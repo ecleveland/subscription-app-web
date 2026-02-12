@@ -14,13 +14,13 @@ export default function SubscriptionCard({
   return (
     <Link
       href={`/subscriptions/${subscription._id}/edit`}
-      className="block border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition-all bg-white"
+      className="block border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-blue-300 dark:hover:border-blue-500 hover:shadow-sm transition-all bg-white dark:bg-gray-800"
     >
       <div className="flex items-start justify-between mb-2">
-        <h3 className="font-semibold text-gray-900">{subscription.name}</h3>
-        <span className="text-lg font-bold text-gray-900">
+        <h3 className="font-semibold text-gray-900 dark:text-gray-100">{subscription.name}</h3>
+        <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
           {formatCurrency(subscription.cost)}
-          <span className="text-xs text-gray-500 font-normal">
+          <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">
             /{subscription.billingCycle === 'monthly' ? 'mo' : 'yr'}
           </span>
         </span>
@@ -28,12 +28,12 @@ export default function SubscriptionCard({
       <div className="flex items-center gap-2 mb-2">
         <CategoryBadge category={subscription.category} />
         {subscription.billingCycle === 'yearly' && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             ({formatCurrency(monthly)}/mo)
           </span>
         )}
       </div>
-      <div className="text-sm text-gray-500">
+      <div className="text-sm text-gray-500 dark:text-gray-400">
         Next billing: {formatDate(subscription.nextBillingDate)}
         {days >= 0 && (
           <span className={days <= 3 ? ' text-red-500 font-medium' : ''}>

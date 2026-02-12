@@ -75,10 +75,14 @@ export default function SubscriptionForm({ subscription }: Props) {
     }
   }
 
+  const inputClasses =
+    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+  const labelClasses = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1';
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-lg">
       <div>
-        <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
+        <label htmlFor="name" className={labelClasses}>
           Name
         </label>
         <input
@@ -87,14 +91,14 @@ export default function SubscriptionForm({ subscription }: Props) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+          className={inputClasses}
           placeholder="Netflix"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label htmlFor="cost" className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="cost" className={labelClasses}>
             Cost ($)
           </label>
           <input
@@ -105,14 +109,14 @@ export default function SubscriptionForm({ subscription }: Props) {
             value={cost}
             onChange={(e) => setCost(e.target.value)}
             required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            className={inputClasses}
             placeholder="15.99"
           />
         </div>
         <div>
           <label
             htmlFor="billingCycle"
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className={labelClasses}
           >
             Billing Cycle
           </label>
@@ -120,7 +124,7 @@ export default function SubscriptionForm({ subscription }: Props) {
             id="billingCycle"
             value={billingCycle}
             onChange={(e) => setBillingCycle(e.target.value as 'monthly' | 'yearly')}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            className={inputClasses}
           >
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
@@ -132,7 +136,7 @@ export default function SubscriptionForm({ subscription }: Props) {
         <div>
           <label
             htmlFor="nextBillingDate"
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className={labelClasses}
           >
             Next Billing Date
           </label>
@@ -142,13 +146,13 @@ export default function SubscriptionForm({ subscription }: Props) {
             value={nextBillingDate}
             onChange={(e) => setNextBillingDate(e.target.value)}
             required
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            className={inputClasses}
           />
         </div>
         <div>
           <label
             htmlFor="category"
-            className="block text-sm font-medium text-gray-700 mb-1"
+            className={labelClasses}
           >
             Category
           </label>
@@ -156,7 +160,7 @@ export default function SubscriptionForm({ subscription }: Props) {
             id="category"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            className={inputClasses}
           >
             {CATEGORIES.map((cat) => (
               <option key={cat} value={cat}>
@@ -168,7 +172,7 @@ export default function SubscriptionForm({ subscription }: Props) {
       </div>
 
       <div>
-        <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">
+        <label htmlFor="notes" className={labelClasses}>
           Notes (optional)
         </label>
         <textarea
@@ -176,7 +180,7 @@ export default function SubscriptionForm({ subscription }: Props) {
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+          className={inputClasses}
           placeholder="Family plan, shared with..."
         />
       </div>
@@ -194,7 +198,7 @@ export default function SubscriptionForm({ subscription }: Props) {
         <button
           type="button"
           onClick={() => router.push('/')}
-          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-700"
+          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
         >
           Cancel
         </button>
@@ -202,7 +206,7 @@ export default function SubscriptionForm({ subscription }: Props) {
           <button
             type="button"
             onClick={handleDelete}
-            className="ml-auto px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            className="ml-auto px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
           >
             Delete
           </button>
