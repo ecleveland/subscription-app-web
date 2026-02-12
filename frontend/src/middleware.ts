@@ -1,17 +1,19 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
-  // Client-side auth uses localStorage, which middleware can't access.
-  // This middleware only handles redirecting the root for unauthenticated users
-  // by checking for a lightweight cookie flag set by the client.
-  const token = request.cookies.get('auth-flag');
+const PUBLIC_PATHS = ['/login', '/register'];
 
-  if (!token && !request.nextUrl.pathname.startsWith('/login')) {
+export function middleware(request: NextRequest) {
+  const token = request.cookies.get('auth-flag');
+  const { pathname } = request.nextUrl;
+
+  const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+
+  if (!token && !isPublicPath) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  if (token && request.nextUrl.pathname.startsWith('/login')) {
+  if (token && isPublicPath) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 

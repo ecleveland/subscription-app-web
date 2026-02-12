@@ -1,5 +1,17 @@
+export interface User {
+  _id: string;
+  username: string;
+  displayName?: string;
+  email?: string;
+  avatarUrl?: string;
+  role: 'user' | 'admin';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Subscription {
   _id: string;
+  userId: string;
   name: string;
   cost: number;
   billingCycle: 'monthly' | 'yearly';

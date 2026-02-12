@@ -30,10 +30,12 @@ function applyTheme(theme: Theme) {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('system');
 
+  // Hydrate from localStorage after mount — must use setState in effect
+  // because localStorage is not available during SSR
   useEffect(() => {
     const stored = localStorage.getItem('theme') as Theme | null;
     if (stored === 'light' || stored === 'dark' || stored === 'system') {
-      setThemeState(stored);
+      setThemeState(stored); // eslint-disable-line react-hooks/set-state-in-effect
       applyTheme(stored);
     } else {
       applyTheme('system');

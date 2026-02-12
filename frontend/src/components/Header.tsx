@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import ThemeToggle from '@/components/ThemeToggle';
 
 export default function Header() {
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, user, isAdmin, logout } = useAuth();
 
   if (!isAuthenticated) return null;
 
@@ -21,6 +21,20 @@ export default function Header() {
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
           >
             + Add
+          </Link>
+          {isAdmin && (
+            <Link
+              href="/admin/users"
+              className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+            >
+              Admin
+            </Link>
+          )}
+          <Link
+            href="/profile"
+            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+          >
+            {user?.displayName || user?.username || 'Profile'}
           </Link>
           <ThemeToggle />
           <button

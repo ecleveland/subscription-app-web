@@ -10,12 +10,14 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import { SubscriptionsService } from './subscriptions.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 
 @Controller('subscriptions')
 @UseGuards(JwtAuthGuard)
@@ -23,31 +25,38 @@ export class SubscriptionsController {
   constructor(private readonly subscriptionsService: SubscriptionsService) {}
 
   @Post()
-  create(@Body() createDto: CreateSubscriptionDto) {
-    return this.subscriptionsService.create(createDto);
+  create(
+    @Req() req: AuthenticatedRequest,
+    @Body() createDto: CreateSubscriptionDto,
+  ) {
+    return this.subscriptionsService.create(req.user.userId, createDto);
   }
 
   @Get()
-  findAll(@Query() query: QuerySubscriptionDto) {
-    return this.subscriptionsService.findAll(query);
+  findAll(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: QuerySubscriptionDto,
+  ) {
+    return this.subscriptionsService.findAll(req.user.userId, query);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.subscriptionsService.findOne(id);
+  findOne(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.subscriptionsService.findOne(req.user.userId, id);
   }
 
   @Patch(':id')
   update(
+    @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
     @Body() updateDto: UpdateSubscriptionDto,
   ) {
-    return this.subscriptionsService.update(id, updateDto);
+    return this.subscriptionsService.update(req.user.userId, id, updateDto);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
-    return this.subscriptionsService.remove(id);
+  remove(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.subscriptionsService.remove(req.user.userId, id);
   }
 }

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
 
 export type SubscriptionDocument = HydratedDocument<Subscription>;
 
@@ -10,6 +10,9 @@ export enum BillingCycle {
 
 @Schema({ timestamps: true })
 export class Subscription {
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', index: true })
+  userId: MongooseSchema.Types.ObjectId;
+
   @Prop({ required: true, trim: true })
   name: string;
 

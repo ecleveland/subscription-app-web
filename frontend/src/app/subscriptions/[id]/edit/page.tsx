@@ -13,10 +13,20 @@ export default function EditSubscriptionPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     apiFetch<Subscription>(`/subscriptions/${params.id}`)
-      .then(setSubscription)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (!cancelled) setSubscription(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [params.id]);
 
   if (loading) {

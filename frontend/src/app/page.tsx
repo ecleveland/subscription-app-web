@@ -2,20 +2,31 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { Subscription } from '@/lib/types';
 import DashboardSummary from '@/components/DashboardSummary';
 import SubscriptionList from '@/components/SubscriptionList';
 
 export default function DashboardPage() {
+  const { isAuthenticated } = useAuth();
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
     apiFetch<Subscription[]>('/subscriptions')
-      .then(setSubscriptions)
+      .then((data) => {
+        if (!cancelled) setSubscriptions(data);
+      })
       .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
 
   if (loading) {
     return (

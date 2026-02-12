@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 
 export default function LoginForm() {
@@ -66,6 +67,15 @@ export default function LoginForm() {
       >
         {loading ? 'Signing in...' : 'Sign In'}
       </button>
+      <p className="text-sm text-gray-500 dark:text-gray-400">
+        Don&apos;t have an account?{' '}
+        <Link
+          href="/register"
+          className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
+        >
+          Create one
+        </Link>
+      </p>
     </form>
   );
 }

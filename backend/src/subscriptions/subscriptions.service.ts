@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   Subscription,
   SubscriptionDocument,
@@ -17,14 +17,23 @@ export class SubscriptionsService {
   ) {}
 
   async create(
+    userId: string,
     createDto: CreateSubscriptionDto,
   ): Promise<SubscriptionDocument> {
-    const subscription = new this.subscriptionModel(createDto);
+    const subscription = new this.subscriptionModel({
+      ...createDto,
+      userId: new Types.ObjectId(userId),
+    });
     return subscription.save();
   }
 
-  async findAll(query: QuerySubscriptionDto): Promise<SubscriptionDocument[]> {
-    const filter: Record<string, unknown> = {};
+  async findAll(
+    userId: string,
+    query: QuerySubscriptionDto,
+  ): Promise<SubscriptionDocument[]> {
+    const filter: Record<string, unknown> = {
+      userId: new Types.ObjectId(userId),
+    };
 
     if (query.category) {
       filter.category = query.category;
@@ -42,31 +51,41 @@ export class SubscriptionsService {
       .exec();
   }
 
-  async findOne(id: string): Promise<SubscriptionDocument> {
+  async findOne(userId: string, id: string): Promise<SubscriptionDocument> {
     const subscription = await this.subscriptionModel.findById(id).exec();
-    if (!subscription) {
+    if (
+      !subscription ||
+      !subscription.userId ||
+      !new Types.ObjectId(userId).equals(
+        subscription.userId as unknown as Types.ObjectId,
+      )
+    ) {
       throw new NotFoundException(`Subscription with ID "${id}" not found`);
     }
     return subscription;
   }
 
   async update(
+    userId: string,
     id: string,
     updateDto: UpdateSubscriptionDto,
   ): Promise<SubscriptionDocument> {
-    const subscription = await this.subscriptionModel
-      .findByIdAndUpdate(id, updateDto, { new: true, runValidators: true })
-      .exec();
-    if (!subscription) {
-      throw new NotFoundException(`Subscription with ID "${id}" not found`);
-    }
-    return subscription;
+    const existing = await this.findOne(userId, id);
+    Object.assign(existing, updateDto);
+    return existing.save();
   }
 
-  async remove(id: string): Promise<void> {
-    const result = await this.subscriptionModel.findByIdAndDelete(id).exec();
-    if (!result) {
-      throw new NotFoundException(`Subscription with ID "${id}" not found`);
-    }
+  async remove(userId: string, id: string): Promise<void> {
+    await this.findOne(userId, id);
+    await this.subscriptionModel.findByIdAndDelete(id).exec();
+  }
+
+  async migrateUnownedSubscriptions(adminUserId: string): Promise<number> {
+    const result = await this.subscriptionModel
+      .updateMany({ userId: { $exists: false } } as Record<string, unknown>, {
+        $set: { userId: new Types.ObjectId(adminUserId) },
+      })
+      .exec();
+    return result.modifiedCount;
   }
 }

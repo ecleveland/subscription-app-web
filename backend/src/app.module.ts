@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import configuration from './config/configuration';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { AdminModule } from './admin/admin.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
@@ -18,6 +20,8 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
       inject: [ConfigService],
     }),
     AuthModule,
+    UsersModule,
+    AdminModule,
     SubscriptionsModule,
   ],
 })
