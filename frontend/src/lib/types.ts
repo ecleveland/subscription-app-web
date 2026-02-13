@@ -18,6 +18,7 @@ export interface Subscription {
   nextBillingDate: string;
   category: string;
   notes?: string;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }

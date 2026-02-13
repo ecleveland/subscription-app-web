@@ -6,11 +6,14 @@ export default function DashboardSummary({
 }: {
   subscriptions: Subscription[];
 }) {
-  const totalMonthly = subscriptions.reduce(
+  const activeSubscriptions = subscriptions.filter(
+    (sub) => sub.isActive !== false,
+  );
+  const totalMonthly = activeSubscriptions.reduce(
     (sum, sub) => sum + getMonthlyCost(sub.cost, sub.billingCycle),
     0,
   );
-  const totalYearly = subscriptions.reduce(
+  const totalYearly = activeSubscriptions.reduce(
     (sum, sub) => sum + getYearlyCost(sub.cost, sub.billingCycle),
     0,
   );
@@ -32,7 +35,7 @@ export default function DashboardSummary({
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">Active</p>
         <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {subscriptions.length}
+          {activeSubscriptions.length}
         </p>
       </div>
     </div>

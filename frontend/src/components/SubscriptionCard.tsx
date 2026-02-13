@@ -1,29 +1,89 @@
+'use client';
+
+import { useState } from 'react';
 import Link from 'next/link';
 import { Subscription } from '@/lib/types';
+import { apiFetch } from '@/lib/api';
 import { formatCurrency, formatDate, daysUntil, getMonthlyCost } from '@/lib/utils';
 import CategoryBadge from './CategoryBadge';
 
 export default function SubscriptionCard({
   subscription,
+  onToggleActive,
 }: {
   subscription: Subscription;
+  onToggleActive?: (id: string, isActive: boolean) => void;
 }) {
+  const [isActive, setIsActive] = useState(subscription.isActive !== false);
+  const [toggling, setToggling] = useState(false);
   const days = daysUntil(subscription.nextBillingDate);
   const monthly = getMonthlyCost(subscription.cost, subscription.billingCycle);
+
+  async function handleToggle(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (toggling) return;
+
+    const newValue = !isActive;
+    setIsActive(newValue);
+    setToggling(true);
+
+    try {
+      await apiFetch(`/subscriptions/${subscription._id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive: newValue }),
+      });
+      onToggleActive?.(subscription._id, newValue);
+    } catch {
+      setIsActive(!newValue);
+    } finally {
+      setToggling(false);
+    }
+  }
 
   return (
     <Link
       href={`/subscriptions/${subscription._id}/edit`}
-      className="block border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-blue-300 dark:hover:border-blue-500 hover:shadow-sm transition-all bg-white dark:bg-gray-800"
+      className={`block border rounded-lg p-4 hover:shadow-sm transition-all ${
+        isActive
+          ? 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 bg-white dark:bg-gray-800'
+          : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
+      }`}
     >
       <div className="flex items-start justify-between mb-2">
-        <h3 className="font-semibold text-gray-900 dark:text-gray-100">{subscription.name}</h3>
-        <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
-          {formatCurrency(subscription.cost)}
-          <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">
-            /{subscription.billingCycle === 'monthly' ? 'mo' : 'yr'}
+        <div className="flex items-center gap-2">
+          <h3 className={`font-semibold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
+            {subscription.name}
+          </h3>
+          {!isActive && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-500 dark:text-gray-400">
+              Inactive
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-lg font-bold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
+            {formatCurrency(subscription.cost)}
+            <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">
+              /{subscription.billingCycle === 'monthly' ? 'mo' : 'yr'}
+            </span>
           </span>
-        </span>
+          <button
+            onClick={handleToggle}
+            disabled={toggling}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+              isActive ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+            }`}
+            aria-label={isActive ? 'Deactivate subscription' : 'Activate subscription'}
+            title={isActive ? 'Deactivate' : 'Activate'}
+          >
+            <span
+              className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+                isActive ? 'translate-x-4.5' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+        </div>
       </div>
       <div className="flex items-center gap-2 mb-2">
         <CategoryBadge category={subscription.category} />

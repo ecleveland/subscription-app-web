@@ -25,6 +25,7 @@ export default function SubscriptionForm({ subscription }: Props) {
   );
   const [category, setCategory] = useState(subscription?.category ?? CATEGORIES[0]);
   const [notes, setNotes] = useState(subscription?.notes ?? '');
+  const [isActive, setIsActive] = useState(subscription?.isActive !== false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -39,6 +40,7 @@ export default function SubscriptionForm({ subscription }: Props) {
       billingCycle,
       nextBillingDate,
       category,
+      isActive,
       ...(notes ? { notes } : {}),
     };
 
@@ -169,6 +171,19 @@ export default function SubscriptionForm({ subscription }: Props) {
             ))}
           </select>
         </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          id="isActive"
+          type="checkbox"
+          checked={isActive}
+          onChange={(e) => setIsActive(e.target.checked)}
+          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+        />
+        <label htmlFor="isActive" className={labelClasses}>
+          Active subscription
+        </label>
       </div>
 
       <div>

@@ -30,6 +30,9 @@ export class Subscription {
 
   @Prop({ trim: true })
   notes?: string;
+
+  @Prop({ default: true })
+  isActive: boolean;
 }
 
 export const SubscriptionSchema = SchemaFactory.createForClass(Subscription);

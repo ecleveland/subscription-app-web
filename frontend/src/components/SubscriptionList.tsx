@@ -4,8 +4,10 @@ import EmptyState from './EmptyState';
 
 export default function SubscriptionList({
   subscriptions,
+  onToggleActive,
 }: {
   subscriptions: Subscription[];
+  onToggleActive?: (id: string, isActive: boolean) => void;
 }) {
   if (subscriptions.length === 0) {
     return <EmptyState />;
@@ -14,7 +16,7 @@ export default function SubscriptionList({
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {subscriptions.map((sub) => (
-        <SubscriptionCard key={sub._id} subscription={sub} />
+        <SubscriptionCard key={sub._id} subscription={sub} onToggleActive={onToggleActive} />
       ))}
     </div>
   );

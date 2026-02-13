@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsDateString,
   IsOptional,
+  IsBoolean,
   Min,
 } from 'class-validator';
 import { BillingCycle } from '../schemas/subscription.schema';
@@ -31,4 +32,8 @@ export class CreateSubscriptionDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }

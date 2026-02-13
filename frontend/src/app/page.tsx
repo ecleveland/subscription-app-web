@@ -36,10 +36,16 @@ export default function DashboardPage() {
     );
   }
 
+  function handleToggleActive(id: string, isActive: boolean) {
+    setSubscriptions((prev) =>
+      prev.map((sub) => (sub._id === id ? { ...sub, isActive } : sub)),
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       <DashboardSummary subscriptions={subscriptions} />
-      <SubscriptionList subscriptions={subscriptions} />
+      <SubscriptionList subscriptions={subscriptions} onToggleActive={handleToggleActive} />
     </div>
   );
 }
