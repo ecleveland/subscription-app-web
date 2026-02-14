@@ -44,6 +44,9 @@ describe('SubscriptionsService', () => {
     mockSubModel.updateMany = jest
       .fn()
       .mockReturnValue(createChainable({ modifiedCount: 0 }));
+    mockSubModel.deleteMany = jest
+      .fn()
+      .mockReturnValue(createChainable({ deletedCount: 0 }));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -227,6 +230,31 @@ describe('SubscriptionsService', () => {
       await expect(service.remove(userId, 'nonexistent')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('removeAllByUserId', () => {
+    it('should delete all subscriptions for the given userId', async () => {
+      mockSubModel.deleteMany.mockReturnValue(
+        createChainable({ deletedCount: 3 }),
+      );
+
+      const result = await service.removeAllByUserId(userId);
+
+      expect(mockSubModel.deleteMany).toHaveBeenCalledWith({
+        userId: expect.any(Types.ObjectId),
+      });
+      expect(result).toBe(3);
+    });
+
+    it('should return 0 when the user has no subscriptions', async () => {
+      mockSubModel.deleteMany.mockReturnValue(
+        createChainable({ deletedCount: 0 }),
+      );
+
+      const result = await service.removeAllByUserId(userId);
+
+      expect(result).toBe(0);
     });
   });
 

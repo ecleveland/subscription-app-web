@@ -11,10 +11,14 @@ import { User, UserDocument, UserRole } from './schemas/user.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private userModel: Model<UserDocument>) {}
+  constructor(
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    private readonly subscriptionsService: SubscriptionsService,
+  ) {}
 
   async create(createUserDto: CreateUserDto): Promise<UserDocument> {
     const passwordHash = await bcrypt.hash(createUserDto.password, 10);
@@ -101,6 +105,7 @@ export class UsersService {
     if (!result) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
+    await this.subscriptionsService.removeAllByUserId(id);
   }
 
   async countAdmins(): Promise<number> {

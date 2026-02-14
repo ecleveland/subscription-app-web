@@ -3,6 +3,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 import { UsersService } from '../src/users/users.service';
+import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
 
 describe('Admin (e2e)', () => {
   let app: INestApplication<App>;
@@ -146,6 +147,53 @@ describe('Admin (e2e)', () => {
         .delete(`/api/admin/users/${createRes.body._id}`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(204);
+    });
+  });
+
+  describe('Cascade deletion', () => {
+    it('should delete user subscriptions when deleting a user', async () => {
+      // Create a user to delete
+      const createRes = await request(app.getHttpServer())
+        .post('/api/admin/users')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ username: 'cascadeuser', password: 'password123' });
+      const targetUserId = createRes.body._id;
+
+      // Log in as the target user and create a subscription
+      const loginRes = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ username: 'cascadeuser', password: 'password123' });
+      const targetToken = loginRes.body.access_token;
+
+      await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${targetToken}`)
+        .send({
+          name: 'Netflix',
+          cost: 15.99,
+          billingCycle: 'monthly',
+          nextBillingDate: '2026-06-01',
+          category: 'Streaming',
+        })
+        .expect(201);
+
+      // Verify subscription exists
+      const subsBefore = await request(app.getHttpServer())
+        .get('/api/subscriptions')
+        .set('Authorization', `Bearer ${targetToken}`)
+        .expect(200);
+      expect(subsBefore.body.length).toBe(1);
+
+      // Admin deletes the user
+      await request(app.getHttpServer())
+        .delete(`/api/admin/users/${targetUserId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(204);
+
+      // Verify subscriptions are gone
+      const subsService = app.get(SubscriptionsService);
+      const remaining = await subsService.findAll(targetUserId, {});
+      expect(remaining).toHaveLength(0);
     });
   });
 });

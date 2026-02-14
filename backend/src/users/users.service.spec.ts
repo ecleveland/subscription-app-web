@@ -8,6 +8,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from './users.service';
 import { User, UserRole } from './schemas/user.schema';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 jest.mock('bcryptjs');
 
@@ -21,6 +22,7 @@ function createChainable(resolvedValue: any = null) {
 describe('UsersService', () => {
   let service: UsersService;
   let mockUserModel: any;
+  let mockSubscriptionsService: { removeAllByUserId: jest.Mock };
 
   const mockUser = {
     _id: '507f1f77bcf86cd799439011',
@@ -33,6 +35,10 @@ describe('UsersService', () => {
   };
 
   beforeEach(async () => {
+    mockSubscriptionsService = {
+      removeAllByUserId: jest.fn().mockResolvedValue(0),
+    };
+
     mockUserModel = jest.fn().mockImplementation((dto) => ({
       ...dto,
       save: jest.fn().mockResolvedValue({ _id: 'new-id', ...dto }),
@@ -54,6 +60,7 @@ describe('UsersService', () => {
       providers: [
         UsersService,
         { provide: getModelToken(User.name), useValue: mockUserModel },
+        { provide: SubscriptionsService, useValue: mockSubscriptionsService },
       ],
     }).compile();
 
@@ -270,23 +277,43 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
-    it('should delete a user by id', async () => {
+    it('should delete user and cascade-delete their subscriptions', async () => {
       mockUserModel.findByIdAndDelete.mockReturnValue(
         createChainable(mockUser),
       );
+      mockSubscriptionsService.removeAllByUserId.mockResolvedValue(5);
 
       await service.remove('507f1f77bcf86cd799439011');
 
       expect(mockUserModel.findByIdAndDelete).toHaveBeenCalledWith(
         '507f1f77bcf86cd799439011',
       );
+      expect(mockSubscriptionsService.removeAllByUserId).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
+      );
     });
 
-    it('should throw NotFoundException when user is not found', async () => {
+    it('should throw NotFoundException and not delete subscriptions when user is not found', async () => {
       mockUserModel.findByIdAndDelete.mockReturnValue(createChainable(null));
 
       await expect(service.remove('nonexistent')).rejects.toThrow(
         NotFoundException,
+      );
+      expect(
+        mockSubscriptionsService.removeAllByUserId,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('should succeed even when user has no subscriptions', async () => {
+      mockUserModel.findByIdAndDelete.mockReturnValue(
+        createChainable(mockUser),
+      );
+      mockSubscriptionsService.removeAllByUserId.mockResolvedValue(0);
+
+      await service.remove('507f1f77bcf86cd799439011');
+
+      expect(mockSubscriptionsService.removeAllByUserId).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
       );
     });
   });

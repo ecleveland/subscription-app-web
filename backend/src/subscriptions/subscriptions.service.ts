@@ -80,6 +80,13 @@ export class SubscriptionsService {
     await this.subscriptionModel.findByIdAndDelete(id).exec();
   }
 
+  async removeAllByUserId(userId: string): Promise<number> {
+    const result = await this.subscriptionModel
+      .deleteMany({ userId: new Types.ObjectId(userId) } as Record<string, unknown>)
+      .exec();
+    return result.deletedCount;
+  }
+
   async migrateUnownedSubscriptions(adminUserId: string): Promise<number> {
     const result = await this.subscriptionModel
       .updateMany({ userId: { $exists: false } } as Record<string, unknown>, {
