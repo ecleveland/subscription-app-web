@@ -19,12 +19,13 @@ function makeSub(overrides: Partial<Subscription> = {}): Subscription {
 }
 
 describe('DashboardSummary', () => {
-  it('should show $0.00 for monthly/yearly and 0 active when no subscriptions', () => {
+  it('should show $0.00 for all cost tiles and 0 active when no subscriptions', () => {
     render(<DashboardSummary subscriptions={[]} />);
 
     const zeroPrices = screen.getAllByText('$0.00');
-    expect(zeroPrices).toHaveLength(2); // monthly and yearly
-    expect(screen.getByText('0')).toBeInTheDocument();
+    expect(zeroPrices).toHaveLength(4); // daily, weekly, monthly, yearly
+    expect(screen.getByText('0')).toBeInTheDocument(); // active count
+    expect(screen.getByText('0 inactive')).toBeInTheDocument();
   });
 
   it('should sum monthly costs correctly', () => {
@@ -51,7 +52,25 @@ describe('DashboardSummary', () => {
     expect(screen.getByText('$240.00')).toBeInTheDocument();
   });
 
-  it('should only count active subscriptions', () => {
+  it('should display daily cost', () => {
+    // $365/year = $1/day
+    const subs = [makeSub({ _id: '1', cost: 365, billingCycle: 'yearly' })];
+
+    render(<DashboardSummary subscriptions={subs} />);
+
+    expect(screen.getByText('$1.00')).toBeInTheDocument();
+  });
+
+  it('should display weekly cost', () => {
+    // $365/year = $7/week
+    const subs = [makeSub({ _id: '1', cost: 365, billingCycle: 'yearly' })];
+
+    render(<DashboardSummary subscriptions={subs} />);
+
+    expect(screen.getByText('$7.00')).toBeInTheDocument();
+  });
+
+  it('should show active and inactive counts in combined tile', () => {
     const subs = [
       makeSub({ _id: '1', isActive: true }),
       makeSub({ _id: '2', isActive: true }),
@@ -60,10 +79,11 @@ describe('DashboardSummary', () => {
 
     render(<DashboardSummary subscriptions={subs} />);
 
-    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument(); // active
+    expect(screen.getByText('1 inactive')).toBeInTheDocument();
   });
 
-  it('should exclude inactive subscriptions from totals', () => {
+  it('should exclude inactive subscriptions from cost totals', () => {
     const subs = [
       makeSub({ _id: '1', cost: 10, billingCycle: 'monthly', isActive: true }),
       makeSub({ _id: '2', cost: 20, billingCycle: 'monthly', isActive: false }),

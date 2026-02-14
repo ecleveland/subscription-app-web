@@ -27,6 +27,20 @@ export function getYearlyCost(
   return billingCycle === 'monthly' ? cost * 12 : cost;
 }
 
+export function getDailyCost(
+  cost: number,
+  billingCycle: 'monthly' | 'yearly',
+): number {
+  return billingCycle === 'yearly' ? cost / 365 : cost / (365 / 12);
+}
+
+export function getWeeklyCost(
+  cost: number,
+  billingCycle: 'monthly' | 'yearly',
+): number {
+  return billingCycle === 'yearly' ? cost / (365 / 7) : cost / (365 / 12 / 7);
+}
+
 export function daysUntil(date: Date | string): number {
   const now = new Date();
   const target = new Date(date);

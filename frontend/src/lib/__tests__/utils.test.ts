@@ -1,4 +1,4 @@
-import { formatCurrency, formatDate, getMonthlyCost, getYearlyCost, daysUntil } from '../utils';
+import { formatCurrency, formatDate, getDailyCost, getWeeklyCost, getMonthlyCost, getYearlyCost, daysUntil } from '../utils';
 
 describe('formatCurrency', () => {
   it('should format a typical price', () => {
@@ -46,6 +46,30 @@ describe('getYearlyCost', () => {
 
   it('should return cost as-is for yearly billing', () => {
     expect(getYearlyCost(120, 'yearly')).toBe(120);
+  });
+});
+
+describe('getDailyCost', () => {
+  it('should convert monthly cost to daily', () => {
+    // $30.44/month (365/12) → $1/day
+    expect(getDailyCost(365 / 12, 'monthly')).toBeCloseTo(1, 5);
+  });
+
+  it('should convert yearly cost to daily', () => {
+    // $365/year → $1/day
+    expect(getDailyCost(365, 'yearly')).toBeCloseTo(1, 5);
+  });
+});
+
+describe('getWeeklyCost', () => {
+  it('should convert monthly cost to weekly', () => {
+    // $365/12 per month → $7/week
+    expect(getWeeklyCost(365 / 12, 'monthly')).toBeCloseTo(7, 5);
+  });
+
+  it('should convert yearly cost to weekly', () => {
+    // $365/year → $7/week
+    expect(getWeeklyCost(365, 'yearly')).toBeCloseTo(7, 5);
   });
 });
 
