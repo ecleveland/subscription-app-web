@@ -60,6 +60,14 @@ export class SubscriptionsService {
     return result;
   }
 
+  private static getMonthlyCost(
+    cost: number,
+    billingCycle: BillingCycle,
+  ): number {
+    if (billingCycle === BillingCycle.WEEKLY) return cost * 4.33;
+    return billingCycle === BillingCycle.YEARLY ? cost / 12 : cost;
+  }
+
   async advanceOverdueDates(userId: string): Promise<void> {
     const now = new Date();
     const overdue = await this.subscriptionModel
@@ -112,6 +120,23 @@ export class SubscriptionsService {
 
     const sortBy = query.sortBy || 'createdAt';
     const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
+
+    if (sortBy === 'cost') {
+      const subscriptions = await this.subscriptionModel
+        .find(filter)
+        .exec();
+      return subscriptions.sort((a, b) => {
+        const aCost = SubscriptionsService.getMonthlyCost(
+          a.cost,
+          a.billingCycle,
+        );
+        const bCost = SubscriptionsService.getMonthlyCost(
+          b.cost,
+          b.billingCycle,
+        );
+        return (aCost - bCost) * sortOrder;
+      });
+    }
 
     return this.subscriptionModel
       .find(filter)

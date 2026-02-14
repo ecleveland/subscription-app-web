@@ -10,8 +10,8 @@ import SubscriptionList from '@/components/SubscriptionList';
 const SORT_OPTIONS = [
   { key: 'nextBillingDate-asc', label: 'Next billing date' },
   { key: 'name-asc', label: 'Name (A–Z)' },
-  { key: 'cost-asc', label: 'Cost (low to high)' },
-  { key: 'cost-desc', label: 'Cost (high to low)' },
+  { key: 'cost-asc', label: 'Monthly cost (low to high)' },
+  { key: 'cost-desc', label: 'Monthly cost (high to low)' },
   { key: 'createdAt-desc', label: 'Date added (newest)' },
 ];
 

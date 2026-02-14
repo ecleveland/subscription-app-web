@@ -227,14 +227,15 @@ describe('Subscriptions (e2e)', () => {
       expect(res.body[0].name).toBe('Meal Kit');
     });
 
-    it('should sort by cost ascending', async () => {
+    it('should sort by normalized monthly cost ascending', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/subscriptions?sortBy=cost&sortOrder=asc')
         .set('Authorization', `Bearer ${tokenB}`)
         .expect(200);
 
-      const costs = res.body.map((s: any) => s.cost);
-      expect(costs).toEqual([...costs].sort((a, b) => a - b));
+      // Monthly costs: GitHub Pro 48/12=$4, Netflix $15.99, AWS $50, Meal Kit 25*4.33=$108.25
+      const names = res.body.map((s: any) => s.name);
+      expect(names).toEqual(['GitHub Pro', 'Netflix', 'AWS', 'Meal Kit']);
     });
   });
 

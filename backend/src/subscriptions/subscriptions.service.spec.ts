@@ -383,16 +383,95 @@ describe('SubscriptionsService', () => {
       expect(chain.sort).toHaveBeenCalledWith({ createdAt: -1 });
     });
 
-    it('should respect custom sortBy and sortOrder', async () => {
+    it('should sort by normalized monthly cost ascending', async () => {
+      const weeklySub = {
+        ...mockSubscription,
+        name: 'Weekly',
+        cost: 10,
+        billingCycle: BillingCycle.WEEKLY,
+      };
+      const monthlySub = {
+        ...mockSubscription,
+        name: 'Monthly',
+        cost: 30,
+        billingCycle: BillingCycle.MONTHLY,
+      };
+      const yearlySub = {
+        ...mockSubscription,
+        name: 'Yearly',
+        cost: 600,
+        billingCycle: BillingCycle.YEARLY,
+      };
+
+      const advanceChain = createChainable([]);
+      const chain = createChainable([monthlySub, weeklySub, yearlySub]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+
+      const result = await service.findAll(userId, {
+        sortBy: 'cost',
+        sortOrder: 'asc',
+      });
+
+      // Monthly costs: monthly=30, weekly=10*4.33=43.30, yearly=600/12=50
+      expect(result.map((s: any) => s.name)).toEqual([
+        'Monthly',
+        'Weekly',
+        'Yearly',
+      ]);
+      expect(chain.sort).not.toHaveBeenCalled();
+    });
+
+    it('should sort by normalized monthly cost descending', async () => {
+      const weeklySub = {
+        ...mockSubscription,
+        name: 'Weekly',
+        cost: 10,
+        billingCycle: BillingCycle.WEEKLY,
+      };
+      const monthlySub = {
+        ...mockSubscription,
+        name: 'Monthly',
+        cost: 30,
+        billingCycle: BillingCycle.MONTHLY,
+      };
+      const yearlySub = {
+        ...mockSubscription,
+        name: 'Yearly',
+        cost: 600,
+        billingCycle: BillingCycle.YEARLY,
+      };
+
+      const advanceChain = createChainable([]);
+      const chain = createChainable([monthlySub, weeklySub, yearlySub]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+
+      const result = await service.findAll(userId, {
+        sortBy: 'cost',
+        sortOrder: 'desc',
+      });
+
+      // Descending: yearly=50, weekly=43.30, monthly=30
+      expect(result.map((s: any) => s.name)).toEqual([
+        'Yearly',
+        'Weekly',
+        'Monthly',
+      ]);
+    });
+
+    it('should use MongoDB sort for non-cost fields', async () => {
       const advanceChain = createChainable([]);
       const chain = createChainable([]);
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
 
-      await service.findAll(userId, { sortBy: 'cost', sortOrder: 'asc' });
+      await service.findAll(userId, { sortBy: 'name', sortOrder: 'asc' });
 
-      expect(chain.sort).toHaveBeenCalledWith({ cost: 1 });
+      expect(chain.sort).toHaveBeenCalledWith({ name: 1 });
     });
 
     it('should advance overdue dates before returning results', async () => {
@@ -520,6 +599,26 @@ describe('SubscriptionsService', () => {
       const result = await service.removeAllByUserId(userId);
 
       expect(result).toBe(0);
+    });
+  });
+
+  describe('getMonthlyCost', () => {
+    it('should return cost as-is for monthly billing', () => {
+      expect(
+        SubscriptionsService['getMonthlyCost'](15, BillingCycle.MONTHLY),
+      ).toBe(15);
+    });
+
+    it('should multiply by 4.33 for weekly billing', () => {
+      expect(
+        SubscriptionsService['getMonthlyCost'](10, BillingCycle.WEEKLY),
+      ).toBeCloseTo(43.3, 1);
+    });
+
+    it('should divide by 12 for yearly billing', () => {
+      expect(
+        SubscriptionsService['getMonthlyCost'](120, BillingCycle.YEARLY),
+      ).toBe(10);
     });
   });
 
