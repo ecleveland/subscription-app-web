@@ -63,8 +63,8 @@ All backend routes are prefixed with `/api`. Subscription routes require a JWT B
 
 ## Architecture Documents
 
-Project architecture decisions and development requirements are documented in `.claude/architecture/`:
-- **`testing.md`** — Test coverage requirements and conventions for new code
+Project architecture decisions and development requirements are documented in `.claude/architecture/`. These documents are **mandatory** — all plans and implementations must follow them. In particular:
+- **`testing.md`** — Every plan must include a testing step. All new code requires tests per the rules in this file. Run the relevant test suite before considering work complete.
 
 ## Environment Variables
 
