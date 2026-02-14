@@ -61,6 +61,11 @@ All backend routes are prefixed with `/api`. Subscription routes require a JWT B
 - **Middleware** uses a lightweight `auth-flag` cookie to redirect unauthenticated users to `/login` (the actual JWT lives in localStorage)
 - **Tailwind v4** uses CSS-first config (`@import "tailwindcss"` in globals.css), not `tailwind.config.js`
 
+## Architecture Documents
+
+Project architecture decisions and development requirements are documented in `.claude/architecture/`:
+- **`testing.md`** — Test coverage requirements and conventions for new code
+
 ## Environment Variables
 
 Backend (`.env` in `/backend`):
