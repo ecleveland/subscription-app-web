@@ -95,14 +95,11 @@ export default function SubscriptionCard({
       </div>
       <div className="text-sm text-gray-500 dark:text-gray-400">
         Next billing: {formatDate(subscription.nextBillingDate)}
-        {days >= 0 && (
+        {isActive && days >= 0 && (
           <span className={days <= 3 ? ' text-red-500 font-medium' : ''}>
             {' '}
             ({days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`})
           </span>
-        )}
-        {days < 0 && (
-          <span className="text-red-500 font-medium"> (overdue)</span>
         )}
       </div>
     </Link>

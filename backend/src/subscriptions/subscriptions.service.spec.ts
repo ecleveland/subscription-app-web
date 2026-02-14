@@ -95,14 +95,168 @@ describe('SubscriptionsService', () => {
     });
   });
 
+  describe('advanceOverdueDates', () => {
+    it('should advance a monthly subscription one month', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-07-01'),
+        billingCycle: BillingCycle.MONTHLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      expect(overdueSub.save).toHaveBeenCalled();
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(7); // August
+      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(1);
+
+      jest.useRealTimers();
+    });
+
+    it('should advance a monthly subscription multiple months when needed', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-03-01'),
+        billingCycle: BillingCycle.MONTHLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(7); // August
+      expect(overdueSub.nextBillingDate.getUTCFullYear()).toBe(2025);
+
+      jest.useRealTimers();
+    });
+
+    it('should advance a yearly subscription', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2024-06-01'),
+        billingCycle: BillingCycle.YEARLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      // June 2024 → June 2025 (still <= July 15) → June 2026
+      expect(overdueSub.nextBillingDate.getUTCFullYear()).toBe(2026);
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(5); // June
+
+      jest.useRealTimers();
+    });
+
+    it('should handle month-end edge case (Jan 31 -> Feb 28)', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-02-15T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-01-31'),
+        billingCycle: BillingCycle.MONTHLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(1); // February
+      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(28);
+
+      jest.useRealTimers();
+    });
+
+    it('should restore original day-of-month when month supports it (Jan 31 -> Feb 28 -> Mar 31)', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-03-15T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-01-31'),
+        billingCycle: BillingCycle.MONTHLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      // Jan 31 → Feb 28 (still <= Mar 15) → Mar 31 (> Mar 15, stop)
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(2); // March
+      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(31);
+
+      jest.useRealTimers();
+    });
+
+    it('should handle leap year edge case (Feb 29 -> Feb 28 next year)', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-03-01T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2024-02-29'),
+        billingCycle: BillingCycle.YEARLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      // Feb 29, 2024 → Feb 28, 2025 (still <= Mar 1) → Feb 28, 2026
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(1); // February
+      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(28);
+      expect(overdueSub.nextBillingDate.getUTCFullYear()).toBe(2026);
+
+      jest.useRealTimers();
+    });
+
+    it('should not save when no overdue subscriptions exist', async () => {
+      mockSubModel.find.mockReturnValueOnce(createChainable([]));
+
+      await service.advanceOverdueDates(userId);
+
+      expect(mockSubscription.save).not.toHaveBeenCalled();
+    });
+
+    it('should only query active subscriptions with past billing dates', async () => {
+      mockSubModel.find.mockReturnValueOnce(createChainable([]));
+
+      await service.advanceOverdueDates(userId);
+
+      expect(mockSubModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          isActive: true,
+          nextBillingDate: { $lte: expect.any(Date) },
+        }),
+      );
+    });
+  });
+
   describe('findAll', () => {
+    // Each test mocks find twice: first call for advanceOverdueDates (returns []),
+    // second call for the main query.
     it('should filter by userId', async () => {
+      const advanceChain = createChainable([]);
       const chain = createChainable([mockSubscription]);
-      mockSubModel.find.mockReturnValue(chain);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
 
       await service.findAll(userId, {});
 
-      expect(mockSubModel.find).toHaveBeenCalledWith(
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({
           userId: expect.any(Types.ObjectId),
         }),
@@ -110,30 +264,41 @@ describe('SubscriptionsService', () => {
     });
 
     it('should add category filter when provided', async () => {
+      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find.mockReturnValue(chain);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
 
       await service.findAll(userId, { category: 'Streaming' });
 
-      expect(mockSubModel.find).toHaveBeenCalledWith(
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({ category: 'Streaming' }),
       );
     });
 
     it('should add billingCycle filter when provided', async () => {
+      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find.mockReturnValue(chain);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
 
       await service.findAll(userId, { billingCycle: BillingCycle.MONTHLY });
 
-      expect(mockSubModel.find).toHaveBeenCalledWith(
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        2,
         expect.objectContaining({ billingCycle: BillingCycle.MONTHLY }),
       );
     });
 
     it('should default to sort by createdAt descending', async () => {
+      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find.mockReturnValue(chain);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
 
       await service.findAll(userId, {});
 
@@ -141,12 +306,34 @@ describe('SubscriptionsService', () => {
     });
 
     it('should respect custom sortBy and sortOrder', async () => {
+      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find.mockReturnValue(chain);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
 
       await service.findAll(userId, { sortBy: 'cost', sortOrder: 'asc' });
 
       expect(chain.sort).toHaveBeenCalledWith({ cost: 1 });
+    });
+
+    it('should advance overdue dates before returning results', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+
+      await service.findAll(userId, {});
+
+      // First find call should be the advance query for overdue active subs
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          isActive: true,
+          nextBillingDate: { $lte: expect.any(Date) },
+        }),
+      );
     });
   });
 

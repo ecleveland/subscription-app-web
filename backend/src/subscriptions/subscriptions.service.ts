@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import {
   Subscription,
   SubscriptionDocument,
+  BillingCycle,
 } from './schemas/subscription.schema';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
@@ -15,6 +16,66 @@ export class SubscriptionsService {
     @InjectModel(Subscription.name)
     private subscriptionModel: Model<SubscriptionDocument>,
   ) {}
+
+  static advanceToFutureDate(
+    currentDate: Date,
+    billingCycle: BillingCycle,
+    now: Date = new Date(),
+  ): Date {
+    const result = new Date(currentDate);
+    const originalDay = currentDate.getUTCDate();
+
+    while (result <= now) {
+      const targetMonth =
+        billingCycle === BillingCycle.MONTHLY
+          ? (result.getUTCMonth() + 1) % 12
+          : result.getUTCMonth();
+
+      if (billingCycle === BillingCycle.MONTHLY) {
+        result.setUTCMonth(result.getUTCMonth() + 1);
+      } else {
+        result.setUTCFullYear(result.getUTCFullYear() + 1);
+      }
+
+      // If month overflowed (e.g. Jan 31 → Mar 3), clamp to last day of target month
+      if (result.getUTCMonth() !== targetMonth) {
+        result.setUTCDate(0);
+      }
+
+      // Try to restore the original day-of-month when the month supports it
+      if (result.getUTCDate() !== originalDay) {
+        const month = result.getUTCMonth();
+        result.setUTCDate(originalDay);
+        if (result.getUTCMonth() !== month) {
+          result.setUTCDate(0);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  async advanceOverdueDates(userId: string): Promise<void> {
+    const now = new Date();
+    const overdue = await this.subscriptionModel
+      .find({
+        userId: new Types.ObjectId(userId),
+        isActive: true,
+        nextBillingDate: { $lte: now },
+      } as Record<string, unknown>)
+      .exec();
+
+    const savePromises = overdue.map((sub) => {
+      sub.nextBillingDate = SubscriptionsService.advanceToFutureDate(
+        sub.nextBillingDate,
+        sub.billingCycle,
+        now,
+      );
+      return sub.save();
+    });
+
+    await Promise.all(savePromises);
+  }
 
   async create(
     userId: string,
@@ -31,6 +92,8 @@ export class SubscriptionsService {
     userId: string,
     query: QuerySubscriptionDto,
   ): Promise<SubscriptionDocument[]> {
+    await this.advanceOverdueDates(userId);
+
     const filter: Record<string, unknown> = {
       userId: new Types.ObjectId(userId),
     };

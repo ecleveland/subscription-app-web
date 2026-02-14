@@ -218,6 +218,100 @@ describe('Subscriptions (e2e)', () => {
     });
   });
 
+  describe('Billing date advancement', () => {
+    it('should advance overdue monthly billing date on GET /subscriptions', async () => {
+      const pastDate = new Date();
+      pastDate.setMonth(pastDate.getMonth() - 2);
+
+      const createRes = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Overdue Monthly',
+          cost: 9.99,
+          billingCycle: 'monthly',
+          nextBillingDate: pastDate.toISOString(),
+          category: 'Software',
+        })
+        .expect(201);
+
+      const subId = createRes.body._id;
+
+      const listRes = await request(app.getHttpServer())
+        .get('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      const updated = listRes.body.find((s: any) => s._id === subId);
+      expect(updated).toBeDefined();
+      expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+    });
+
+    it('should not advance billing date for inactive subscriptions', async () => {
+      const pastDate = new Date();
+      pastDate.setMonth(pastDate.getMonth() - 1);
+
+      const createRes = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Inactive Service',
+          cost: 5.99,
+          billingCycle: 'monthly',
+          nextBillingDate: pastDate.toISOString(),
+          category: 'Software',
+          isActive: false,
+        })
+        .expect(201);
+
+      const subId = createRes.body._id;
+
+      const listRes = await request(app.getHttpServer())
+        .get('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      const unchanged = listRes.body.find((s: any) => s._id === subId);
+      expect(unchanged).toBeDefined();
+      expect(new Date(unchanged.nextBillingDate).getTime()).toBeLessThan(
+        Date.now(),
+      );
+    });
+
+    it('should advance overdue yearly billing date', async () => {
+      const pastDate = new Date();
+      pastDate.setFullYear(pastDate.getFullYear() - 1);
+      pastDate.setMonth(pastDate.getMonth() - 1);
+
+      const createRes = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Annual License',
+          cost: 99.99,
+          billingCycle: 'yearly',
+          nextBillingDate: pastDate.toISOString(),
+          category: 'Software',
+        })
+        .expect(201);
+
+      const subId = createRes.body._id;
+
+      const listRes = await request(app.getHttpServer())
+        .get('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      const updated = listRes.body.find((s: any) => s._id === subId);
+      expect(updated).toBeDefined();
+      expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+    });
+  });
+
   describe('Validation', () => {
     it('should return 400 when required fields are missing', async () => {
       await request(app.getHttpServer())

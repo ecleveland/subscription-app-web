@@ -84,13 +84,16 @@ describe('SubscriptionCard', () => {
     expect(screen.getByText(/today/)).toBeInTheDocument();
   });
 
-  it('should show "overdue" when billing date is past', () => {
+  it('should not show countdown for inactive subscriptions', () => {
     render(
       <SubscriptionCard
-        subscription={makeSub({ nextBillingDate: '2025-06-10T12:00:00' })}
+        subscription={makeSub({ nextBillingDate: '2025-06-10T12:00:00', isActive: false })}
       />,
     );
-    expect(screen.getByText(/overdue/)).toBeInTheDocument();
+    expect(screen.getByText(/Jun 10, 2025/)).toBeInTheDocument();
+    expect(screen.queryByText(/overdue/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/in \d+ day/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/today/)).not.toBeInTheDocument();
   });
 
   it('should call PATCH on toggle and invoke onToggleActive callback', async () => {
