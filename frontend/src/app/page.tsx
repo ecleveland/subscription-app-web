@@ -61,7 +61,7 @@ export default function DashboardPage() {
           id="sort"
           value={sortKey}
           onChange={(e) => setSortKey(e.target.value)}
-          className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
         >
           {SORT_OPTIONS.map((opt) => (
             <option key={opt.key} value={opt.key}>{opt.label}</option>

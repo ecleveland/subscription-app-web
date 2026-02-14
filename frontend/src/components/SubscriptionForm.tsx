@@ -98,7 +98,7 @@ export default function SubscriptionForm({ subscription }: Props) {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="cost" className={labelClasses}>
             Cost ($)
@@ -135,7 +135,7 @@ export default function SubscriptionForm({ subscription }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label
             htmlFor="nextBillingDate"

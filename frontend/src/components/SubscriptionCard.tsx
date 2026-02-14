@@ -50,9 +50,9 @@ export default function SubscriptionCard({
           : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
       }`}
     >
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <h3 className={`font-semibold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-1 mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className={`font-semibold truncate ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
             {subscription.name}
           </h3>
           {!isActive && (
@@ -61,7 +61,7 @@ export default function SubscriptionCard({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <span className={`text-lg font-bold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
             {formatCurrency(subscription.cost)}
             <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">

@@ -94,4 +94,26 @@ describe('Header', () => {
 
     expect(mockLogout).toHaveBeenCalled();
   });
+
+  it('should toggle mobile menu when hamburger button is clicked', async () => {
+    authState = {
+      isAuthenticated: true,
+      user: { userId: '1', username: 'test', role: 'user' },
+      isAdmin: false,
+      logout: mockLogout,
+    };
+
+    const user = userEvent.setup();
+    render(<Header />);
+
+    const toggleBtn = screen.getByLabelText('Toggle navigation menu');
+    expect(toggleBtn).toBeInTheDocument();
+    expect(toggleBtn).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(toggleBtn);
+    expect(toggleBtn).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(toggleBtn);
+    expect(toggleBtn).toHaveAttribute('aria-expanded', 'false');
+  });
 });

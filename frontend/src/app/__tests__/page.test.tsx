@@ -56,8 +56,8 @@ describe('DashboardPage sorting', () => {
     expect(options).toHaveLength(5);
     expect(options[0]).toHaveTextContent('Next billing date');
     expect(options[1]).toHaveTextContent('Name (A–Z)');
-    expect(options[2]).toHaveTextContent('Cost (low to high)');
-    expect(options[3]).toHaveTextContent('Cost (high to low)');
+    expect(options[2]).toHaveTextContent('Monthly cost (low to high)');
+    expect(options[3]).toHaveTextContent('Monthly cost (high to low)');
     expect(options[4]).toHaveTextContent('Date added (newest)');
   });
 
