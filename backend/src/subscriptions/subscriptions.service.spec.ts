@@ -221,6 +221,69 @@ describe('SubscriptionsService', () => {
       jest.useRealTimers();
     });
 
+    it('should advance a weekly subscription by 7 days', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-07-10'),
+        billingCycle: BillingCycle.WEEKLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      expect(overdueSub.save).toHaveBeenCalled();
+      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(17);
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(6); // July
+
+      jest.useRealTimers();
+    });
+
+    it('should advance a weekly subscription multiple weeks when needed', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-06-15'),
+        billingCycle: BillingCycle.WEEKLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      // June 15 + (4*7=28) = July 13 (still <= July 15), + 7 = July 20
+      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(20);
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(6); // July
+
+      jest.useRealTimers();
+    });
+
+    it('should advance weekly subscription across month boundary', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-08-03T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-07-28'),
+        billingCycle: BillingCycle.WEEKLY,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      // July 28 + 7 = August 4
+      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(4);
+      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(7); // August
+
+      jest.useRealTimers();
+    });
+
     it('should not save when no overdue subscriptions exist', async () => {
       mockSubModel.find.mockReturnValueOnce(createChainable([]));
 
@@ -290,6 +353,21 @@ describe('SubscriptionsService', () => {
       expect(mockSubModel.find).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({ billingCycle: BillingCycle.MONTHLY }),
+      );
+    });
+
+    it('should filter by weekly billingCycle when provided', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+
+      await service.findAll(userId, { billingCycle: BillingCycle.WEEKLY });
+
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ billingCycle: BillingCycle.WEEKLY }),
       );
     });
 

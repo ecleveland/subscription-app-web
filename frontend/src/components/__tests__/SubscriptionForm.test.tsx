@@ -50,6 +50,14 @@ describe('SubscriptionForm', () => {
       expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
     });
 
+    it('should include weekly in billing cycle options', () => {
+      render(<SubscriptionForm />);
+      const select = screen.getByLabelText('Billing Cycle');
+      const options = select.querySelectorAll('option');
+      const values = Array.from(options).map((o) => o.getAttribute('value'));
+      expect(values).toContain('weekly');
+    });
+
     it('should not show Delete button', () => {
       render(<SubscriptionForm />);
       expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();

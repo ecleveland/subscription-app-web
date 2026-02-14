@@ -37,6 +37,10 @@ describe('getMonthlyCost', () => {
   it('should divide by 12 for yearly billing', () => {
     expect(getMonthlyCost(120, 'yearly')).toBe(10);
   });
+
+  it('should multiply by 4.33 for weekly billing', () => {
+    expect(getMonthlyCost(10, 'weekly')).toBeCloseTo(43.3, 1);
+  });
 });
 
 describe('getYearlyCost', () => {
@@ -46,6 +50,10 @@ describe('getYearlyCost', () => {
 
   it('should return cost as-is for yearly billing', () => {
     expect(getYearlyCost(120, 'yearly')).toBe(120);
+  });
+
+  it('should multiply by 52.14 for weekly billing', () => {
+    expect(getYearlyCost(10, 'weekly')).toBeCloseTo(521.4, 1);
   });
 });
 
@@ -59,6 +67,10 @@ describe('getDailyCost', () => {
     // $365/year → $1/day
     expect(getDailyCost(365, 'yearly')).toBeCloseTo(1, 5);
   });
+
+  it('should divide by 7 for weekly billing', () => {
+    expect(getDailyCost(7, 'weekly')).toBeCloseTo(1, 5);
+  });
 });
 
 describe('getWeeklyCost', () => {
@@ -70,6 +82,10 @@ describe('getWeeklyCost', () => {
   it('should convert yearly cost to weekly', () => {
     // $365/year → $7/week
     expect(getWeeklyCost(365, 'yearly')).toBeCloseTo(7, 5);
+  });
+
+  it('should return cost as-is for weekly billing', () => {
+    expect(getWeeklyCost(25, 'weekly')).toBe(25);
   });
 });
 

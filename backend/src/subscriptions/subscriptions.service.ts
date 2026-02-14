@@ -26,6 +26,11 @@ export class SubscriptionsService {
     const originalDay = currentDate.getUTCDate();
 
     while (result <= now) {
+      if (billingCycle === BillingCycle.WEEKLY) {
+        result.setUTCDate(result.getUTCDate() + 7);
+        continue;
+      }
+
       const targetMonth =
         billingCycle === BillingCycle.MONTHLY
           ? (result.getUTCMonth() + 1) % 12

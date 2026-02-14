@@ -53,6 +53,17 @@ describe('SubscriptionCard', () => {
     expect(screen.getByText('/yr')).toBeInTheDocument();
   });
 
+  it('should show weekly abbreviation for weekly subscriptions', () => {
+    render(<SubscriptionCard subscription={makeSub({ billingCycle: 'weekly', cost: 25 })} />);
+    expect(screen.getByText('/wk')).toBeInTheDocument();
+  });
+
+  it('should show monthly equivalent for weekly subscriptions', () => {
+    render(<SubscriptionCard subscription={makeSub({ billingCycle: 'weekly', cost: 10 })} />);
+    // $10/wk * 4.33 = $43.30/mo
+    expect(screen.getByText('($43.30/mo)')).toBeInTheDocument();
+  });
+
   it('should show monthly equivalent for yearly subscriptions', () => {
     render(<SubscriptionCard subscription={makeSub({ billingCycle: 'yearly', cost: 120 })} />);
     // $120/yr = $10/mo

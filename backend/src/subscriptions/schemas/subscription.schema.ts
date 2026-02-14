@@ -4,6 +4,7 @@ import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
 export type SubscriptionDocument = HydratedDocument<Subscription>;
 
 export enum BillingCycle {
+  WEEKLY = 'weekly',
   MONTHLY = 'monthly',
   YEARLY = 'yearly',
 }

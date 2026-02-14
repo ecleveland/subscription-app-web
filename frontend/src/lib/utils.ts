@@ -15,29 +15,33 @@ export function formatDate(date: Date | string): string {
 
 export function getMonthlyCost(
   cost: number,
-  billingCycle: 'monthly' | 'yearly',
+  billingCycle: 'weekly' | 'monthly' | 'yearly',
 ): number {
+  if (billingCycle === 'weekly') return cost * 4.33;
   return billingCycle === 'yearly' ? cost / 12 : cost;
 }
 
 export function getYearlyCost(
   cost: number,
-  billingCycle: 'monthly' | 'yearly',
+  billingCycle: 'weekly' | 'monthly' | 'yearly',
 ): number {
+  if (billingCycle === 'weekly') return cost * 52.14;
   return billingCycle === 'monthly' ? cost * 12 : cost;
 }
 
 export function getDailyCost(
   cost: number,
-  billingCycle: 'monthly' | 'yearly',
+  billingCycle: 'weekly' | 'monthly' | 'yearly',
 ): number {
+  if (billingCycle === 'weekly') return cost / 7;
   return billingCycle === 'yearly' ? cost / 365 : cost / (365 / 12);
 }
 
 export function getWeeklyCost(
   cost: number,
-  billingCycle: 'monthly' | 'yearly',
+  billingCycle: 'weekly' | 'monthly' | 'yearly',
 ): number {
+  if (billingCycle === 'weekly') return cost;
   return billingCycle === 'yearly' ? cost / (365 / 7) : cost / (365 / 12 / 7);
 }
 

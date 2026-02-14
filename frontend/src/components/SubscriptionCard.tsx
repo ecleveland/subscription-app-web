@@ -65,7 +65,7 @@ export default function SubscriptionCard({
           <span className={`text-lg font-bold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
             {formatCurrency(subscription.cost)}
             <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">
-              /{subscription.billingCycle === 'monthly' ? 'mo' : 'yr'}
+              /{subscription.billingCycle === 'monthly' ? 'mo' : subscription.billingCycle === 'yearly' ? 'yr' : 'wk'}
             </span>
           </span>
           <button
@@ -87,7 +87,7 @@ export default function SubscriptionCard({
       </div>
       <div className="flex items-center gap-2 mb-2">
         <CategoryBadge category={subscription.category} />
-        {subscription.billingCycle === 'yearly' && (
+        {subscription.billingCycle !== 'monthly' && (
           <span className="text-xs text-gray-500 dark:text-gray-400">
             ({formatCurrency(monthly)}/mo)
           </span>

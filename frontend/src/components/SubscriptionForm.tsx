@@ -15,7 +15,7 @@ export default function SubscriptionForm({ subscription }: Props) {
 
   const [name, setName] = useState(subscription?.name ?? '');
   const [cost, setCost] = useState(subscription?.cost?.toString() ?? '');
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>(
+  const [billingCycle, setBillingCycle] = useState<'weekly' | 'monthly' | 'yearly'>(
     subscription?.billingCycle ?? 'monthly',
   );
   const [nextBillingDate, setNextBillingDate] = useState(
@@ -125,9 +125,10 @@ export default function SubscriptionForm({ subscription }: Props) {
           <select
             id="billingCycle"
             value={billingCycle}
-            onChange={(e) => setBillingCycle(e.target.value as 'monthly' | 'yearly')}
+            onChange={(e) => setBillingCycle(e.target.value as 'weekly' | 'monthly' | 'yearly')}
             className={inputClasses}
           >
+            <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
           </select>

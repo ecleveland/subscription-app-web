@@ -185,6 +185,16 @@ describe('Subscriptions (e2e)', () => {
           nextBillingDate: '2026-01-01',
           category: 'Software',
         });
+      await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({
+          name: 'Meal Kit',
+          cost: 25,
+          billingCycle: 'weekly',
+          nextBillingDate: '2025-07-10',
+          category: 'Other',
+        });
     });
 
     it('should filter by category', async () => {
@@ -205,6 +215,16 @@ describe('Subscriptions (e2e)', () => {
 
       expect(res.body).toHaveLength(1);
       expect(res.body[0].name).toBe('GitHub Pro');
+    });
+
+    it('should filter by weekly billingCycle', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?billingCycle=weekly')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].name).toBe('Meal Kit');
     });
 
     it('should sort by cost ascending', async () => {
@@ -276,6 +296,36 @@ describe('Subscriptions (e2e)', () => {
       const unchanged = listRes.body.find((s: any) => s._id === subId);
       expect(unchanged).toBeDefined();
       expect(new Date(unchanged.nextBillingDate).getTime()).toBeLessThan(
+        Date.now(),
+      );
+    });
+
+    it('should advance overdue weekly billing date on GET /subscriptions', async () => {
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - 10);
+
+      const createRes = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Overdue Weekly',
+          cost: 25,
+          billingCycle: 'weekly',
+          nextBillingDate: pastDate.toISOString(),
+          category: 'Other',
+        })
+        .expect(201);
+
+      const subId = createRes.body._id;
+
+      const listRes = await request(app.getHttpServer())
+        .get('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      const updated = listRes.body.find((s: any) => s._id === subId);
+      expect(updated).toBeDefined();
+      expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
         Date.now(),
       );
     });

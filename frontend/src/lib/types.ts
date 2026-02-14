@@ -14,7 +14,7 @@ export interface Subscription {
   userId: string;
   name: string;
   cost: number;
-  billingCycle: 'monthly' | 'yearly';
+  billingCycle: 'weekly' | 'monthly' | 'yearly';
   nextBillingDate: string;
   category: string;
   notes?: string;
