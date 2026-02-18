@@ -51,7 +51,10 @@ describe('AuthService', () => {
 
       expect(result).toEqual({ access_token: 'signed-jwt-token' });
       expect(usersService.findByUsername).toHaveBeenCalledWith('testuser');
-      expect(bcrypt.compare).toHaveBeenCalledWith('password', 'hashed-password');
+      expect(bcrypt.compare).toHaveBeenCalledWith(
+        'password',
+        'hashed-password',
+      );
     });
 
     it('should sign JWT with correct payload shape', async () => {

@@ -28,15 +28,15 @@ describe('SubscriptionsController', () => {
       create: jest.fn().mockResolvedValue(mockSubscription),
       findAll: jest.fn().mockResolvedValue([mockSubscription]),
       findOne: jest.fn().mockResolvedValue(mockSubscription),
-      update: jest.fn().mockResolvedValue({ ...mockSubscription, name: 'Updated' }),
+      update: jest
+        .fn()
+        .mockResolvedValue({ ...mockSubscription, name: 'Updated' }),
       remove: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SubscriptionsController],
-      providers: [
-        { provide: SubscriptionsService, useValue: service },
-      ],
+      providers: [{ provide: SubscriptionsService, useValue: service }],
     }).compile();
 
     controller = module.get<SubscriptionsController>(SubscriptionsController);
@@ -83,7 +83,11 @@ describe('SubscriptionsController', () => {
       const dto = { name: 'Updated' };
       await controller.update(mockReq, 'sub-id-1', dto);
 
-      expect(service.update).toHaveBeenCalledWith('user-id-123', 'sub-id-1', dto);
+      expect(service.update).toHaveBeenCalledWith(
+        'user-id-123',
+        'sub-id-1',
+        dto,
+      );
     });
   });
 

@@ -1,12 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { MongoMemoryServer } from 'mongodb-memory-server';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AppModule } from '../../src/app.module';
+import { SubscriptionsService } from '../../src/subscriptions/subscriptions.service';
 
 // Track mongod instances per app for proper cleanup
 const mongodInstances = new WeakMap<INestApplication, MongoMemoryServer>();
 
-export async function createTestApp(): Promise<INestApplication> {
+export interface TestAppOptions {
+  disableThrottling?: boolean;
+}
+
+export async function createTestApp(
+  options: TestAppOptions = { disableThrottling: true },
+): Promise<INestApplication> {
   const mongod = await MongoMemoryServer.create();
 
   process.env.MONGODB_URI = mongod.getUri();
@@ -14,9 +22,20 @@ export async function createTestApp(): Promise<INestApplication> {
   process.env.JWT_EXPIRES_IN = '1h';
   process.env.AUTH_PASSWORD_HASH = '';
 
-  const moduleFixture: TestingModule = await Test.createTestingModule({
+  // Disable advance cooldown in E2E tests so billing date tests work
+  SubscriptionsService.ADVANCE_COOLDOWN_MS = 0;
+
+  let builder = Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  });
+
+  if (options.disableThrottling) {
+    builder = builder
+      .overrideGuard(ThrottlerGuard)
+      .useValue({ canActivate: () => true }) as unknown as typeof builder;
+  }
+
+  const moduleFixture: TestingModule = await builder.compile();
 
   const app = moduleFixture.createNestApplication();
   app.setGlobalPrefix('api');

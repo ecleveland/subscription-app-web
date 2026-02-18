@@ -21,7 +21,9 @@ describe('UsersController', () => {
   beforeEach(async () => {
     usersService = {
       findOnePublic: jest.fn().mockResolvedValue(mockUser),
-      update: jest.fn().mockResolvedValue({ ...mockUser, displayName: 'Updated' }),
+      update: jest
+        .fn()
+        .mockResolvedValue({ ...mockUser, displayName: 'Updated' }),
       changePassword: jest.fn().mockResolvedValue(undefined),
     };
 

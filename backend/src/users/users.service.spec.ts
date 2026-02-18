@@ -165,7 +165,9 @@ describe('UsersService', () => {
 
       const result = await service.findOne('507f1f77bcf86cd799439011');
 
-      expect(mockUserModel.findById).toHaveBeenCalledWith('507f1f77bcf86cd799439011');
+      expect(mockUserModel.findById).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
+      );
       expect(result).toEqual(mockUser);
     });
 
@@ -299,9 +301,7 @@ describe('UsersService', () => {
       await expect(service.remove('nonexistent')).rejects.toThrow(
         NotFoundException,
       );
-      expect(
-        mockSubscriptionsService.removeAllByUserId,
-      ).not.toHaveBeenCalled();
+      expect(mockSubscriptionsService.removeAllByUserId).not.toHaveBeenCalled();
     });
 
     it('should succeed even when user has no subscriptions', async () => {

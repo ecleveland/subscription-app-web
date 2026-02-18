@@ -12,6 +12,9 @@ import { QuerySubscriptionDto } from './dto/query-subscription.dto';
 
 @Injectable()
 export class SubscriptionsService {
+  private advanceCooldowns = new Map<string, number>();
+  static ADVANCE_COOLDOWN_MS = 60_000;
+
   constructor(
     @InjectModel(Subscription.name)
     private subscriptionModel: Model<SubscriptionDocument>,
@@ -78,16 +81,26 @@ export class SubscriptionsService {
       } as Record<string, unknown>)
       .exec();
 
-    const savePromises = overdue.map((sub) => {
-      sub.nextBillingDate = SubscriptionsService.advanceToFutureDate(
+    if (overdue.length === 0) return;
+
+    const bulkOps = overdue.map((sub) => {
+      const newDate = SubscriptionsService.advanceToFutureDate(
         sub.nextBillingDate,
         sub.billingCycle,
         now,
       );
-      return sub.save();
+      return {
+        updateOne: {
+          filter: {
+            _id: sub._id,
+            nextBillingDate: { $lte: now },
+          },
+          update: { $set: { nextBillingDate: newDate } },
+        },
+      };
     });
 
-    await Promise.all(savePromises);
+    await this.subscriptionModel.bulkWrite(bulkOps);
   }
 
   async create(
@@ -105,7 +118,12 @@ export class SubscriptionsService {
     userId: string,
     query: QuerySubscriptionDto,
   ): Promise<SubscriptionDocument[]> {
-    await this.advanceOverdueDates(userId);
+    const lastAdvance = this.advanceCooldowns.get(userId) ?? 0;
+    const now = Date.now();
+    if (now - lastAdvance >= SubscriptionsService.ADVANCE_COOLDOWN_MS) {
+      this.advanceCooldowns.set(userId, now);
+      await this.advanceOverdueDates(userId);
+    }
 
     const filter: Record<string, unknown> = {
       userId: new Types.ObjectId(userId),
@@ -122,9 +140,7 @@ export class SubscriptionsService {
     const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
 
     if (sortBy === 'cost') {
-      const subscriptions = await this.subscriptionModel
-        .find(filter)
-        .exec();
+      const subscriptions = await this.subscriptionModel.find(filter).exec();
       return subscriptions.sort((a, b) => {
         const aCost = SubscriptionsService.getMonthlyCost(
           a.cost,
@@ -169,13 +185,24 @@ export class SubscriptionsService {
   }
 
   async remove(userId: string, id: string): Promise<void> {
-    await this.findOne(userId, id);
-    await this.subscriptionModel.findByIdAndDelete(id).exec();
+    const deleted = await this.subscriptionModel
+      .findOneAndDelete({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      })
+      .exec();
+
+    if (!deleted) {
+      throw new NotFoundException(`Subscription with ID "${id}" not found`);
+    }
   }
 
   async removeAllByUserId(userId: string): Promise<number> {
     const result = await this.subscriptionModel
-      .deleteMany({ userId: new Types.ObjectId(userId) } as Record<string, unknown>)
+      .deleteMany({ userId: new Types.ObjectId(userId) } as Record<
+        string,
+        unknown
+      >)
       .exec();
     return result.deletedCount;
   }

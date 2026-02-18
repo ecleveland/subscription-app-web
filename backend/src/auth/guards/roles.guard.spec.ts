@@ -48,7 +48,10 @@ describe('RolesGuard', () => {
   });
 
   it('should allow access when user role matches one of multiple required roles', () => {
-    reflector.getAllAndOverride.mockReturnValue([UserRole.ADMIN, UserRole.USER]);
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.ADMIN,
+      UserRole.USER,
+    ]);
     const context = createMockContext(UserRole.USER);
 
     expect(guard.canActivate(context)).toBe(true);

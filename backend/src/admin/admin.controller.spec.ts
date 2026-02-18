@@ -9,7 +9,13 @@ describe('AdminController', () => {
   let usersService: jest.Mocked<
     Pick<
       UsersService,
-      'findAll' | 'create' | 'findOne' | 'findOnePublic' | 'update' | 'remove' | 'countAdmins'
+      | 'findAll'
+      | 'create'
+      | 'findOne'
+      | 'findOnePublic'
+      | 'update'
+      | 'remove'
+      | 'countAdmins'
     >
   >;
 
@@ -143,9 +149,9 @@ describe('AdminController', () => {
       usersService.findOne.mockResolvedValue(mockAdmin as any);
       usersService.countAdmins.mockResolvedValue(1);
 
-      await expect(
-        controller.remove(mockReq, 'admin-id-1'),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(controller.remove(mockReq, 'admin-id-1')).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(usersService.remove).not.toHaveBeenCalled();
     });
 

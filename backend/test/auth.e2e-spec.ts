@@ -3,6 +3,44 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 
+describe('Auth rate limiting (e2e)', () => {
+  let app: INestApplication<App>;
+
+  beforeAll(async () => {
+    app = await createTestApp({ disableThrottling: false });
+  });
+
+  afterAll(async () => {
+    await closeTestApp(app);
+  });
+
+  it('should return 429 after 5 login attempts within 60s', async () => {
+    for (let i = 0; i < 5; i++) {
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ username: 'nobody', password: 'wrong' });
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ username: 'nobody', password: 'wrong' })
+      .expect(429);
+  });
+
+  it('should return 429 after 3 registration attempts within 60s', async () => {
+    for (let i = 0; i < 3; i++) {
+      await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ username: `ratelimit${i}`, password: 'password123' });
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ username: 'ratelimit3', password: 'password123' })
+      .expect(429);
+  });
+});
+
 describe('Auth (e2e)', () => {
   let app: INestApplication<App>;
 
@@ -110,9 +148,7 @@ describe('Auth (e2e)', () => {
     });
 
     it('should return 401 without a token', () => {
-      return request(app.getHttpServer())
-        .get('/api/subscriptions')
-        .expect(401);
+      return request(app.getHttpServer()).get('/api/subscriptions').expect(401);
     });
   });
 });

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
@@ -13,7 +14,9 @@ describe('AuthController', () => {
       login: jest.fn().mockResolvedValue({ access_token: 'jwt-token' }),
     };
     usersService = {
-      create: jest.fn().mockResolvedValue({ _id: 'new-id', username: 'newuser' }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ _id: 'new-id', username: 'newuser' }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -22,7 +25,10 @@ describe('AuthController', () => {
         { provide: AuthService, useValue: authService },
         { provide: UsersService, useValue: usersService },
       ],
-    }).compile();
+    })
+      .overrideGuard(ThrottlerGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<AuthController>(AuthController);
   });

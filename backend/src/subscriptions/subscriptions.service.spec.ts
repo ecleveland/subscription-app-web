@@ -41,6 +41,10 @@ describe('SubscriptionsService', () => {
     mockSubModel.findByIdAndDelete = jest
       .fn()
       .mockReturnValue(createChainable(null));
+    mockSubModel.findOneAndDelete = jest
+      .fn()
+      .mockReturnValue(createChainable(null));
+    mockSubModel.bulkWrite = jest.fn().mockResolvedValue({ modifiedCount: 0 });
     mockSubModel.updateMany = jest
       .fn()
       .mockReturnValue(createChainable({ modifiedCount: 0 }));
@@ -96,23 +100,36 @@ describe('SubscriptionsService', () => {
   });
 
   describe('advanceOverdueDates', () => {
-    it('should advance a monthly subscription one month', async () => {
+    it('should advance a monthly subscription one month via bulkWrite', async () => {
       jest.useFakeTimers();
       jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2025-07-01'),
         billingCycle: BillingCycle.MONTHLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
-      expect(overdueSub.save).toHaveBeenCalled();
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(7); // August
-      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(1);
+      expect(mockSubModel.bulkWrite).toHaveBeenCalledWith([
+        {
+          updateOne: {
+            filter: {
+              _id: subId,
+              nextBillingDate: { $lte: expect.any(Date) },
+            },
+            update: { $set: { nextBillingDate: expect.any(Date) } },
+          },
+        },
+      ]);
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCMonth()).toBe(7); // August
+      expect(newDate.getUTCDate()).toBe(1);
 
       jest.useRealTimers();
     });
@@ -123,16 +140,19 @@ describe('SubscriptionsService', () => {
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2025-03-01'),
         billingCycle: BillingCycle.MONTHLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(7); // August
-      expect(overdueSub.nextBillingDate.getUTCFullYear()).toBe(2025);
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCMonth()).toBe(7); // August
+      expect(newDate.getUTCFullYear()).toBe(2025);
 
       jest.useRealTimers();
     });
@@ -143,17 +163,20 @@ describe('SubscriptionsService', () => {
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2024-06-01'),
         billingCycle: BillingCycle.YEARLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
       // June 2024 → June 2025 (still <= July 15) → June 2026
-      expect(overdueSub.nextBillingDate.getUTCFullYear()).toBe(2026);
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(5); // June
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCFullYear()).toBe(2026);
+      expect(newDate.getUTCMonth()).toBe(5); // June
 
       jest.useRealTimers();
     });
@@ -164,16 +187,19 @@ describe('SubscriptionsService', () => {
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2025-01-31'),
         billingCycle: BillingCycle.MONTHLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(1); // February
-      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(28);
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCMonth()).toBe(1); // February
+      expect(newDate.getUTCDate()).toBe(28);
 
       jest.useRealTimers();
     });
@@ -184,17 +210,20 @@ describe('SubscriptionsService', () => {
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2025-01-31'),
         billingCycle: BillingCycle.MONTHLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
       // Jan 31 → Feb 28 (still <= Mar 15) → Mar 31 (> Mar 15, stop)
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(2); // March
-      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(31);
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCMonth()).toBe(2); // March
+      expect(newDate.getUTCDate()).toBe(31);
 
       jest.useRealTimers();
     });
@@ -205,18 +234,21 @@ describe('SubscriptionsService', () => {
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2024-02-29'),
         billingCycle: BillingCycle.YEARLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
       // Feb 29, 2024 → Feb 28, 2025 (still <= Mar 1) → Feb 28, 2026
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(1); // February
-      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(28);
-      expect(overdueSub.nextBillingDate.getUTCFullYear()).toBe(2026);
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCMonth()).toBe(1); // February
+      expect(newDate.getUTCDate()).toBe(28);
+      expect(newDate.getUTCFullYear()).toBe(2026);
 
       jest.useRealTimers();
     });
@@ -227,17 +259,20 @@ describe('SubscriptionsService', () => {
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2025-07-10'),
         billingCycle: BillingCycle.WEEKLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
-      expect(overdueSub.save).toHaveBeenCalled();
-      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(17);
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(6); // July
+      expect(mockSubModel.bulkWrite).toHaveBeenCalled();
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCDate()).toBe(17);
+      expect(newDate.getUTCMonth()).toBe(6); // July
 
       jest.useRealTimers();
     });
@@ -248,17 +283,20 @@ describe('SubscriptionsService', () => {
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2025-06-15'),
         billingCycle: BillingCycle.WEEKLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
       // June 15 + (4*7=28) = July 13 (still <= July 15), + 7 = July 20
-      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(20);
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(6); // July
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCDate()).toBe(20);
+      expect(newDate.getUTCMonth()).toBe(6); // July
 
       jest.useRealTimers();
     });
@@ -269,27 +307,30 @@ describe('SubscriptionsService', () => {
 
       const overdueSub = {
         ...mockSubscription,
+        _id: subId,
         nextBillingDate: new Date('2025-07-28'),
         billingCycle: BillingCycle.WEEKLY,
-        save: jest.fn().mockResolvedValue(undefined),
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
       await service.advanceOverdueDates(userId);
 
       // July 28 + 7 = August 4
-      expect(overdueSub.nextBillingDate.getUTCDate()).toBe(4);
-      expect(overdueSub.nextBillingDate.getUTCMonth()).toBe(7); // August
+      const newDate =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
+          .nextBillingDate;
+      expect(newDate.getUTCDate()).toBe(4);
+      expect(newDate.getUTCMonth()).toBe(7); // August
 
       jest.useRealTimers();
     });
 
-    it('should not save when no overdue subscriptions exist', async () => {
+    it('should not call bulkWrite when no overdue subscriptions exist', async () => {
       mockSubModel.find.mockReturnValueOnce(createChainable([]));
 
       await service.advanceOverdueDates(userId);
 
-      expect(mockSubscription.save).not.toHaveBeenCalled();
+      expect(mockSubModel.bulkWrite).not.toHaveBeenCalled();
     });
 
     it('should only query active subscriptions with past billing dates', async () => {
@@ -303,6 +344,28 @@ describe('SubscriptionsService', () => {
           nextBillingDate: { $lte: expect.any(Date) },
         }),
       );
+    });
+
+    it('should include atomic guard in bulkWrite filter', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
+
+      const overdueSub = {
+        ...mockSubscription,
+        _id: subId,
+        nextBillingDate: new Date('2025-07-01'),
+        billingCycle: BillingCycle.MONTHLY,
+      };
+      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
+
+      await service.advanceOverdueDates(userId);
+
+      const filter =
+        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.filter;
+      expect(filter._id).toBe(subId);
+      expect(filter.nextBillingDate).toEqual({ $lte: expect.any(Date) });
+
+      jest.useRealTimers();
     });
   });
 
@@ -492,6 +555,22 @@ describe('SubscriptionsService', () => {
         }),
       );
     });
+
+    it('should skip advanceOverdueDates on second call within cooldown', async () => {
+      const advanceChain = createChainable([]);
+      const chain1 = createChainable([mockSubscription]);
+      const chain2 = createChainable([mockSubscription]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain1)
+        .mockReturnValueOnce(chain2);
+
+      await service.findAll(userId, {});
+      await service.findAll(userId, {});
+
+      // find called 3 times: advance + main query + main query (no advance)
+      expect(mockSubModel.find).toHaveBeenCalledTimes(3);
+    });
   });
 
   describe('findOne', () => {
@@ -556,22 +635,23 @@ describe('SubscriptionsService', () => {
   });
 
   describe('remove', () => {
-    it('should verify ownership then delete', async () => {
-      mockSubModel.findById.mockReturnValue(createChainable(mockSubscription));
-      mockSubModel.findByIdAndDelete.mockReturnValue(
+    it('should atomically delete by id and userId', async () => {
+      mockSubModel.findOneAndDelete.mockReturnValue(
         createChainable(mockSubscription),
       );
 
       await service.remove(userId, subId);
 
-      expect(mockSubModel.findById).toHaveBeenCalledWith(subId);
-      expect(mockSubModel.findByIdAndDelete).toHaveBeenCalledWith(subId);
+      expect(mockSubModel.findOneAndDelete).toHaveBeenCalledWith({
+        _id: expect.any(Types.ObjectId),
+        userId: expect.any(Types.ObjectId),
+      });
     });
 
-    it('should throw NotFoundException if subscription not found', async () => {
-      mockSubModel.findById.mockReturnValue(createChainable(null));
+    it('should throw NotFoundException if subscription not found or not owned', async () => {
+      mockSubModel.findOneAndDelete.mockReturnValue(createChainable(null));
 
-      await expect(service.remove(userId, 'nonexistent')).rejects.toThrow(
+      await expect(service.remove(userId, subId)).rejects.toThrow(
         NotFoundException,
       );
     });

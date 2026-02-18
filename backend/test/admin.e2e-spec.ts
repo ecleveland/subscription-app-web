@@ -62,9 +62,7 @@ describe('Admin (e2e)', () => {
     });
 
     it('should deny unauthenticated access to admin routes', async () => {
-      await request(app.getHttpServer())
-        .get('/api/admin/users')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/admin/users').expect(401);
     });
   });
 
