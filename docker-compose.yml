@@ -21,9 +21,8 @@ services:
     environment:
       - PORT=3001
       - MONGODB_URI=mongodb://mongo:27017/subscriptions
-      - AUTH_USERNAME=${AUTH_USERNAME:-admin}
-      - AUTH_PASSWORD_HASH=${AUTH_PASSWORD_HASH}
-      - JWT_SECRET=${JWT_SECRET}
+      - AUTH_PASSWORD_HASH=${AUTH_PASSWORD_HASH:-}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - FRONTEND_URL=http://localhost:3000
     depends_on:

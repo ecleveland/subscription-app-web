@@ -39,7 +39,7 @@ A full-stack web app for tracking and managing recurring subscriptions.
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Default login: `admin` / `password`.
+Open [http://localhost:3000](http://localhost:3000) and register a new account to get started.
 
 ### Local Development
 
@@ -54,8 +54,8 @@ Open [http://localhost:3000](http://localhost:3000). Default login: `admin` / `p
    ```bash
    cd backend
    npm install
-   cp .env.example .env   # edit .env if needed — defaults work for local dev
-   npm run start:dev       # runs on port 3001
+   cp ../.env.example .env   # JWT_SECRET is required — see Environment Variables below
+   npm run start:dev          # runs on port 3001
    ```
 
 3. **Frontend:**
@@ -79,24 +79,18 @@ Copy `.env.example` at the repo root and fill in the values.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MONGODB_URI` | MongoDB connection string | `mongodb://localhost:27017/subscriptions` |
-| `AUTH_USERNAME` | Login username | `admin` |
-| `AUTH_PASSWORD_HASH` | bcrypt hash of the login password | *(see below)* |
-| `JWT_SECRET` | Secret key for signing JWTs | *(generate one)* |
+| `JWT_SECRET` | **Required.** Secret key for signing JWTs | *(generate one)* |
 | `JWT_EXPIRES_IN` | Token expiry duration | `24h` |
 | `FRONTEND_URL` | Frontend origin for CORS | `http://localhost:3000` |
 | `NEXT_PUBLIC_API_URL` | Backend API URL used by the frontend | `http://localhost:3001/api` |
-
-Generate a password hash:
-
-```bash
-node -e "require('bcryptjs').hash('yourpassword', 10).then(console.log)"
-```
 
 Generate a JWT secret:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 ```
+
+Users register via `POST /api/auth/register` or the registration page in the UI.
 
 ## API Overview
 

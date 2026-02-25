@@ -7,7 +7,7 @@
 A subscription tracking web app as a monorepo with three Dockerized services.
 
 ### Backend (`/backend`) — NestJS 11 REST API
-- JWT-based single-user auth (password as bcrypt hash in env vars)
+- JWT-based multi-user auth with registration and role-based access control
 - Full CRUD API for subscriptions at `/api/subscriptions`
 - Mongoose schemas with class-validator DTOs
 - Global validation pipe, CORS, `/api` prefix
@@ -34,12 +34,12 @@ A subscription tracking web app as a monorepo with three Dockerized services.
 ## Decisions made
 - **Database**: MongoDB with Mongoose (chosen by user)
 - **Styling**: Tailwind CSS v4 with CSS-first config (chosen by user)
-- **Auth**: NestJS backend owns auth, issues JWTs; single-user with env var credentials (chosen by user)
+- **Auth**: NestJS backend owns auth, issues JWTs; multi-user with registration and role-based access (chosen by user)
 - **Repo structure**: Monorepo with `/frontend` and `/backend` directories (chosen by user)
 - **Docker images**: `node:22-alpine` and `mongo:7` — all ARM-native, no Rosetta needed
 
 ## Current state
 - Initial commit `80c15fb` on `master`
 - Pushed to https://github.com/ecleveland/subscription-app-web (private)
-- Default login: `admin` / `password`
+- Register a new account via the UI or `POST /api/auth/register` to get started
 - Plan file preserved at `~/.claude/plans/cosmic-sleeping-meadow.md`

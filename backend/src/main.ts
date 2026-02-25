@@ -28,16 +28,15 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Seed admin user from env vars on first startup
+  // Seed admin user from env vars on first startup (legacy migration)
   const usersService = app.get(UsersService);
-  const seedUsername = configService.get<string>('auth.username') ?? 'admin';
   const seedPasswordHash = configService.get<string>('auth.passwordHash') ?? '';
   if (seedPasswordHash) {
-    await usersService.seedAdmin(seedUsername, seedPasswordHash);
+    await usersService.seedAdmin('admin', seedPasswordHash);
   }
 
   // Migrate existing subscriptions without userId to the admin user
-  const admin = await usersService.findByUsername(seedUsername);
+  const admin = await usersService.findByUsername('admin');
   if (admin) {
     const subscriptionsService = app.get(SubscriptionsService);
     const migrated = await subscriptionsService.migrateUnownedSubscriptions(

@@ -84,10 +84,9 @@ Project architecture decisions and development requirements are documented in `.
 ## Environment Variables
 
 Backend (`.env` in `/backend`):
-- `MONGODB_URI`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `FRONTEND_URL` (CORS)
-- `AUTH_USERNAME`, `AUTH_PASSWORD_HASH` — legacy env vars, no longer used by the auth service (users are now stored in MongoDB)
+- `MONGODB_URI`, `JWT_SECRET` (required), `JWT_EXPIRES_IN`, `FRONTEND_URL` (CORS)
 
 Frontend (`.env.local` in `/frontend`):
 - `NEXT_PUBLIC_API_URL` — backend URL (default: `http://localhost:3001/api`)
 
-To create an initial admin user, register via the API or use the admin endpoints. Generate a bcrypt hash: `node -e "require('bcryptjs').hash('yourpassword',10).then(console.log)"`
+To create an initial user, register via `POST /api/auth/register` or the registration page. Admins can then be promoted via the admin panel or database.
