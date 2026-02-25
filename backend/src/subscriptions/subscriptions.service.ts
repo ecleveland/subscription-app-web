@@ -189,7 +189,7 @@ export class SubscriptionsService {
       .findOneAndDelete({
         _id: new Types.ObjectId(id),
         userId: new Types.ObjectId(userId),
-      })
+      } as Record<string, unknown>)
       .exec();
 
     if (!deleted) {
