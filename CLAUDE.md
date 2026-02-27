@@ -81,6 +81,15 @@ Project architecture decisions and development requirements are documented in `.
 - **`testing.md`** — Every plan must include a testing step. All new code requires tests per the rules in this file. Run the relevant test suite before considering work complete.
 - **`backend-patterns.md`** — Mongoose filter type casting rules and `tsc` vs `ts-jest` compatibility notes.
 
+## Linear Workflow
+
+This project tracks work in Linear (workspace: **Vega Apps**, project: **Subscription App**). When implementing a plan tied to a Linear issue:
+
+- **Commit messages**: Include the issue identifier (e.g., `VEG-48`) in the commit message so Linear auto-links the commit. Example: `VEG-48: Add security headers via Helmet middleware`
+- **PR titles/descriptions**: Include the identifier in the PR title or body. Use `Closes VEG-48` or `Fixes VEG-48` in the PR description to auto-transition the issue when the PR merges.
+- **After push**: If the plan references a Linear issue, update its status to **Done** using the Linear MCP tools once the work is committed and pushed.
+- **Branch naming**: When creating feature branches, use the Linear-suggested format: `veg-48-add-security-headers-via-helmet`
+
 ## Environment Variables
 
 Backend (`.env` in `/backend`):
