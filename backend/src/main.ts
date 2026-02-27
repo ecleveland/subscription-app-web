@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { UsersService } from './users/users.service';
 import { SubscriptionsService } from './subscriptions/subscriptions.service';
@@ -19,6 +20,16 @@ async function bootstrap() {
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
+      },
+    }),
+  );
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      strictTransportSecurity: {
+        maxAge: 15552000,
+        includeSubDomains: true,
       },
     }),
   );

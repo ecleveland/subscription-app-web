@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import helmet from 'helmet';
 import { AppModule } from '../../src/app.module';
 import { SubscriptionsService } from '../../src/subscriptions/subscriptions.service';
 
@@ -46,6 +47,16 @@ export async function createTestApp(
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
+      },
+    }),
+  );
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      strictTransportSecurity: {
+        maxAge: 15552000,
+        includeSubDomains: true,
       },
     }),
   );
