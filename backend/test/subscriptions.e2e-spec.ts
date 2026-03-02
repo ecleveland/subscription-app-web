@@ -55,8 +55,9 @@ describe('Subscriptions (e2e)', () => {
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(200);
 
-      expect(res.body).toHaveLength(1);
-      expect(res.body[0].name).toBe('Netflix');
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].name).toBe('Netflix');
+      expect(res.body.meta).toBeDefined();
     });
 
     it('should get a single subscription', async () => {
@@ -148,7 +149,7 @@ describe('Subscriptions (e2e)', () => {
         .set('Authorization', `Bearer ${tokenB}`)
         .expect(200);
 
-      expect(res.body).toHaveLength(0);
+      expect(res.body.data).toHaveLength(0);
     });
   });
 
@@ -203,8 +204,8 @@ describe('Subscriptions (e2e)', () => {
         .set('Authorization', `Bearer ${tokenB}`)
         .expect(200);
 
-      expect(res.body).toHaveLength(2);
-      expect(res.body.every((s: any) => s.category === 'Software')).toBe(true);
+      expect(res.body.data).toHaveLength(2);
+      expect(res.body.data.every((s: any) => s.category === 'Software')).toBe(true);
     });
 
     it('should filter by billingCycle', async () => {
@@ -213,8 +214,8 @@ describe('Subscriptions (e2e)', () => {
         .set('Authorization', `Bearer ${tokenB}`)
         .expect(200);
 
-      expect(res.body).toHaveLength(1);
-      expect(res.body[0].name).toBe('GitHub Pro');
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].name).toBe('GitHub Pro');
     });
 
     it('should filter by weekly billingCycle', async () => {
@@ -223,8 +224,8 @@ describe('Subscriptions (e2e)', () => {
         .set('Authorization', `Bearer ${tokenB}`)
         .expect(200);
 
-      expect(res.body).toHaveLength(1);
-      expect(res.body[0].name).toBe('Meal Kit');
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].name).toBe('Meal Kit');
     });
 
     it('should sort by normalized monthly cost ascending', async () => {
@@ -234,8 +235,103 @@ describe('Subscriptions (e2e)', () => {
         .expect(200);
 
       // Monthly costs: GitHub Pro 48/12=$4, Netflix $15.99, AWS $50, Meal Kit 25*4.33=$108.25
-      const names = res.body.map((s: any) => s.name);
+      const names = res.body.data.map((s: any) => s.name);
       expect(names).toEqual(['GitHub Pro', 'Netflix', 'AWS', 'Meal Kit']);
+    });
+  });
+
+  describe('Pagination', () => {
+    // Relies on userB's 4 subscriptions created in "Filtering and sorting" beforeAll
+    it('should return paginated envelope with correct meta', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?limit=2&page=1')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(2);
+      expect(res.body.meta.total).toBe(4);
+      expect(res.body.meta.page).toBe(1);
+      expect(res.body.meta.limit).toBe(2);
+      expect(res.body.meta.totalPages).toBe(2);
+      expect(res.body.meta.hasNextPage).toBe(true);
+    });
+
+    it('should return second page results', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?limit=2&page=2')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(2);
+      expect(res.body.meta.page).toBe(2);
+      expect(res.body.meta.hasNextPage).toBe(false);
+    });
+
+    it('should return empty data for page beyond total', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?limit=2&page=10')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(0);
+      expect(res.body.meta.total).toBe(4);
+    });
+
+    it('should return all results when limit=0', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?limit=0')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(4);
+      expect(res.body.meta.totalPages).toBe(1);
+      expect(res.body.meta.hasNextPage).toBe(false);
+    });
+
+    it('should combine filtering and pagination', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?category=Software&limit=1&page=1')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.meta.total).toBe(2);
+      expect(res.body.meta.totalPages).toBe(2);
+    });
+
+    it('should combine cost sorting and pagination', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?sortBy=cost&sortOrder=asc&limit=2&page=1')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(2);
+      // First two by ascending monthly cost: GitHub Pro ($4/mo), Netflix ($15.99/mo)
+      const names = res.body.data.map((s: any) => s.name);
+      expect(names).toEqual(['GitHub Pro', 'Netflix']);
+    });
+
+    it('should return 400 for page=0', async () => {
+      await request(app.getHttpServer())
+        .get('/api/subscriptions?page=0')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(400);
+    });
+
+    it('should return 400 for limit=101', async () => {
+      await request(app.getHttpServer())
+        .get('/api/subscriptions?limit=101')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(400);
+    });
+
+    it('should default limit to 20 when not specified', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.meta.limit).toBe(20);
     });
   });
 
@@ -259,11 +355,11 @@ describe('Subscriptions (e2e)', () => {
       const subId = createRes.body._id;
 
       const listRes = await request(app.getHttpServer())
-        .get('/api/subscriptions')
+        .get('/api/subscriptions?limit=0')
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(200);
 
-      const updated = listRes.body.find((s: any) => s._id === subId);
+      const updated = listRes.body.data.find((s: any) => s._id === subId);
       expect(updated).toBeDefined();
       expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
         Date.now(),
@@ -290,11 +386,11 @@ describe('Subscriptions (e2e)', () => {
       const subId = createRes.body._id;
 
       const listRes = await request(app.getHttpServer())
-        .get('/api/subscriptions')
+        .get('/api/subscriptions?limit=0')
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(200);
 
-      const unchanged = listRes.body.find((s: any) => s._id === subId);
+      const unchanged = listRes.body.data.find((s: any) => s._id === subId);
       expect(unchanged).toBeDefined();
       expect(new Date(unchanged.nextBillingDate).getTime()).toBeLessThan(
         Date.now(),
@@ -320,11 +416,11 @@ describe('Subscriptions (e2e)', () => {
       const subId = createRes.body._id;
 
       const listRes = await request(app.getHttpServer())
-        .get('/api/subscriptions')
+        .get('/api/subscriptions?limit=0')
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(200);
 
-      const updated = listRes.body.find((s: any) => s._id === subId);
+      const updated = listRes.body.data.find((s: any) => s._id === subId);
       expect(updated).toBeDefined();
       expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
         Date.now(),
@@ -351,11 +447,11 @@ describe('Subscriptions (e2e)', () => {
       const subId = createRes.body._id;
 
       const listRes = await request(app.getHttpServer())
-        .get('/api/subscriptions')
+        .get('/api/subscriptions?limit=0')
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(200);
 
-      const updated = listRes.body.find((s: any) => s._id === subId);
+      const updated = listRes.body.data.find((s: any) => s._id === subId);
       expect(updated).toBeDefined();
       expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
         Date.now(),

@@ -8,6 +8,8 @@ import { Subscription, BillingCycle } from './schemas/subscription.schema';
 function createChainable(resolvedValue: any = null) {
   const chain: any = {};
   chain.sort = jest.fn().mockReturnValue(chain);
+  chain.skip = jest.fn().mockReturnValue(chain);
+  chain.limit = jest.fn().mockReturnValue(chain);
   chain.exec = jest.fn().mockResolvedValue(resolvedValue);
   return chain;
 }
@@ -44,6 +46,9 @@ describe('SubscriptionsService', () => {
     mockSubModel.findOneAndDelete = jest
       .fn()
       .mockReturnValue(createChainable(null));
+    mockSubModel.countDocuments = jest
+      .fn()
+      .mockReturnValue(createChainable(0));
     mockSubModel.bulkWrite = jest.fn().mockResolvedValue({ modifiedCount: 0 });
     mockSubModel.updateMany = jest
       .fn()
@@ -371,13 +376,14 @@ describe('SubscriptionsService', () => {
 
   describe('findAll', () => {
     // Each test mocks find twice: first call for advanceOverdueDates (returns []),
-    // second call for the main query.
+    // second call for the main query. Also mocks countDocuments.
     it('should filter by userId', async () => {
       const advanceChain = createChainable([]);
       const chain = createChainable([mockSubscription]);
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       await service.findAll(userId, {});
 
@@ -395,6 +401,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { category: 'Streaming' });
 
@@ -410,6 +417,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { billingCycle: BillingCycle.MONTHLY });
 
@@ -425,6 +433,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { billingCycle: BillingCycle.WEEKLY });
 
@@ -440,6 +449,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, {});
 
@@ -471,6 +481,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(3));
 
       const result = await service.findAll(userId, {
         sortBy: 'cost',
@@ -478,7 +489,7 @@ describe('SubscriptionsService', () => {
       });
 
       // Monthly costs: monthly=30, weekly=10*4.33=43.30, yearly=600/12=50
-      expect(result.map((s: any) => s.name)).toEqual([
+      expect(result.data.map((s: any) => s.name)).toEqual([
         'Monthly',
         'Weekly',
         'Yearly',
@@ -511,6 +522,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(3));
 
       const result = await service.findAll(userId, {
         sortBy: 'cost',
@@ -518,7 +530,7 @@ describe('SubscriptionsService', () => {
       });
 
       // Descending: yearly=50, weekly=43.30, monthly=30
-      expect(result.map((s: any) => s.name)).toEqual([
+      expect(result.data.map((s: any) => s.name)).toEqual([
         'Yearly',
         'Weekly',
         'Monthly',
@@ -531,6 +543,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { sortBy: 'name', sortOrder: 'asc' });
 
@@ -543,6 +556,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, {});
 
@@ -564,12 +578,118 @@ describe('SubscriptionsService', () => {
         .mockReturnValueOnce(advanceChain)
         .mockReturnValueOnce(chain1)
         .mockReturnValueOnce(chain2);
+      mockSubModel.countDocuments
+        .mockReturnValueOnce(createChainable(1))
+        .mockReturnValueOnce(createChainable(1));
 
       await service.findAll(userId, {});
       await service.findAll(userId, {});
 
       // find called 3 times: advance + main query + main query (no advance)
       expect(mockSubModel.find).toHaveBeenCalledTimes(3);
+    });
+
+    it('should return paginated envelope with correct meta', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([mockSubscription]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
+
+      const result = await service.findAll(userId, {});
+
+      expect(result.data).toEqual([mockSubscription]);
+      expect(result.meta).toEqual({
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+        hasNextPage: false,
+      });
+    });
+
+    it('should apply skip and limit for non-cost sort', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(25));
+
+      const result = await service.findAll(userId, { page: 2, limit: 10 });
+
+      expect(chain.skip).toHaveBeenCalledWith(10);
+      expect(chain.limit).toHaveBeenCalledWith(10);
+      expect(result.meta).toEqual({
+        total: 25,
+        page: 2,
+        limit: 10,
+        totalPages: 3,
+        hasNextPage: true,
+      });
+    });
+
+    it('should compute hasNextPage correctly on last page', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(25));
+
+      const result = await service.findAll(userId, { page: 3, limit: 10 });
+
+      expect(result.meta.hasNextPage).toBe(false);
+    });
+
+    it('should return all results when limit=0', async () => {
+      const subs = [mockSubscription, { ...mockSubscription, _id: 'sub2' }];
+      const advanceChain = createChainable([]);
+      const chain = createChainable(subs);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(2));
+
+      const result = await service.findAll(userId, { limit: 0 });
+
+      expect(chain.skip).not.toHaveBeenCalled();
+      expect(chain.limit).not.toHaveBeenCalled();
+      expect(result.data).toHaveLength(2);
+      expect(result.meta).toEqual({
+        total: 2,
+        page: 1,
+        limit: 0,
+        totalPages: 1,
+        hasNextPage: false,
+      });
+    });
+
+    it('should paginate cost-sorted results', async () => {
+      const subs = Array.from({ length: 5 }, (_, i) => ({
+        ...mockSubscription,
+        _id: `sub${i}`,
+        name: `Sub${i}`,
+        cost: (i + 1) * 10,
+        billingCycle: BillingCycle.MONTHLY,
+      }));
+      const advanceChain = createChainable([]);
+      const chain = createChainable(subs);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(5));
+
+      const result = await service.findAll(userId, {
+        sortBy: 'cost',
+        sortOrder: 'asc',
+        page: 2,
+        limit: 2,
+      });
+
+      expect(result.data.map((s: any) => s.name)).toEqual(['Sub2', 'Sub3']);
+      expect(result.meta.total).toBe(5);
     });
   });
 

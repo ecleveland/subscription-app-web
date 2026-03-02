@@ -9,6 +9,7 @@ import {
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
+import { PaginatedSubscriptions } from './interfaces/paginated-subscriptions.interface';
 
 @Injectable()
 export class SubscriptionsService {
@@ -117,7 +118,7 @@ export class SubscriptionsService {
   async findAll(
     userId: string,
     query: QuerySubscriptionDto,
-  ): Promise<SubscriptionDocument[]> {
+  ): Promise<PaginatedSubscriptions> {
     const lastAdvance = this.advanceCooldowns.get(userId) ?? 0;
     const now = Date.now();
     if (now - lastAdvance >= SubscriptionsService.ADVANCE_COOLDOWN_MS) {
@@ -136,12 +137,22 @@ export class SubscriptionsService {
       filter.billingCycle = query.billingCycle;
     }
 
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = limit === 0 ? 0 : (page - 1) * limit;
+
+    const total = await this.subscriptionModel
+      .countDocuments(filter as Record<string, unknown>)
+      .exec();
+
     const sortBy = query.sortBy || 'createdAt';
     const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
 
+    let data: SubscriptionDocument[];
+
     if (sortBy === 'cost') {
       const subscriptions = await this.subscriptionModel.find(filter).exec();
-      return subscriptions.sort((a, b) => {
+      const sorted = subscriptions.sort((a, b) => {
         const aCost = SubscriptionsService.getMonthlyCost(
           a.cost,
           a.billingCycle,
@@ -152,12 +163,24 @@ export class SubscriptionsService {
         );
         return (aCost - bCost) * sortOrder;
       });
+      data = limit === 0 ? sorted : sorted.slice(skip, skip + limit);
+    } else {
+      const q = this.subscriptionModel
+        .find(filter)
+        .sort({ [sortBy]: sortOrder });
+      if (limit !== 0) {
+        q.skip(skip).limit(limit);
+      }
+      data = await q.exec();
     }
 
-    return this.subscriptionModel
-      .find(filter)
-      .sort({ [sortBy]: sortOrder })
-      .exec();
+    const totalPages = limit === 0 ? 1 : Math.ceil(total / limit);
+    const hasNextPage = limit === 0 ? false : page < totalPages;
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages, hasNextPage },
+    };
   }
 
   async findOne(userId: string, id: string): Promise<SubscriptionDocument> {

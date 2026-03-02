@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsEnum, IsIn } from 'class-validator';
+import { IsOptional, IsString, IsEnum, IsIn, IsInt, Min, Max } from 'class-validator';
 import { BillingCycle } from '../schemas/subscription.schema';
 
 export class QuerySubscriptionDto {
@@ -17,4 +17,15 @@ export class QuerySubscriptionDto {
   @IsOptional()
   @IsIn(['asc', 'desc'])
   sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  limit?: number;
 }

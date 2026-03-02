@@ -180,7 +180,7 @@ describe('Admin (e2e)', () => {
         .get('/api/subscriptions')
         .set('Authorization', `Bearer ${targetToken}`)
         .expect(200);
-      expect(subsBefore.body.length).toBe(1);
+      expect(subsBefore.body.data.length).toBe(1);
 
       // Admin deletes the user
       await request(app.getHttpServer())
@@ -191,7 +191,7 @@ describe('Admin (e2e)', () => {
       // Verify subscriptions are gone
       const subsService = app.get(SubscriptionsService);
       const remaining = await subsService.findAll(targetUserId, {});
-      expect(remaining).toHaveLength(0);
+      expect(remaining.data).toHaveLength(0);
     });
   });
 });
