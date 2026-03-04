@@ -26,10 +26,10 @@ export default function DashboardPage() {
   const [sortKey, setSortKey] = useState('nextBillingDate-asc');
   const [page, setPage] = useState(1);
 
-  // Reset page to 1 when sort changes
-  useEffect(() => {
+  function handleSortChange(newSortKey: string) {
+    setSortKey(newSortKey);
     setPage(1);
-  }, [sortKey]);
+  }
 
   // Paginated fetch for the list
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function DashboardPage() {
         <select
           id="sort"
           value={sortKey}
-          onChange={(e) => setSortKey(e.target.value)}
+          onChange={(e) => handleSortChange(e.target.value)}
           className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
         >
           {SORT_OPTIONS.map((opt) => (

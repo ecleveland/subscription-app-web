@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import ThemeToggle from '@/components/ThemeToggle';
 
 export default function Header() {
-  const { isAuthenticated, user, isAdmin, logout } = useAuth();
+  const { isAuthenticated, isAdmin, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   if (!isAuthenticated) return null;
