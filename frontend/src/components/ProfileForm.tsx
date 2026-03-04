@@ -4,6 +4,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import Image from 'next/image';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
+import { showErrorToast, showSuccessToast } from '@/lib/toast';
 
 export default function ProfileForm() {
   const { user, refreshProfile } = useAuth();
@@ -11,7 +12,6 @@ export default function ProfileForm() {
   const [email, setEmail] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -25,7 +25,6 @@ export default function ProfileForm() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    setSuccess('');
     setLoading(true);
 
     try {
@@ -38,9 +37,11 @@ export default function ProfileForm() {
         }),
       });
       await refreshProfile();
-      setSuccess('Profile updated successfully.');
+      showSuccessToast('Profile updated successfully.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update profile');
+      const message = err instanceof Error ? err.message : 'Failed to update profile';
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoading(false);
     }
@@ -129,7 +130,6 @@ export default function ProfileForm() {
           />
         </div>
         {error && <p className="text-red-500 text-sm">{error}</p>}
-        {success && <p className="text-green-600 dark:text-green-400 text-sm">{success}</p>}
         <button
           type="submit"
           disabled={loading}

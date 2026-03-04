@@ -2,19 +2,18 @@
 
 import { useState, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { showErrorToast, showSuccessToast } from '@/lib/toast';
 
 export default function ChangePasswordForm() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    setSuccess('');
 
     if (newPassword !== confirmPassword) {
       setError('New passwords do not match.');
@@ -33,14 +32,14 @@ export default function ChangePasswordForm() {
         method: 'POST',
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      setSuccess('Password changed successfully.');
+      showSuccessToast('Password changed successfully.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to change password',
-      );
+      const message = err instanceof Error ? err.message : 'Failed to change password';
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoading(false);
     }
@@ -106,11 +105,6 @@ export default function ChangePasswordForm() {
           />
         </div>
         {error && <p className="text-red-500 text-sm">{error}</p>}
-        {success && (
-          <p className="text-green-600 dark:text-green-400 text-sm">
-            {success}
-          </p>
-        )}
         <button
           type="submit"
           disabled={loading}

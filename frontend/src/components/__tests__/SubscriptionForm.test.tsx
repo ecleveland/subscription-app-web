@@ -7,6 +7,11 @@ vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
 }));
 
+vi.mock('@/lib/toast', () => ({
+  showErrorToast: vi.fn(),
+  showSuccessToast: vi.fn(),
+}));
+
 const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
@@ -20,6 +25,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import { apiFetch } from '@/lib/api';
+import { showErrorToast, showSuccessToast } from '@/lib/toast';
 
 const existingSub: Subscription = {
   _id: 'sub-1',
@@ -84,6 +90,7 @@ describe('SubscriptionForm', () => {
 
       await waitFor(() => {
         expect(mockPush).toHaveBeenCalledWith('/');
+        expect(showSuccessToast).toHaveBeenCalledWith('Subscription created');
       });
     });
 
@@ -101,6 +108,7 @@ describe('SubscriptionForm', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Server error')).toBeInTheDocument();
+        expect(showErrorToast).toHaveBeenCalledWith('Server error');
       });
     });
   });

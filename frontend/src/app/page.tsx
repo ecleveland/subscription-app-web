@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { showErrorToast } from '@/lib/toast';
 import { Subscription, PaginatedResponse, PaginationMeta } from '@/lib/types';
 import DashboardSummary from '@/components/DashboardSummary';
 import SubscriptionList from '@/components/SubscriptionList';
@@ -44,7 +45,9 @@ export default function DashboardPage() {
           setMeta(res.meta);
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        showErrorToast(err instanceof Error ? err.message : 'Failed to load subscriptions');
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -61,7 +64,9 @@ export default function DashboardPage() {
       .then((res) => {
         if (!cancelled) setAllSubscriptions(res.data);
       })
-      .catch(() => {});
+      .catch((err) => {
+        showErrorToast(err instanceof Error ? err.message : 'Failed to load subscriptions');
+      });
     return () => {
       cancelled = true;
     };

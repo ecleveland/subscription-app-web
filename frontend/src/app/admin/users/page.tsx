@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
+import { showErrorToast } from '@/lib/toast';
 import type { User } from '@/lib/types';
 import UserTable from '@/components/admin/UserTable';
 
@@ -26,7 +27,9 @@ export default function AdminUsersPage() {
       .then((data) => {
         if (!cancelled) setUsers(data);
       })
-      .catch(() => {})
+      .catch((err) => {
+        showErrorToast(err instanceof Error ? err.message : 'Failed to load users');
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });

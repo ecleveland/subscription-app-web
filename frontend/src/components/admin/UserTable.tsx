@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
+import { showErrorToast, showSuccessToast } from '@/lib/toast';
 
 interface UserTableProps {
   users: User[];
@@ -29,8 +30,11 @@ export default function UserTable({ users, onUserDeleted }: UserTableProps) {
     try {
       await apiFetch(`/admin/users/${user._id}`, { method: 'DELETE' });
       onUserDeleted(user._id);
+      showSuccessToast(`User "${user.username}" deleted`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete user');
+      const message = err instanceof Error ? err.message : 'Failed to delete user';
+      setError(message);
+      showErrorToast(message);
     } finally {
       setDeleting(null);
     }

@@ -4,6 +4,7 @@ import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { Subscription, CATEGORIES } from '@/lib/types';
+import { showErrorToast, showSuccessToast } from '@/lib/toast';
 
 interface Props {
   subscription?: Subscription;
@@ -50,15 +51,19 @@ export default function SubscriptionForm({ subscription }: Props) {
           method: 'PATCH',
           body: JSON.stringify(body),
         });
+        showSuccessToast('Subscription updated');
       } else {
         await apiFetch('/subscriptions', {
           method: 'POST',
           body: JSON.stringify(body),
         });
+        showSuccessToast('Subscription created');
       }
       router.push('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      const message = err instanceof Error ? err.message : 'Something went wrong';
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoading(false);
     }
@@ -71,9 +76,12 @@ export default function SubscriptionForm({ subscription }: Props) {
       await apiFetch(`/subscriptions/${subscription!._id}`, {
         method: 'DELETE',
       });
+      showSuccessToast('Subscription deleted');
       router.push('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete');
+      const message = err instanceof Error ? err.message : 'Failed to delete';
+      setError(message);
+      showErrorToast(message);
     }
   }
 

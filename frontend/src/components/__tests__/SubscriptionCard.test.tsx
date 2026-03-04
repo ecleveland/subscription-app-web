@@ -7,7 +7,13 @@ vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
 }));
 
+vi.mock('@/lib/toast', () => ({
+  showErrorToast: vi.fn(),
+  showSuccessToast: vi.fn(),
+}));
+
 import { apiFetch } from '@/lib/api';
+import { showErrorToast } from '@/lib/toast';
 
 function makeSub(overrides: Partial<Subscription> = {}): Subscription {
   return {
@@ -143,6 +149,7 @@ describe('SubscriptionCard', () => {
     // After failure, the Inactive badge should NOT appear (reverted)
     await waitFor(() => {
       expect(screen.queryByText('Inactive')).not.toBeInTheDocument();
+      expect(showErrorToast).toHaveBeenCalledWith('Network error');
     });
   });
 });
