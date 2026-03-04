@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { showErrorToast, showSuccessToast } from '@/lib/toast';
 
 export default function AdminUserForm() {
   const router = useRouter();
@@ -36,9 +37,12 @@ export default function AdminUserForm() {
           role,
         }),
       });
+      showSuccessToast('User created');
       router.push('/admin/users');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create user');
+      const message = err instanceof Error ? err.message : 'Failed to create user';
+      setError(message);
+      showErrorToast(message);
     } finally {
       setLoading(false);
     }

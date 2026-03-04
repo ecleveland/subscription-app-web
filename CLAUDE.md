@@ -83,12 +83,22 @@ Project architecture decisions and development requirements are documented in `.
 
 ## Linear Workflow
 
-This project tracks work in Linear (workspace: **Vega Apps**, project: **Subscription App**). When implementing a plan tied to a Linear issue:
+This project tracks work in Linear (workspace: **Vega Apps**, project: **Subscription App**).
 
-- **Commit messages**: Include the issue identifier (e.g., `VEG-48`) in the commit message so Linear auto-links the commit. Example: `VEG-48: Add security headers via Helmet middleware`
-- **PR titles/descriptions**: Include the identifier in the PR title or body. Use `Closes VEG-48` or `Fixes VEG-48` in the PR description to auto-transition the issue when the PR merges.
-- **After push**: If the plan references a Linear issue, update its status to **Done** using the Linear MCP tools once the work is committed and pushed.
-- **Branch naming**: When creating feature branches, use the Linear-suggested format: `veg-48-add-security-headers-via-helmet`
+### Starting a ticket
+
+When the user asks to start or work on a Linear ticket (e.g., "let's start VEG-50"):
+
+1. **Fetch the issue** — Use Linear MCP tools to read the issue details (title, description, acceptance criteria)
+2. **Create a feature branch** — `git checkout -b veg-{number}-{slug}` from `master` (e.g., `veg-50-add-dark-mode-toggle`)
+3. **Enter plan mode** — Explore the codebase, design the implementation, and get user approval before writing code
+4. **Implement** — Write code and tests per the architecture docs in `.claude/architecture/`
+5. **Verify** — Run the relevant test suites and linter before considering work complete
+6. **Commit** — Stage changes and commit with the issue identifier prefix: `VEG-{number}: {description}`
+7. **Push & create PR** — Push the branch and create a PR via `gh pr create` with:
+   - Title prefixed with the issue identifier (e.g., `VEG-50: Add dark mode toggle`)
+   - Body containing `Closes VEG-{number}` to auto-transition the issue to **Done** when the PR merges
+8. **Update Linear status** — Set the issue to **In Progress** using Linear MCP tools. The issue will auto-transition to **Done** when the PR merges (via the `Closes` keyword — no manual update needed at that point).
 
 ## Environment Variables
 

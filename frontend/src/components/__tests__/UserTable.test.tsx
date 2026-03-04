@@ -7,8 +7,14 @@ vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
 }));
 
+vi.mock('@/lib/toast', () => ({
+  showErrorToast: vi.fn(),
+  showSuccessToast: vi.fn(),
+}));
+
 const { apiFetch } = await import('@/lib/api');
 const mockApiFetch = apiFetch as ReturnType<typeof vi.fn>;
+const { showSuccessToast } = await import('@/lib/toast');
 
 const mockUsers: User[] = [
   {
@@ -71,6 +77,7 @@ describe('UserTable', () => {
     await waitFor(() => {
       expect(mockApiFetch).toHaveBeenCalledWith('/admin/users/1', { method: 'DELETE' });
       expect(mockOnUserDeleted).toHaveBeenCalledWith('1');
+      expect(showSuccessToast).toHaveBeenCalledWith('User "alice" deleted');
     });
   });
 

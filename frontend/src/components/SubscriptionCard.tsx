@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Subscription } from '@/lib/types';
 import { apiFetch } from '@/lib/api';
 import { formatCurrency, formatDate, daysUntil, getMonthlyCost } from '@/lib/utils';
+import { showErrorToast } from '@/lib/toast';
 import CategoryBadge from './CategoryBadge';
 
 export default function SubscriptionCard({
@@ -34,8 +35,9 @@ export default function SubscriptionCard({
         body: JSON.stringify({ isActive: newValue }),
       });
       onToggleActive?.(subscription._id, newValue);
-    } catch {
+    } catch (err) {
       setIsActive(!newValue);
+      showErrorToast(err instanceof Error ? err.message : 'Failed to update subscription');
     } finally {
       setToggling(false);
     }
