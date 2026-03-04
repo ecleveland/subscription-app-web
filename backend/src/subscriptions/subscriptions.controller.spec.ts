@@ -28,7 +28,13 @@ describe('SubscriptionsController', () => {
       create: jest.fn().mockResolvedValue(mockSubscription),
       findAll: jest.fn().mockResolvedValue({
         data: [mockSubscription],
-        meta: { total: 1, page: 1, limit: 20, totalPages: 1, hasNextPage: false },
+        meta: {
+          total: 1,
+          page: 1,
+          limit: 20,
+          totalPages: 1,
+          hasNextPage: false,
+        },
       }),
       findOne: jest.fn().mockResolvedValue(mockSubscription),
       update: jest

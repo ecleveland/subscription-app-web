@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { UsersService } from './users/users.service';
@@ -38,6 +39,15 @@ async function bootstrap() {
     origin: configService.get<string>('cors.origin'),
     credentials: true,
   });
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Subscription App API')
+    .setDescription('REST API for managing subscriptions')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document);
 
   // Seed admin user from env vars on first startup (legacy migration)
   const usersService = app.get(UsersService);
