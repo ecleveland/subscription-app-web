@@ -46,9 +46,7 @@ describe('SubscriptionsService', () => {
     mockSubModel.findOneAndDelete = jest
       .fn()
       .mockReturnValue(createChainable(null));
-    mockSubModel.countDocuments = jest
-      .fn()
-      .mockReturnValue(createChainable(0));
+    mockSubModel.countDocuments = jest.fn().mockReturnValue(createChainable(0));
     mockSubModel.bulkWrite = jest.fn().mockResolvedValue({ modifiedCount: 0 });
     mockSubModel.updateMany = jest
       .fn()

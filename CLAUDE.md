@@ -100,6 +100,13 @@ When the user asks to start or work on a Linear ticket (e.g., "let's start VEG-5
    - Body containing `Closes VEG-{number}` to auto-transition the issue to **Done** when the PR merges
 8. **Update Linear status** — Set the issue to **In Progress** using Linear MCP tools. The issue will auto-transition to **Done** when the PR merges (via the `Closes` keyword — no manual update needed at that point).
 
+### Plan requirements
+
+**Every plan for a Linear ticket MUST include steps 5–8 above** (verify, commit, push/PR, update Linear). These are not optional post-implementation cleanup — they are required deliverables of the plan. When writing a plan in plan mode, explicitly include:
+- A **Verification** step that runs lint and the relevant test suites
+- A **Commit & PR** step that commits all changes, pushes the branch, and creates a PR with `Closes VEG-{number}` in the body
+- A **Linear status update** step that sets the issue to **In Progress**
+
 ## Environment Variables
 
 Backend (`.env` in `/backend`):

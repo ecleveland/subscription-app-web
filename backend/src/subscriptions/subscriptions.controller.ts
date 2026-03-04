@@ -12,6 +12,12 @@ import {
   HttpStatus,
   Req,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
@@ -19,12 +25,18 @@ import { QuerySubscriptionDto } from './dto/query-subscription.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 
+@ApiTags('Subscriptions')
+@ApiBearerAuth()
 @Controller('subscriptions')
 @UseGuards(JwtAuthGuard)
 export class SubscriptionsController {
   constructor(private readonly subscriptionsService: SubscriptionsService) {}
 
   @Post()
+  @ApiOperation({ summary: 'Create a subscription' })
+  @ApiResponse({ status: 201, description: 'Subscription created' })
+  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   create(
     @Req() req: AuthenticatedRequest,
     @Body() createDto: CreateSubscriptionDto,
@@ -33,6 +45,9 @@ export class SubscriptionsController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'List subscriptions for the current user' })
+  @ApiResponse({ status: 200, description: 'Paginated list of subscriptions' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   findAll(
     @Req() req: AuthenticatedRequest,
     @Query() query: QuerySubscriptionDto,
@@ -41,11 +56,20 @@ export class SubscriptionsController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get a subscription by ID' })
+  @ApiResponse({ status: 200, description: 'Subscription found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Subscription not found' })
   findOne(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.subscriptionsService.findOne(req.user.userId, id);
   }
 
   @Patch(':id')
+  @ApiOperation({ summary: 'Update a subscription' })
+  @ApiResponse({ status: 200, description: 'Subscription updated' })
+  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Subscription not found' })
   update(
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
@@ -56,6 +80,10 @@ export class SubscriptionsController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a subscription' })
+  @ApiResponse({ status: 204, description: 'Subscription deleted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Subscription not found' })
   remove(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.subscriptionsService.remove(req.user.userId, id);
   }

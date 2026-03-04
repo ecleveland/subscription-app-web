@@ -205,7 +205,9 @@ describe('Subscriptions (e2e)', () => {
         .expect(200);
 
       expect(res.body.data).toHaveLength(2);
-      expect(res.body.data.every((s: any) => s.category === 'Software')).toBe(true);
+      expect(res.body.data.every((s: any) => s.category === 'Software')).toBe(
+        true,
+      );
     });
 
     it('should filter by billingCycle', async () => {

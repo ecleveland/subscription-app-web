@@ -141,9 +141,7 @@ export class SubscriptionsService {
     const limit = query.limit ?? 20;
     const skip = limit === 0 ? 0 : (page - 1) * limit;
 
-    const total = await this.subscriptionModel
-      .countDocuments(filter as Record<string, unknown>)
-      .exec();
+    const total = await this.subscriptionModel.countDocuments(filter).exec();
 
     const sortBy = query.sortBy || 'createdAt';
     const sortOrder = query.sortOrder === 'asc' ? 1 : -1;

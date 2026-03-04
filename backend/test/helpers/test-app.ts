@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from '../../src/app.module';
 import { SubscriptionsService } from '../../src/subscriptions/subscriptions.service';
@@ -60,6 +61,15 @@ export async function createTestApp(
       },
     }),
   );
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Subscription App API')
+    .setDescription('REST API for managing subscriptions')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document);
 
   await app.init();
   mongodInstances.set(app, mongod);
