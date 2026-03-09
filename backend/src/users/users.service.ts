@@ -72,6 +72,12 @@ export class UsersService {
     return this.userModel.findOne({ username: username.toLowerCase() }).exec();
   }
 
+  async findByEmail(email: string): Promise<UserDocument | null> {
+    return this.userModel
+      .findOne({ email: email.toLowerCase() } as Record<string, unknown>)
+      .exec();
+  }
+
   async update(
     id: string,
     updateDto: UpdateUserDto | AdminUpdateUserDto,

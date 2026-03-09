@@ -13,6 +13,9 @@ import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { AccessTokenResponseDto } from './dto/access-token-response.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { MessageResponseDto } from './dto/message-response.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -54,5 +57,41 @@ export class AuthController {
       email: registerDto.email,
     });
     return this.authService.login(registerDto.username, registerDto.password);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @ApiOperation({ summary: 'Request a password reset email' })
+  @ApiResponse({
+    status: 200,
+    description: 'Always returns success to prevent email enumeration',
+    type: MessageResponseDto,
+  })
+  async forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+  ): Promise<MessageResponseDto> {
+    await this.authService.forgotPassword(dto.email);
+    return {
+      message:
+        'If an account with that email exists, a password reset link has been sent.',
+    };
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Reset password using a token from the email' })
+  @ApiResponse({
+    status: 200,
+    description: 'Password successfully reset',
+    type: MessageResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+  ): Promise<MessageResponseDto> {
+    await this.authService.resetPassword(dto.token, dto.password);
+    return { message: 'Your password has been successfully reset.' };
   }
 }
