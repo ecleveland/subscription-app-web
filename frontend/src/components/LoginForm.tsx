@@ -57,6 +57,14 @@ export default function LoginForm() {
           className={inputClasses}
         />
       </div>
+      <div className="text-right">
+        <Link
+          href="/forgot-password"
+          className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+        >
+          Forgot password?
+        </Link>
+      </div>
       {error && (
         <p className="text-red-500 text-sm">{error}</p>
       )}

@@ -41,6 +41,13 @@ describe('LoginForm', () => {
     );
   });
 
+  it('should contain "Forgot password?" link to /forgot-password', () => {
+    render(<LoginForm />);
+    expect(
+      screen.getByRole('link', { name: 'Forgot password?' }),
+    ).toHaveAttribute('href', '/forgot-password');
+  });
+
   it('should call login with username and password on submit', async () => {
     const user = userEvent.setup();
     mockLogin.mockResolvedValue(undefined);

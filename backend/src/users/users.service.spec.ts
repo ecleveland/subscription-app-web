@@ -222,6 +222,27 @@ describe('UsersService', () => {
     });
   });
 
+  describe('findByEmail', () => {
+    it('should find user by lowercased email', async () => {
+      mockUserModel.findOne.mockReturnValue(createChainable(mockUser));
+
+      const result = await service.findByEmail('Test@Example.com');
+
+      expect(mockUserModel.findOne).toHaveBeenCalledWith({
+        email: 'test@example.com',
+      });
+      expect(result).toEqual(mockUser);
+    });
+
+    it('should return null when user is not found', async () => {
+      mockUserModel.findOne.mockReturnValue(createChainable(null));
+
+      const result = await service.findByEmail('nobody@example.com');
+
+      expect(result).toBeNull();
+    });
+  });
+
   describe('update', () => {
     it('should update and return the user excluding passwordHash', async () => {
       const updatedUser = { ...mockUser, displayName: 'Updated' };
