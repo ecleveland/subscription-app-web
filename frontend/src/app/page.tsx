@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { showErrorToast } from '@/lib/toast';
 import { Subscription, PaginatedResponse, PaginationMeta } from '@/lib/types';
 import DashboardSummary from '@/components/DashboardSummary';
+import SearchInput from '@/components/SearchInput';
 import SubscriptionList from '@/components/SubscriptionList';
 import Pagination from '@/components/Pagination';
+import { useDebounce } from '@/hooks/useDebounce';
 
 const SORT_OPTIONS = [
   { key: 'nextBillingDate-asc', label: 'Next billing date' },
@@ -25,9 +27,16 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState('nextBillingDate-asc');
   const [page, setPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 300);
 
   function handleSortChange(newSortKey: string) {
     setSortKey(newSortKey);
+    setPage(1);
+  }
+
+  function handleSearchChange(value: string) {
+    setSearchTerm(value);
     setPage(1);
   }
 
@@ -72,14 +81,6 @@ export default function DashboardPage() {
     };
   }, [isAuthenticated]);
 
-  if (loading) {
-    return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <p className="text-gray-500 dark:text-gray-400">Loading...</p>
-      </div>
-    );
-  }
-
   function handleToggleActive(id: string, isActive: boolean) {
     setSubscriptions((prev) =>
       prev.map((sub) => (sub._id === id ? { ...sub, isActive } : sub)),
@@ -89,9 +90,69 @@ export default function DashboardPage() {
     );
   }
 
+  const isSearching = debouncedSearch.trim().length > 0;
+
+  const { displaySubscriptions, displayMeta } = useMemo(() => {
+    if (!isSearching) {
+      return { displaySubscriptions: subscriptions, displayMeta: meta };
+    }
+
+    const query = debouncedSearch.trim().toLowerCase();
+    const filtered = allSubscriptions.filter(
+      (sub) =>
+        sub.name.toLowerCase().includes(query) ||
+        (sub.notes && sub.notes.toLowerCase().includes(query)),
+    );
+
+    const [sortBy, sortOrder] = sortKey.split('-');
+    const sorted = [...filtered].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'name':
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case 'cost':
+          cmp = a.cost - b.cost;
+          break;
+        case 'nextBillingDate':
+          cmp = new Date(a.nextBillingDate).getTime() - new Date(b.nextBillingDate).getTime();
+          break;
+        case 'createdAt':
+          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          break;
+      }
+      return sortOrder === 'desc' ? -cmp : cmp;
+    });
+
+    const limit = 20;
+    const start = (page - 1) * limit;
+    const paged = sorted.slice(start, start + limit);
+    const totalPages = Math.max(1, Math.ceil(sorted.length / limit));
+
+    return {
+      displaySubscriptions: paged,
+      displayMeta: {
+        total: sorted.length,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+      } as PaginationMeta,
+    };
+  }, [isSearching, debouncedSearch, allSubscriptions, subscriptions, meta, sortKey, page]);
+
+  if (loading) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 py-8">
+        <p className="text-gray-500 dark:text-gray-400">Loading...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
       <DashboardSummary subscriptions={allSubscriptions} />
+      <SearchInput value={searchTerm} onChange={handleSearchChange} />
       <div className="flex items-center gap-2 mb-4">
         <label htmlFor="sort" className="text-sm text-gray-500 dark:text-gray-400">Sort by</label>
         <select
@@ -105,9 +166,15 @@ export default function DashboardPage() {
           ))}
         </select>
       </div>
-      <SubscriptionList subscriptions={subscriptions} onToggleActive={handleToggleActive} />
-      {meta && meta.totalPages > 1 && (
-        <Pagination page={page} totalPages={meta.totalPages} onPageChange={setPage} />
+      {isSearching && displaySubscriptions.length === 0 ? (
+        <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+          No subscriptions match &ldquo;{debouncedSearch.trim()}&rdquo;
+        </p>
+      ) : (
+        <SubscriptionList subscriptions={displaySubscriptions} onToggleActive={handleToggleActive} />
+      )}
+      {displayMeta && displayMeta.totalPages > 1 && (
+        <Pagination page={page} totalPages={displayMeta.totalPages} onPageChange={setPage} />
       )}
     </div>
   );
