@@ -65,7 +65,39 @@ describe('apiFetch', () => {
     );
   });
 
-  it('should clear storage and throw Unauthorized on 401', async () => {
+  it('should attempt refresh on 401 when refresh_token exists, then retry original request', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+    window.localStorage.setItem('refresh_token', 'valid-refresh');
+
+    mockFetch
+      // Original request → 401
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      // Refresh call → success
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            access_token: 'new-jwt',
+            refresh_token: 'new-refresh',
+          }),
+      })
+      // Retry original request → success
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: 'ok' }),
+      });
+
+    const result = await apiFetch('/subscriptions');
+
+    expect(result).toEqual({ data: 'ok' });
+    expect(window.localStorage.getItem('token')).toBe('new-jwt');
+    expect(window.localStorage.getItem('refresh_token')).toBe('new-refresh');
+    // 3 calls: original, refresh, retry
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('should clear state and throw on 401 when no refresh_token exists', async () => {
     window.localStorage.setItem('token', 'expired-jwt');
     window.localStorage.setItem('user', '{}');
     mockFetch.mockResolvedValue({
@@ -77,7 +109,67 @@ describe('apiFetch', () => {
 
     expect(window.localStorage.getItem('token')).toBeNull();
     expect(window.localStorage.getItem('user')).toBeNull();
-    // jsdom doesn't support navigation, but the code sets window.location.href = '/login'
+  });
+
+  it('should clear state when refresh fails', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+    window.localStorage.setItem('refresh_token', 'bad-refresh');
+    window.localStorage.setItem('user', '{}');
+
+    mockFetch
+      // Original request → 401
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      // Refresh call → failure
+      .mockResolvedValueOnce({ ok: false, status: 401 });
+
+    await expect(apiFetch('/subscriptions')).rejects.toThrow('Unauthorized');
+
+    expect(window.localStorage.getItem('token')).toBeNull();
+    expect(window.localStorage.getItem('refresh_token')).toBeNull();
+  });
+
+  it('should only call refresh once for concurrent 401s', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+    window.localStorage.setItem('refresh_token', 'valid-refresh');
+
+    let refreshCallCount = 0;
+
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        refreshCallCount++;
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              access_token: 'new-jwt',
+              refresh_token: 'new-refresh',
+            }),
+        });
+      }
+      // First calls return 401, retry calls return success
+      if (
+        mockFetch.mock.calls.filter(
+          (c: string[]) => c[0] === url && !c[0].includes('/auth/refresh'),
+        ).length <= 1
+      ) {
+        return Promise.resolve({ ok: false, status: 401 });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ data: 'ok' }),
+      });
+    });
+
+    const [result1, result2] = await Promise.all([
+      apiFetch('/subscriptions'),
+      apiFetch('/users/me'),
+    ]);
+
+    expect(result1).toEqual({ data: 'ok' });
+    expect(result2).toEqual({ data: 'ok' });
+    // Refresh should have been called only once
+    expect(refreshCallCount).toBe(1);
   });
 
   it('should throw with message from response body on non-ok', async () => {

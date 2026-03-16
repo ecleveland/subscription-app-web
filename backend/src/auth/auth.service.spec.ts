@@ -9,6 +9,7 @@ import { Logger } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { PasswordReset } from './schemas/password-reset.schema';
+import { RefreshToken } from './schemas/refresh-token.schema';
 import { MAIL_SERVICE } from '../mail/mail.service';
 
 jest.mock('bcryptjs');
@@ -16,11 +17,12 @@ jest.mock('bcryptjs');
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: jest.Mocked<
-    Pick<UsersService, 'findByUsername' | 'findByEmail'>
+    Pick<UsersService, 'findByUsername' | 'findByEmail' | 'findOne'>
   >;
   let jwtService: jest.Mocked<Pick<JwtService, 'sign'>>;
   let mailService: { sendPasswordResetEmail: jest.Mock };
   let mockPasswordResetModel: any;
+  let mockRefreshTokenModel: any;
 
   const mockUser = {
     _id: { toString: () => '507f1f77bcf86cd799439011' },
@@ -35,6 +37,7 @@ describe('AuthService', () => {
     usersService = {
       findByUsername: jest.fn(),
       findByEmail: jest.fn(),
+      findOne: jest.fn(),
     };
     jwtService = {
       sign: jest.fn().mockReturnValue('signed-jwt-token'),
@@ -49,6 +52,20 @@ describe('AuthService', () => {
     }));
     mockPasswordResetModel.findOne = jest.fn().mockReturnValue({
       exec: jest.fn().mockResolvedValue(null),
+    });
+
+    const refreshSaveMock = jest.fn().mockResolvedValue(undefined);
+    mockRefreshTokenModel = jest.fn().mockImplementation(() => ({
+      save: refreshSaveMock,
+    }));
+    mockRefreshTokenModel.findOne = jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue(null),
+    });
+    mockRefreshTokenModel.findOneAndUpdate = jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue(null),
+    });
+    mockRefreshTokenModel.updateMany = jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
     });
 
     const module: TestingModule = await Test.createTestingModule({
@@ -66,6 +83,10 @@ describe('AuthService', () => {
           provide: getModelToken(PasswordReset.name),
           useValue: mockPasswordResetModel,
         },
+        {
+          provide: getModelToken(RefreshToken.name),
+          useValue: mockRefreshTokenModel,
+        },
         { provide: MAIL_SERVICE, useValue: mailService },
       ],
     }).compile();
@@ -78,14 +99,16 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
-    it('should return an access token for valid credentials', async () => {
+    it('should return access_token and refresh_token for valid credentials', async () => {
       usersService.findByUsername.mockResolvedValue(mockUser as any);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       const result = await service.login('testuser', 'password');
 
-      expect(result).toEqual({ access_token: 'signed-jwt-token' });
+      expect(result.access_token).toBe('signed-jwt-token');
+      expect(result.refresh_token).toBeDefined();
+      expect(typeof result.refresh_token).toBe('string');
       expect(usersService.findByUsername).toHaveBeenCalledWith('testuser');
       expect(bcrypt.compare).toHaveBeenCalledWith(
         'password',
@@ -108,6 +131,21 @@ describe('AuthService', () => {
         username: 'testuser',
         role: 'user',
       });
+    });
+
+    it('should store refresh token hash in database', async () => {
+      usersService.findByUsername.mockResolvedValue(mockUser as any);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.login('testuser', 'password');
+
+      expect(mockRefreshTokenModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: expect.anything(),
+          tokenHash: expect.any(String),
+          expiresAt: expect.any(Date),
+        }),
+      );
     });
 
     it('should throw UnauthorizedException and warn when user is not found', async () => {
@@ -136,6 +174,88 @@ describe('AuthService', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         expect.objectContaining({ username: 'testuser' }),
         'Login failed: invalid password',
+      );
+    });
+  });
+
+  describe('refresh', () => {
+    it('should revoke old token and return new pair for valid refresh token', async () => {
+      const plainToken = crypto.randomBytes(32).toString('hex');
+      const tokenDoc = {
+        userId: { toString: () => '507f1f77bcf86cd799439011' },
+        tokenHash: crypto.createHash('sha256').update(plainToken).digest('hex'),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockRefreshTokenModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(tokenDoc),
+      });
+      usersService.findOne.mockResolvedValue(mockUser as any);
+
+      const result = await service.refresh(plainToken);
+
+      expect(result.access_token).toBe('signed-jwt-token');
+      expect(result.refresh_token).toBeDefined();
+      expect(tokenDoc.revokedAt).toBeInstanceOf(Date);
+      expect(tokenDoc.save).toHaveBeenCalled();
+    });
+
+    it('should throw UnauthorizedException for expired/revoked token', async () => {
+      mockRefreshTokenModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
+      });
+
+      await expect(service.refresh('invalid-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should throw UnauthorizedException when user no longer exists', async () => {
+      const plainToken = crypto.randomBytes(32).toString('hex');
+      const tokenDoc = {
+        userId: { toString: () => '507f1f77bcf86cd799439011' },
+        tokenHash: crypto.createHash('sha256').update(plainToken).digest('hex'),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        save: jest.fn(),
+      };
+      mockRefreshTokenModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(tokenDoc),
+      });
+      usersService.findOne.mockRejectedValue(new Error('Not found'));
+
+      await expect(service.refresh(plainToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe('logout', () => {
+    it('should revoke the specified refresh token', async () => {
+      const plainToken = crypto.randomBytes(32).toString('hex');
+
+      await service.logout('507f1f77bcf86cd799439011', plainToken);
+
+      expect(mockRefreshTokenModel.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: expect.anything(),
+          tokenHash: expect.any(String),
+          revokedAt: { $exists: false },
+        }),
+        expect.objectContaining({ revokedAt: expect.any(Date) }),
+      );
+    });
+  });
+
+  describe('revokeAllRefreshTokens', () => {
+    it('should call updateMany with userId filter', async () => {
+      await service.revokeAllRefreshTokens('507f1f77bcf86cd799439011');
+
+      expect(mockRefreshTokenModel.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: expect.anything(),
+          revokedAt: { $exists: false },
+        }),
+        expect.objectContaining({ revokedAt: expect.any(Date) }),
       );
     });
   });
@@ -179,7 +299,7 @@ describe('AuthService', () => {
       .update(plainToken)
       .digest('hex');
 
-    it('should update password and mark token as used for valid token', async () => {
+    it('should update password, mark token as used, and revoke refresh tokens for valid token', async () => {
       const resetDoc = {
         email: 'test@example.com',
         tokenHash,
@@ -199,6 +319,7 @@ describe('AuthService', () => {
       expect(mockUser.passwordHash).toBe('new-hashed-password');
       expect(resetDoc.usedAt).toBeInstanceOf(Date);
       expect(resetDoc.save).toHaveBeenCalled();
+      expect(mockRefreshTokenModel.updateMany).toHaveBeenCalled();
     });
 
     it('should throw BadRequestException for invalid token', async () => {

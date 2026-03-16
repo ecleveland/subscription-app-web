@@ -6,9 +6,13 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { User, UserDocument, UserRole } from './schemas/user.schema';
+import {
+  RefreshToken,
+  RefreshTokenDocument,
+} from '../auth/schemas/refresh-token.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
@@ -20,6 +24,8 @@ export class UsersService {
 
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(RefreshToken.name)
+    private refreshTokenModel: Model<RefreshTokenDocument>,
     private readonly subscriptionsService: SubscriptionsService,
   ) {}
 
@@ -112,6 +118,17 @@ export class UsersService {
     }
     user.passwordHash = await bcrypt.hash(newPassword, 10);
     await user.save();
+
+    await this.refreshTokenModel
+      .updateMany(
+        {
+          userId: new Types.ObjectId(id),
+          revokedAt: { $exists: false },
+        } as Record<string, unknown>,
+        { revokedAt: new Date() },
+      )
+      .exec();
+
     this.logger.log({ userId: id }, 'Password changed');
   }
 

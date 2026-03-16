@@ -12,6 +12,10 @@ import {
   PasswordReset,
   PasswordResetSchema,
 } from './schemas/password-reset.schema';
+import {
+  RefreshToken,
+  RefreshTokenSchema,
+} from './schemas/refresh-token.schema';
 
 @Module({
   imports: [
@@ -22,13 +26,14 @@ import {
       useFactory: (configService: ConfigService): JwtModuleOptions => ({
         secret: configService.get<string>('auth.jwtSecret'),
         signOptions: {
-          expiresIn: configService.get('auth.jwtExpiresIn') ?? '24h',
+          expiresIn: configService.get('auth.jwtExpiresIn') ?? '15m',
         },
       }),
       inject: [ConfigService],
     }),
     MongooseModule.forFeature([
       { name: PasswordReset.name, schema: PasswordResetSchema },
+      { name: RefreshToken.name, schema: RefreshTokenSchema },
     ]),
   ],
   controllers: [AuthController],

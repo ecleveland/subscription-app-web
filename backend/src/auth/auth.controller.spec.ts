@@ -7,12 +7,22 @@ import { UsersService } from '../users/users.service';
 
 describe('AuthController', () => {
   let controller: AuthController;
-  let authService: jest.Mocked<Pick<AuthService, 'login'>>;
+  let authService: jest.Mocked<
+    Pick<AuthService, 'login' | 'refresh' | 'logout'>
+  >;
   let usersService: jest.Mocked<Pick<UsersService, 'create'>>;
 
   beforeEach(async () => {
     authService = {
-      login: jest.fn().mockResolvedValue({ access_token: 'jwt-token' }),
+      login: jest.fn().mockResolvedValue({
+        access_token: 'jwt-token',
+        refresh_token: 'refresh-token',
+      }),
+      refresh: jest.fn().mockResolvedValue({
+        access_token: 'new-jwt-token',
+        refresh_token: 'new-refresh-token',
+      }),
+      logout: jest.fn().mockResolvedValue(undefined),
     };
     usersService = {
       create: jest
@@ -46,7 +56,10 @@ describe('AuthController', () => {
       });
 
       expect(authService.login).toHaveBeenCalledWith('testuser', 'password');
-      expect(result).toEqual({ access_token: 'jwt-token' });
+      expect(result).toEqual({
+        access_token: 'jwt-token',
+        refresh_token: 'refresh-token',
+      });
     });
   });
 
@@ -67,7 +80,10 @@ describe('AuthController', () => {
         email: 'new@example.com',
       });
       expect(authService.login).toHaveBeenCalledWith('newuser', 'password123');
-      expect(result).toEqual({ access_token: 'jwt-token' });
+      expect(result).toEqual({
+        access_token: 'jwt-token',
+        refresh_token: 'refresh-token',
+      });
       expect(logSpy).toHaveBeenCalledWith(
         { username: 'newuser' },
         'User registered',
@@ -86,6 +102,35 @@ describe('AuthController', () => {
         displayName: undefined,
         email: undefined,
       });
+    });
+  });
+
+  describe('refresh', () => {
+    it('should delegate to authService.refresh', async () => {
+      const result = await controller.refresh({
+        refresh_token: 'some-refresh-token',
+      });
+
+      expect(authService.refresh).toHaveBeenCalledWith('some-refresh-token');
+      expect(result).toEqual({
+        access_token: 'new-jwt-token',
+        refresh_token: 'new-refresh-token',
+      });
+    });
+  });
+
+  describe('logout', () => {
+    it('should delegate to authService.logout with userId and refresh token', async () => {
+      const req = {
+        user: { userId: 'user-123', username: 'test', role: 'user' },
+      } as any;
+
+      await controller.logout(req, { refresh_token: 'token-to-revoke' });
+
+      expect(authService.logout).toHaveBeenCalledWith(
+        'user-123',
+        'token-to-revoke',
+      );
     });
   });
 });

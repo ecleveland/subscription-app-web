@@ -33,7 +33,7 @@ interface AuthContextType {
     displayName?: string;
     email?: string;
   }) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -123,6 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const data = await res.json();
       localStorage.setItem('token', data.access_token);
+      localStorage.setItem('refresh_token', data.refresh_token);
       document.cookie = 'auth-flag=1; path=/; SameSite=Lax';
       setIsAuthenticated(true);
 
@@ -153,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const responseData = await res.json();
       localStorage.setItem('token', responseData.access_token);
+      localStorage.setItem('refresh_token', responseData.refresh_token);
       document.cookie = 'auth-flag=1; path=/; SameSite=Lax';
       setIsAuthenticated(true);
 
@@ -163,9 +165,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [router, fetchAndStoreProfile],
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    const refreshToken = localStorage.getItem('refresh_token');
+
+    // Best-effort backend logout
+    if (token && refreshToken) {
+      try {
+        await fetch(`${API_URL}/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      } catch {
+        // Ignore errors — we're logging out anyway
+      }
+    }
+
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('refresh_token');
     document.cookie =
       'auth-flag=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     setIsAuthenticated(false);

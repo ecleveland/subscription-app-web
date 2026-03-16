@@ -8,14 +8,19 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
+import { UserDocument } from '../users/schemas/user.schema';
 import {
   PasswordReset,
   PasswordResetDocument,
 } from './schemas/password-reset.schema';
+import {
+  RefreshToken,
+  RefreshTokenDocument,
+} from './schemas/refresh-token.schema';
 import { MAIL_SERVICE } from '../mail/mail.service';
 import type { MailService } from '../mail/mail.service';
 
@@ -29,13 +34,40 @@ export class AuthService {
     private configService: ConfigService,
     @InjectModel(PasswordReset.name)
     private passwordResetModel: Model<PasswordResetDocument>,
+    @InjectModel(RefreshToken.name)
+    private refreshTokenModel: Model<RefreshTokenDocument>,
     @Inject(MAIL_SERVICE) private mailService: MailService,
   ) {}
+
+  private async generateTokenPair(
+    userId: string,
+    username: string,
+    role: string,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    const payload = { sub: userId, username, role };
+    const access_token = this.jwtService.sign(payload);
+
+    const plainToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(plainToken)
+      .digest('hex');
+
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await new this.refreshTokenModel({
+      userId: new Types.ObjectId(userId),
+      tokenHash,
+      expiresAt,
+    }).save();
+
+    return { access_token, refresh_token: plainToken };
+  }
 
   async login(
     username: string,
     password: string,
-  ): Promise<{ access_token: string }> {
+  ): Promise<{ access_token: string; refresh_token: string }> {
     const user = await this.usersService.findByUsername(username);
     if (!user) {
       this.logger.warn({ username }, 'Login failed: user not found');
@@ -56,14 +88,80 @@ export class AuthService {
       'Login successful',
     );
 
-    const payload = {
-      sub: user._id.toString(),
-      username: user.username,
-      role: user.role,
-    };
-    return {
-      access_token: this.jwtService.sign(payload),
-    };
+    return this.generateTokenPair(
+      user._id.toString(),
+      user.username,
+      user.role,
+    );
+  }
+
+  async refresh(
+    refreshToken: string,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(refreshToken)
+      .digest('hex');
+
+    const tokenDoc = await this.refreshTokenModel
+      .findOne({
+        tokenHash,
+        expiresAt: { $gt: new Date() },
+        revokedAt: { $exists: false },
+      } as Record<string, unknown>)
+      .exec();
+
+    if (!tokenDoc) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    // Verify user still exists
+    let user: UserDocument;
+    try {
+      user = await this.usersService.findOne(tokenDoc.userId.toString());
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    // Revoke old token
+    tokenDoc.revokedAt = new Date();
+    await tokenDoc.save();
+
+    return this.generateTokenPair(
+      user._id.toString(),
+      user.username,
+      user.role,
+    );
+  }
+
+  async logout(userId: string, refreshToken: string): Promise<void> {
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(refreshToken)
+      .digest('hex');
+
+    await this.refreshTokenModel
+      .findOneAndUpdate(
+        {
+          userId: new Types.ObjectId(userId),
+          tokenHash,
+          revokedAt: { $exists: false },
+        } as Record<string, unknown>,
+        { revokedAt: new Date() },
+      )
+      .exec();
+  }
+
+  async revokeAllRefreshTokens(userId: string): Promise<void> {
+    await this.refreshTokenModel
+      .updateMany(
+        {
+          userId: new Types.ObjectId(userId),
+          revokedAt: { $exists: false },
+        } as Record<string, unknown>,
+        { revokedAt: new Date() },
+      )
+      .exec();
   }
 
   async forgotPassword(email: string): Promise<void> {
@@ -125,6 +223,8 @@ export class AuthService {
 
     resetDoc.usedAt = new Date();
     await resetDoc.save();
+
+    await this.revokeAllRefreshTokens(user._id.toString());
 
     this.logger.log(
       { userId: user._id.toString() },

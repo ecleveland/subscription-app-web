@@ -96,10 +96,17 @@ describe('useAuth', () => {
 
   it('should clear state and redirect on logout', async () => {
     window.localStorage.setItem('token', 'some-jwt');
+    window.localStorage.setItem('refresh_token', 'some-refresh');
     window.localStorage.setItem(
       'user',
       JSON.stringify({ userId: '123', username: 'test', role: 'user' }),
     );
+
+    // Mock the logout fetch call
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+    });
 
     const { result } = renderAuthHook();
 
@@ -107,18 +114,54 @@ describe('useAuth', () => {
       expect(result.current.isAuthenticated).toBe(true);
     });
 
-    act(() => {
-      result.current.logout();
+    await act(async () => {
+      await result.current.logout();
     });
 
     expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.user).toBeNull();
     expect(window.localStorage.getItem('token')).toBeNull();
     expect(window.localStorage.getItem('user')).toBeNull();
+    expect(window.localStorage.getItem('refresh_token')).toBeNull();
     expect(mockPush).toHaveBeenCalledWith('/login');
   });
 
-  it('should store token and redirect on successful login', async () => {
+  it('should call backend logout endpoint on logout', async () => {
+    window.localStorage.setItem('token', 'my-jwt');
+    window.localStorage.setItem('refresh_token', 'my-refresh');
+    window.localStorage.setItem(
+      'user',
+      JSON.stringify({ userId: '123', username: 'test', role: 'user' }),
+    );
+
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+    });
+
+    const { result } = renderAuthHook();
+
+    await waitFor(() => {
+      expect(result.current.isAuthenticated).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.logout();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/logout'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer my-jwt',
+        }),
+        body: JSON.stringify({ refresh_token: 'my-refresh' }),
+      }),
+    );
+  });
+
+  it('should store token and refresh_token on successful login', async () => {
     const mockToken = createMockJwt({
       sub: '123',
       username: 'testuser',
@@ -129,7 +172,11 @@ describe('useAuth', () => {
       // login call
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ access_token: mockToken }),
+        json: () =>
+          Promise.resolve({
+            access_token: mockToken,
+            refresh_token: 'login-refresh-token',
+          }),
       })
       // fetchAndStoreProfile calls apiFetch('/users/me')
       .mockResolvedValueOnce({
@@ -153,8 +200,59 @@ describe('useAuth', () => {
     });
 
     expect(window.localStorage.getItem('token')).toBe(mockToken);
+    expect(window.localStorage.getItem('refresh_token')).toBe(
+      'login-refresh-token',
+    );
     expect(result.current.isAuthenticated).toBe(true);
     expect(mockPush).toHaveBeenCalledWith('/');
+  });
+
+  it('should store refresh_token on successful register', async () => {
+    const mockToken = createMockJwt({
+      sub: '456',
+      username: 'newuser',
+      role: 'user',
+    });
+
+    (global.fetch as ReturnType<typeof vi.fn>)
+      // register call
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            access_token: mockToken,
+            refresh_token: 'register-refresh-token',
+          }),
+      })
+      // fetchAndStoreProfile calls apiFetch('/users/me')
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            displayName: 'New User',
+            email: 'new@example.com',
+          }),
+      });
+
+    const { result } = renderAuthHook();
+
+    await waitFor(() => {
+      expect(result.current.isAuthenticated).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.register({
+        username: 'newuser',
+        password: 'password123',
+      });
+    });
+
+    expect(window.localStorage.getItem('token')).toBe(mockToken);
+    expect(window.localStorage.getItem('refresh_token')).toBe(
+      'register-refresh-token',
+    );
+    expect(result.current.isAuthenticated).toBe(true);
   });
 
   it('should throw on failed login', async () => {
