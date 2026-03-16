@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { Subscription } from '@/lib/types';
 import SubscriptionForm from '@/components/SubscriptionForm';
+import SubscriptionFormSkeleton from '@/components/SubscriptionFormSkeleton';
 
 export default function EditSubscriptionPage() {
   const params = useParams<{ id: string }>();
@@ -32,7 +33,10 @@ export default function EditSubscriptionPage() {
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8">
-        <p className="text-gray-500 dark:text-gray-400">Loading...</p>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+          Edit Subscription
+        </h1>
+        <SubscriptionFormSkeleton />
       </div>
     );
   }

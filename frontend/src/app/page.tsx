@@ -9,6 +9,7 @@ import DashboardSummary from '@/components/DashboardSummary';
 import SearchInput from '@/components/SearchInput';
 import SubscriptionList from '@/components/SubscriptionList';
 import Pagination from '@/components/Pagination';
+import DashboardSkeleton from '@/components/DashboardSkeleton';
 import { useDebounce } from '@/hooks/useDebounce';
 
 const SORT_OPTIONS = [
@@ -144,7 +145,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8">
-        <p className="text-gray-500 dark:text-gray-400">Loading...</p>
+        <DashboardSkeleton />
       </div>
     );
   }
