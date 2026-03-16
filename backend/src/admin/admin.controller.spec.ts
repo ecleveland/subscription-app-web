@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, Logger } from '@nestjs/common';
 import { AdminController } from './admin.controller';
 import { UsersService } from '../users/users.service';
 import { UserRole } from '../users/schemas/user.schema';
@@ -66,10 +66,19 @@ describe('AdminController', () => {
   });
 
   describe('create', () => {
-    it('should delegate to usersService.create', async () => {
+    it('should delegate to usersService.create and log', async () => {
+      usersService.create.mockResolvedValue({
+        _id: { toString: () => 'new-user-id' },
+        username: 'new',
+      } as any);
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
       const dto = { username: 'new', password: 'password123' };
-      await controller.create(dto);
+      await controller.create(mockReq, dto);
       expect(usersService.create).toHaveBeenCalledWith(dto);
+      expect(logSpy).toHaveBeenCalledWith(
+        { adminId: 'requester-id', targetUserId: 'new-user-id' },
+        'Admin created user',
+      );
     });
   });
 
@@ -81,13 +90,20 @@ describe('AdminController', () => {
   });
 
   describe('update', () => {
-    it('should allow non-role updates without checking admin count', async () => {
-      await controller.update('user-id-1', { displayName: 'New Name' });
+    it('should allow non-role updates without checking admin count and log', async () => {
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
+      await controller.update(mockReq, 'user-id-1', {
+        displayName: 'New Name',
+      });
 
       expect(usersService.countAdmins).not.toHaveBeenCalled();
       expect(usersService.update).toHaveBeenCalledWith('user-id-1', {
         displayName: 'New Name',
       });
+      expect(logSpy).toHaveBeenCalledWith(
+        { adminId: 'requester-id', targetUserId: 'user-id-1' },
+        'Admin updated user',
+      );
     });
 
     it('should allow role change when target is not an admin', async () => {
@@ -96,7 +112,7 @@ describe('AdminController', () => {
         role: UserRole.USER,
       } as any);
 
-      await controller.update('user-id-1', { role: UserRole.ADMIN });
+      await controller.update(mockReq, 'user-id-1', { role: UserRole.ADMIN });
 
       // findOne is called but countAdmins is not because target is not admin
       expect(usersService.update).toHaveBeenCalled();
@@ -106,7 +122,7 @@ describe('AdminController', () => {
       usersService.findOne.mockResolvedValue(mockAdmin as any);
       usersService.countAdmins.mockResolvedValue(2);
 
-      await controller.update('admin-id-1', { role: UserRole.USER });
+      await controller.update(mockReq, 'admin-id-1', { role: UserRole.USER });
 
       expect(usersService.countAdmins).toHaveBeenCalled();
       expect(usersService.update).toHaveBeenCalledWith('admin-id-1', {
@@ -119,13 +135,13 @@ describe('AdminController', () => {
       usersService.countAdmins.mockResolvedValue(1);
 
       await expect(
-        controller.update('admin-id-1', { role: UserRole.USER }),
+        controller.update(mockReq, 'admin-id-1', { role: UserRole.USER }),
       ).rejects.toThrow(ForbiddenException);
       expect(usersService.update).not.toHaveBeenCalled();
     });
 
     it('should not check admin count when setting role to admin', async () => {
-      await controller.update('user-id-1', { role: UserRole.ADMIN });
+      await controller.update(mockReq, 'user-id-1', { role: UserRole.ADMIN });
 
       // No ForbiddenException concern when promoting to admin
       expect(usersService.countAdmins).not.toHaveBeenCalled();
@@ -155,13 +171,18 @@ describe('AdminController', () => {
       expect(usersService.remove).not.toHaveBeenCalled();
     });
 
-    it('should allow deleting an admin when multiple admins exist', async () => {
+    it('should allow deleting an admin when multiple admins exist and log', async () => {
       usersService.findOne.mockResolvedValue(mockAdmin as any);
       usersService.countAdmins.mockResolvedValue(2);
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await controller.remove(mockReq, 'admin-id-1');
 
       expect(usersService.remove).toHaveBeenCalledWith('admin-id-1');
+      expect(logSpy).toHaveBeenCalledWith(
+        { adminId: 'requester-id', targetUserId: 'admin-id-1' },
+        'Admin deleted user',
+      );
     });
 
     it('should allow deleting a non-admin user', async () => {

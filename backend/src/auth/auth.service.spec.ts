@@ -5,6 +5,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
+import { Logger } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { PasswordReset } from './schemas/password-reset.schema';
@@ -80,6 +81,7 @@ describe('AuthService', () => {
     it('should return an access token for valid credentials', async () => {
       usersService.findByUsername.mockResolvedValue(mockUser as any);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       const result = await service.login('testuser', 'password');
 
@@ -88,6 +90,10 @@ describe('AuthService', () => {
       expect(bcrypt.compare).toHaveBeenCalledWith(
         'password',
         'hashed-password',
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ username: 'testuser' }),
+        'Login successful',
       );
     });
 
@@ -104,23 +110,33 @@ describe('AuthService', () => {
       });
     });
 
-    it('should throw UnauthorizedException when user is not found', async () => {
+    it('should throw UnauthorizedException and warn when user is not found', async () => {
       usersService.findByUsername.mockResolvedValue(null);
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
 
       await expect(service.login('unknown', 'password')).rejects.toThrow(
         UnauthorizedException,
       );
       expect(bcrypt.compare).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ username: 'unknown' }),
+        'Login failed: user not found',
+      );
     });
 
-    it('should throw UnauthorizedException when password is incorrect', async () => {
+    it('should throw UnauthorizedException and warn when password is incorrect', async () => {
       usersService.findByUsername.mockResolvedValue(mockUser as any);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
 
       await expect(service.login('testuser', 'wrong')).rejects.toThrow(
         UnauthorizedException,
       );
       expect(jwtService.sign).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ username: 'testuser' }),
+        'Login failed: invalid password',
+      );
     });
   });
 

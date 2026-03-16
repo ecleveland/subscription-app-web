@@ -1,14 +1,16 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { UsersService } from './users/users.service';
 import { SubscriptionsService } from './subscriptions/subscriptions.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(PinoLogger));
 
   const configService = app.get(ConfigService);
 
@@ -64,7 +66,9 @@ async function bootstrap() {
       admin._id.toString(),
     );
     if (migrated > 0) {
-      console.log(`Migrated ${migrated} existing subscriptions to admin user`);
+      new Logger('Bootstrap').log(
+        `Migrated ${migrated} existing subscriptions to admin user`,
+      );
     }
   }
 

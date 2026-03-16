@@ -11,6 +11,7 @@ import {
   UseGuards,
   Req,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -33,6 +34,8 @@ import { AdminUpdateUserDto } from '../users/dto/admin-update-user.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 export class AdminController {
+  private readonly logger = new Logger(AdminController.name);
+
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
@@ -50,8 +53,16 @@ export class AdminController {
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden — admin only' })
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  async create(
+    @Req() req: AuthenticatedRequest,
+    @Body() createUserDto: CreateUserDto,
+  ) {
+    const result = await this.usersService.create(createUserDto);
+    this.logger.log(
+      { adminId: req.user.userId, targetUserId: result._id.toString() },
+      'Admin created user',
+    );
+    return result;
   }
 
   @Get(':id')
@@ -71,7 +82,11 @@ export class AdminController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden — admin only' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async update(@Param('id') id: string, @Body() updateDto: AdminUpdateUserDto) {
+  async update(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() updateDto: AdminUpdateUserDto,
+  ) {
     if (updateDto.role && updateDto.role !== UserRole.ADMIN) {
       const user = await this.usersService.findOne(id);
       if (user.role === UserRole.ADMIN) {
@@ -81,7 +96,12 @@ export class AdminController {
         }
       }
     }
-    return this.usersService.update(id, updateDto);
+    const result = await this.usersService.update(id, updateDto);
+    this.logger.log(
+      { adminId: req.user.userId, targetUserId: id },
+      'Admin updated user',
+    );
+    return result;
   }
 
   @Delete(':id')
@@ -102,6 +122,10 @@ export class AdminController {
         throw new ForbiddenException('Cannot delete the last admin');
       }
     }
-    return this.usersService.remove(id);
+    await this.usersService.remove(id);
+    this.logger.log(
+      { adminId: req.user.userId, targetUserId: id },
+      'Admin deleted user',
+    );
   }
 }

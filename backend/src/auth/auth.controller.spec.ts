@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -50,7 +51,8 @@ describe('AuthController', () => {
   });
 
   describe('register', () => {
-    it('should create user then login with the same credentials', async () => {
+    it('should create user then login with the same credentials and log registration', async () => {
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
       const result = await controller.register({
         username: 'newuser',
         password: 'password123',
@@ -66,6 +68,10 @@ describe('AuthController', () => {
       });
       expect(authService.login).toHaveBeenCalledWith('newuser', 'password123');
       expect(result).toEqual({ access_token: 'jwt-token' });
+      expect(logSpy).toHaveBeenCalledWith(
+        { username: 'newuser' },
+        'User registered',
+      );
     });
 
     it('should pass undefined for optional fields when not provided', async () => {

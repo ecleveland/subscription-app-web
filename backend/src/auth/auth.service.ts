@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   Inject,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -20,6 +21,8 @@ import type { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
@@ -35,13 +38,23 @@ export class AuthService {
   ): Promise<{ access_token: string }> {
     const user = await this.usersService.findByUsername(username);
     if (!user) {
+      this.logger.warn({ username }, 'Login failed: user not found');
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
+      this.logger.warn(
+        { username, userId: user._id.toString() },
+        'Login failed: invalid password',
+      );
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    this.logger.log(
+      { username, userId: user._id.toString() },
+      'Login successful',
+    );
 
     const payload = {
       sub: user._id.toString(),
@@ -56,8 +69,14 @@ export class AuthService {
   async forgotPassword(email: string): Promise<void> {
     const user = await this.usersService.findByEmail(email);
     if (!user) {
+      this.logger.log('Password reset requested for unknown email');
       return;
     }
+
+    this.logger.log(
+      { userId: user._id.toString() },
+      'Password reset requested',
+    );
 
     const plainToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto
@@ -92,6 +111,7 @@ export class AuthService {
       .exec();
 
     if (!resetDoc) {
+      this.logger.warn('Password reset attempted with invalid/expired token');
       throw new BadRequestException('Invalid or expired password reset token');
     }
 
@@ -105,5 +125,10 @@ export class AuthService {
 
     resetDoc.usedAt = new Date();
     await resetDoc.save();
+
+    this.logger.log(
+      { userId: user._id.toString() },
+      'Password reset completed',
+    );
   }
 }

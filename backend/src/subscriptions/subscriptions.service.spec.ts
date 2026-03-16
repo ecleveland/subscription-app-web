@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, Logger } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { SubscriptionsService } from './subscriptions.service';
@@ -73,7 +73,7 @@ describe('SubscriptionsService', () => {
   });
 
   describe('create', () => {
-    it('should create a subscription with userId as ObjectId', async () => {
+    it('should create a subscription with userId as ObjectId and log', async () => {
       const dto = {
         name: 'Netflix',
         cost: 15.99,
@@ -81,13 +81,16 @@ describe('SubscriptionsService', () => {
         nextBillingDate: '2025-06-01',
         category: 'Streaming',
       };
-      const saveMock = jest
-        .fn()
-        .mockResolvedValue({ _id: 'new-id', ...dto, userId });
+      const saveMock = jest.fn().mockResolvedValue({
+        _id: { toString: () => 'new-id' },
+        ...dto,
+        userId,
+      });
       mockSubModel.mockImplementation((data: any) => ({
         ...data,
         save: saveMock,
       }));
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await service.create(userId, dto);
 
@@ -99,6 +102,10 @@ describe('SubscriptionsService', () => {
         }),
       );
       expect(saveMock).toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith(
+        { userId, subscriptionId: 'new-id' },
+        'Subscription created',
+      );
     });
   });
 
@@ -732,7 +739,7 @@ describe('SubscriptionsService', () => {
   });
 
   describe('update', () => {
-    it('should update fields and save', async () => {
+    it('should update fields, save, and log', async () => {
       const existingSub = {
         ...mockSubscription,
         save: jest.fn().mockResolvedValue({
@@ -741,6 +748,7 @@ describe('SubscriptionsService', () => {
         }),
       };
       mockSubModel.findById.mockReturnValue(createChainable(existingSub));
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       const result = await service.update(userId, subId, {
         name: 'Netflix Premium',
@@ -749,14 +757,19 @@ describe('SubscriptionsService', () => {
       expect(existingSub.name).toBe('Netflix Premium');
       expect(existingSub.save).toHaveBeenCalled();
       expect(result).toBeDefined();
+      expect(logSpy).toHaveBeenCalledWith(
+        { userId, subscriptionId: subId },
+        'Subscription updated',
+      );
     });
   });
 
   describe('remove', () => {
-    it('should atomically delete by id and userId', async () => {
+    it('should atomically delete by id and userId and log', async () => {
       mockSubModel.findOneAndDelete.mockReturnValue(
         createChainable(mockSubscription),
       );
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await service.remove(userId, subId);
 
@@ -764,6 +777,10 @@ describe('SubscriptionsService', () => {
         _id: expect.any(Types.ObjectId),
         userId: expect.any(Types.ObjectId),
       });
+      expect(logSpy).toHaveBeenCalledWith(
+        { userId, subscriptionId: subId },
+        'Subscription deleted',
+      );
     });
 
     it('should throw NotFoundException if subscription not found or not owned', async () => {
