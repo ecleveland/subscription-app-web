@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/api';
 import { showErrorToast } from '@/lib/toast';
 import type { User } from '@/lib/types';
 import UserTable from '@/components/admin/UserTable';
+import UserTableSkeleton from '@/components/admin/UserTableSkeleton';
 
 export default function AdminUsersPage() {
   const { isAdmin, isAuthenticated } = useAuth();
@@ -58,7 +59,7 @@ export default function AdminUsersPage() {
         </Link>
       </div>
       {loading ? (
-        <p className="text-gray-500 dark:text-gray-400">Loading users...</p>
+        <UserTableSkeleton />
       ) : users.length === 0 ? (
         <p className="text-gray-500 dark:text-gray-400">No users found.</p>
       ) : (
