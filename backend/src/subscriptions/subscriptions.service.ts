@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -13,6 +13,7 @@ import { PaginatedSubscriptions } from './interfaces/paginated-subscriptions.int
 
 @Injectable()
 export class SubscriptionsService {
+  private readonly logger = new Logger(SubscriptionsService.name);
   private advanceCooldowns = new Map<string, number>();
   static ADVANCE_COOLDOWN_MS = 60_000;
 
@@ -112,7 +113,12 @@ export class SubscriptionsService {
       ...createDto,
       userId: new Types.ObjectId(userId),
     });
-    return subscription.save();
+    const saved = await subscription.save();
+    this.logger.log(
+      { userId, subscriptionId: saved._id.toString() },
+      'Subscription created',
+    );
+    return saved;
   }
 
   async findAll(
@@ -202,7 +208,9 @@ export class SubscriptionsService {
   ): Promise<SubscriptionDocument> {
     const existing = await this.findOne(userId, id);
     Object.assign(existing, updateDto);
-    return existing.save();
+    const saved = await existing.save();
+    this.logger.log({ userId, subscriptionId: id }, 'Subscription updated');
+    return saved;
   }
 
   async remove(userId: string, id: string): Promise<void> {
@@ -216,6 +224,7 @@ export class SubscriptionsService {
     if (!deleted) {
       throw new NotFoundException(`Subscription with ID "${id}" not found`);
     }
+    this.logger.log({ userId, subscriptionId: id }, 'Subscription deleted');
   }
 
   async removeAllByUserId(userId: string): Promise<number> {

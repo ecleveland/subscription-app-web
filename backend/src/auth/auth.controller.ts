@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
@@ -21,6 +22,8 @@ import { MessageResponseDto } from './dto/message-response.dto';
 @Controller('auth')
 @UseGuards(ThrottlerGuard)
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private authService: AuthService,
     private usersService: UsersService,
@@ -56,6 +59,7 @@ export class AuthController {
       displayName: registerDto.displayName,
       email: registerDto.email,
     });
+    this.logger.log({ username: registerDto.username }, 'User registered');
     return this.authService.login(registerDto.username, registerDto.password);
   }
 

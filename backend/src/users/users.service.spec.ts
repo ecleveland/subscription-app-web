@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import * as bcrypt from 'bcryptjs';
@@ -72,10 +73,10 @@ describe('UsersService', () => {
   });
 
   describe('create', () => {
-    it('should hash the password and save the user', async () => {
+    it('should hash the password, save the user, and log', async () => {
       (bcrypt.hash as jest.Mock).mockResolvedValue('bcrypt-hash');
       const saveMock = jest.fn().mockResolvedValue({
-        _id: 'new-id',
+        _id: { toString: () => 'new-id' },
         username: 'newuser',
         passwordHash: 'bcrypt-hash',
         role: UserRole.USER,
@@ -84,6 +85,7 @@ describe('UsersService', () => {
         ...dto,
         save: saveMock,
       }));
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       const result = await service.create({
         username: 'newuser',
@@ -100,6 +102,10 @@ describe('UsersService', () => {
       );
       expect(saveMock).toHaveBeenCalled();
       expect(result).toBeDefined();
+      expect(logSpy).toHaveBeenCalledWith(
+        { userId: 'new-id', username: 'newuser' },
+        'User created',
+      );
     });
 
     it('should assign the provided role when specified', async () => {
@@ -272,7 +278,7 @@ describe('UsersService', () => {
   });
 
   describe('changePassword', () => {
-    it('should hash new password and save when current password is valid', async () => {
+    it('should hash new password, save, and log when current password is valid', async () => {
       const userDoc = {
         ...mockUser,
         save: jest.fn().mockResolvedValue(undefined),
@@ -280,6 +286,7 @@ describe('UsersService', () => {
       mockUserModel.findById.mockReturnValue(createChainable(userDoc));
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await service.changePassword('507f1f77bcf86cd799439011', 'old', 'new');
 
@@ -287,6 +294,10 @@ describe('UsersService', () => {
       expect(bcrypt.hash).toHaveBeenCalledWith('new', 10);
       expect(userDoc.passwordHash).toBe('new-hash');
       expect(userDoc.save).toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith(
+        { userId: '507f1f77bcf86cd799439011' },
+        'Password changed',
+      );
     });
 
     it('should throw UnauthorizedException when current password is wrong', async () => {
@@ -300,11 +311,12 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
-    it('should delete user and cascade-delete their subscriptions', async () => {
+    it('should delete user, cascade-delete their subscriptions, and log', async () => {
       mockUserModel.findByIdAndDelete.mockReturnValue(
         createChainable(mockUser),
       );
       mockSubscriptionsService.removeAllByUserId.mockResolvedValue(5);
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await service.remove('507f1f77bcf86cd799439011');
 
@@ -313,6 +325,10 @@ describe('UsersService', () => {
       );
       expect(mockSubscriptionsService.removeAllByUserId).toHaveBeenCalledWith(
         '507f1f77bcf86cd799439011',
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        { userId: '507f1f77bcf86cd799439011' },
+        'User deleted',
       );
     });
 
@@ -353,7 +369,7 @@ describe('UsersService', () => {
   });
 
   describe('seedAdmin', () => {
-    it('should create admin when no admins exist and passwordHash is provided', async () => {
+    it('should create admin when no admins exist and passwordHash is provided and log', async () => {
       mockUserModel.countDocuments.mockReturnValue(createChainable(0));
       mockUserModel.findOne.mockReturnValue(createChainable(null));
       const saveMock = jest.fn().mockResolvedValue(undefined);
@@ -361,6 +377,7 @@ describe('UsersService', () => {
         ...dto,
         save: saveMock,
       }));
+      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await service.seedAdmin('admin', 'pre-hashed');
 
@@ -372,6 +389,10 @@ describe('UsersService', () => {
         }),
       );
       expect(saveMock).toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith(
+        { username: 'admin' },
+        'Seeded admin user',
+      );
     });
 
     it('should skip seeding when admins already exist', async () => {

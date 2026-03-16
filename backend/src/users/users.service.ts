@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -15,6 +16,8 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private readonly subscriptionsService: SubscriptionsService,
@@ -32,7 +35,12 @@ export class UsersService {
     });
 
     try {
-      return await user.save();
+      const saved = await user.save();
+      this.logger.log(
+        { userId: saved._id.toString(), username: createUserDto.username },
+        'User created',
+      );
+      return saved;
     } catch (error: unknown) {
       if (
         error instanceof Error &&
@@ -104,6 +112,7 @@ export class UsersService {
     }
     user.passwordHash = await bcrypt.hash(newPassword, 10);
     await user.save();
+    this.logger.log({ userId: id }, 'Password changed');
   }
 
   async remove(id: string): Promise<void> {
@@ -112,6 +121,7 @@ export class UsersService {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
     await this.subscriptionsService.removeAllByUserId(id);
+    this.logger.log({ userId: id }, 'User deleted');
   }
 
   async countAdmins(): Promise<number> {
@@ -130,7 +140,7 @@ export class UsersService {
           role: UserRole.ADMIN,
         });
         await admin.save();
-        console.log(`Seeded admin user: ${username}`);
+        this.logger.log({ username }, 'Seeded admin user');
       }
     }
   }
