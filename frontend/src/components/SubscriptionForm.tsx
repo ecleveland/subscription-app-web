@@ -27,6 +27,9 @@ export default function SubscriptionForm({ subscription }: Props) {
   const [category, setCategory] = useState(subscription?.category ?? CATEGORIES[0]);
   const [notes, setNotes] = useState(subscription?.notes ?? '');
   const [isActive, setIsActive] = useState(subscription?.isActive !== false);
+  const [reminderDaysBefore, setReminderDaysBefore] = useState(
+    subscription?.reminderDaysBefore?.toString() ?? '3',
+  );
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -42,6 +45,7 @@ export default function SubscriptionForm({ subscription }: Props) {
       nextBillingDate,
       category,
       isActive,
+      reminderDaysBefore: parseInt(reminderDaysBefore, 10),
       ...(notes ? { notes } : {}),
     };
 
@@ -193,6 +197,24 @@ export default function SubscriptionForm({ subscription }: Props) {
         <label htmlFor="isActive" className={labelClasses}>
           Active subscription
         </label>
+      </div>
+
+      <div>
+        <label htmlFor="reminderDaysBefore" className={labelClasses}>
+          Remind me before renewal (days)
+        </label>
+        <input
+          id="reminderDaysBefore"
+          type="number"
+          min="0"
+          max="30"
+          value={reminderDaysBefore}
+          onChange={(e) => setReminderDaysBefore(e.target.value)}
+          className={inputClasses}
+        />
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          Set to 0 to disable reminders for this subscription.
+        </p>
       </div>
 
       <div>

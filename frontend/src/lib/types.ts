@@ -19,6 +19,7 @@ export interface Subscription {
   category: string;
   notes?: string;
   isActive: boolean;
+  reminderDaysBefore: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -36,6 +37,24 @@ export const CATEGORIES = [
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+
+export interface AppNotification {
+  _id: string;
+  userId: string;
+  subscriptionId: string;
+  type: 'renewal_reminder';
+  title: string;
+  message: string;
+  read: boolean;
+  billingDate: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationsResponse {
+  data: AppNotification[];
+  unreadCount: number;
+}
 
 export interface PaginationMeta {
   total: number;

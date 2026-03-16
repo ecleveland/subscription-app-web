@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import ThemeToggle from '@/components/ThemeToggle';
+import NotificationBell from '@/components/NotificationBell';
 
 export default function Header() {
   const { isAuthenticated, isAdmin, logout } = useAuth();
@@ -69,6 +70,7 @@ export default function Header() {
             Profile
           </Link>
           <div className="flex items-center gap-3 md:gap-4 py-1 md:py-0">
+            <NotificationBell />
             <ThemeToggle />
             <button
               onClick={() => { closeMenu(); logout(); }}
