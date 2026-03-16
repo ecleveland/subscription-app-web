@@ -101,6 +101,95 @@ describe('DashboardPage sorting', () => {
   });
 });
 
+describe('DashboardPage search', () => {
+  const subs = [
+    makeSub({ _id: '1', name: 'Netflix', notes: 'Family plan', cost: 15 }),
+    makeSub({ _id: '2', name: 'Spotify', notes: 'Music streaming', cost: 10 }),
+    makeSub({ _id: '3', name: 'GitHub', cost: 4 }),
+  ];
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Paginated call returns all subs; unpaginated (limit=0) also returns all
+    vi.mocked(apiFetch).mockResolvedValue(makeEnvelope(subs));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('should render the search input', async () => {
+    render(<DashboardPage />);
+    expect(await screen.findByLabelText('Search subscriptions')).toBeInTheDocument();
+  });
+
+  it('should filter subscriptions when search term is entered', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<DashboardPage />);
+
+    await screen.findByText('Netflix');
+    expect(screen.getByText('Spotify')).toBeInTheDocument();
+    expect(screen.getByText('GitHub')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Search subscriptions'), 'net');
+
+    await waitFor(() => {
+      expect(screen.getByText('Netflix')).toBeInTheDocument();
+      expect(screen.queryByText('Spotify')).not.toBeInTheDocument();
+      expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
+    });
+  });
+
+  it('should show no results message when nothing matches', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<DashboardPage />);
+
+    await screen.findByText('Netflix');
+
+    await user.type(screen.getByLabelText('Search subscriptions'), 'zzzzz');
+
+    await waitFor(() => {
+      expect(screen.getByText(/No subscriptions match/)).toBeInTheDocument();
+    });
+  });
+
+  it('should search in notes field', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<DashboardPage />);
+
+    await screen.findByText('Netflix');
+
+    await user.type(screen.getByLabelText('Search subscriptions'), 'family');
+
+    await waitFor(() => {
+      expect(screen.getByText('Netflix')).toBeInTheDocument();
+      expect(screen.queryByText('Spotify')).not.toBeInTheDocument();
+    });
+  });
+
+  it('should return to full list when search is cleared', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<DashboardPage />);
+
+    await screen.findByText('Netflix');
+
+    await user.type(screen.getByLabelText('Search subscriptions'), 'net');
+
+    await waitFor(() => {
+      expect(screen.queryByText('Spotify')).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByLabelText('Clear search'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Netflix')).toBeInTheDocument();
+      expect(screen.getByText('Spotify')).toBeInTheDocument();
+      expect(screen.getByText('GitHub')).toBeInTheDocument();
+    });
+  });
+});
+
 describe('DashboardPage pagination', () => {
   afterEach(() => {
     vi.restoreAllMocks();
