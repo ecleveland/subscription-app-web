@@ -56,7 +56,7 @@ describe('Auth (e2e)', () => {
   });
 
   describe('POST /api/auth/register', () => {
-    it('should register a new user and return access_token', () => {
+    it('should register a new user and return access_token and refresh_token', () => {
       return request(app.getHttpServer())
         .post('/api/auth/register')
         .send({
@@ -67,6 +67,8 @@ describe('Auth (e2e)', () => {
         .expect((res) => {
           expect(res.body.access_token).toBeDefined();
           expect(typeof res.body.access_token).toBe('string');
+          expect(res.body.refresh_token).toBeDefined();
+          expect(typeof res.body.refresh_token).toBe('string');
         });
     });
 
@@ -101,7 +103,7 @@ describe('Auth (e2e)', () => {
   });
 
   describe('POST /api/auth/login', () => {
-    it('should return access_token for valid credentials', () => {
+    it('should return access_token and refresh_token for valid credentials', () => {
       return request(app.getHttpServer())
         .post('/api/auth/login')
         .send({
@@ -111,6 +113,7 @@ describe('Auth (e2e)', () => {
         .expect(200)
         .expect((res) => {
           expect(res.body.access_token).toBeDefined();
+          expect(res.body.refresh_token).toBeDefined();
         });
     });
 
@@ -131,6 +134,108 @@ describe('Auth (e2e)', () => {
           username: 'nobody',
           password: 'password123',
         })
+        .expect(401);
+    });
+  });
+
+  describe('POST /api/auth/refresh', () => {
+    it('should return new token pair for valid refresh token', async () => {
+      const loginRes = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ username: 'testuser', password: 'password123' });
+
+      const refreshToken = loginRes.body.refresh_token;
+
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refresh_token: refreshToken })
+        .expect(200)
+        .expect((res) => {
+          expect(res.body.access_token).toBeDefined();
+          expect(res.body.refresh_token).toBeDefined();
+          // New refresh token should be different from old one (rotation)
+          expect(res.body.refresh_token).not.toBe(refreshToken);
+        });
+    });
+
+    it('should reject old refresh token after rotation', async () => {
+      const loginRes = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ username: 'testuser', password: 'password123' });
+
+      const oldRefreshToken = loginRes.body.refresh_token;
+
+      // Use the refresh token once
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refresh_token: oldRefreshToken })
+        .expect(200);
+
+      // Try to use the same refresh token again
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refresh_token: oldRefreshToken })
+        .expect(401);
+    });
+
+    it('should return 401 for invalid refresh token', () => {
+      return request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refresh_token: 'invalid-token' })
+        .expect(401);
+    });
+  });
+
+  describe('POST /api/auth/logout', () => {
+    it('should revoke refresh token so it cannot be used afterwards', async () => {
+      const loginRes = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ username: 'testuser', password: 'password123' });
+
+      const { access_token, refresh_token } = loginRes.body;
+
+      // Logout
+      await request(app.getHttpServer())
+        .post('/api/auth/logout')
+        .set('Authorization', `Bearer ${access_token}`)
+        .send({ refresh_token })
+        .expect(204);
+
+      // Try to use the revoked refresh token
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refresh_token })
+        .expect(401);
+    });
+
+    it('should return 401 without a JWT', () => {
+      return request(app.getHttpServer())
+        .post('/api/auth/logout')
+        .send({ refresh_token: 'some-token' })
+        .expect(401);
+    });
+  });
+
+  describe('Password change revokes refresh tokens', () => {
+    it('should invalidate refresh tokens after password change', async () => {
+      // Register a fresh user
+      const regRes = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ username: 'pwchangeuser', password: 'password123' });
+
+      const { access_token, refresh_token } = regRes.body;
+
+      // Change password
+      await request(app.getHttpServer())
+        .post('/api/users/me/change-password')
+        .set('Authorization', `Bearer ${access_token}`)
+        .send({ currentPassword: 'password123', newPassword: 'newpass123' })
+        .expect(204);
+
+      // Old refresh token should be rejected
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refresh_token })
         .expect(401);
     });
   });
@@ -231,6 +336,7 @@ describe('Auth (e2e)', () => {
         .expect(200)
         .expect((res) => {
           expect(res.body.access_token).toBeDefined();
+          expect(res.body.refresh_token).toBeDefined();
         });
 
       // Login with old password should fail

@@ -10,6 +10,7 @@ import * as bcrypt from 'bcryptjs';
 import { UsersService } from './users.service';
 import { User, UserRole } from './schemas/user.schema';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { RefreshToken } from '../auth/schemas/refresh-token.schema';
 
 jest.mock('bcryptjs');
 
@@ -23,6 +24,7 @@ function createChainable(resolvedValue: any = null) {
 describe('UsersService', () => {
   let service: UsersService;
   let mockUserModel: any;
+  let mockRefreshTokenModel: any;
   let mockSubscriptionsService: { removeAllByUserId: jest.Mock };
 
   const mockUser = {
@@ -57,10 +59,20 @@ describe('UsersService', () => {
       .fn()
       .mockReturnValue(createChainable(0));
 
+    mockRefreshTokenModel = {
+      updateMany: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: getModelToken(User.name), useValue: mockUserModel },
+        {
+          provide: getModelToken(RefreshToken.name),
+          useValue: mockRefreshTokenModel,
+        },
         { provide: SubscriptionsService, useValue: mockSubscriptionsService },
       ],
     }).compile();
@@ -297,6 +309,26 @@ describe('UsersService', () => {
       expect(logSpy).toHaveBeenCalledWith(
         { userId: '507f1f77bcf86cd799439011' },
         'Password changed',
+      );
+    });
+
+    it('should revoke all refresh tokens after password change', async () => {
+      const userDoc = {
+        ...mockUser,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockUserModel.findById.mockReturnValue(createChainable(userDoc));
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
+
+      await service.changePassword('507f1f77bcf86cd799439011', 'old', 'new');
+
+      expect(mockRefreshTokenModel.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: expect.anything(),
+          revokedAt: { $exists: false },
+        }),
+        expect.objectContaining({ revokedAt: expect.any(Date) }),
       );
     });
 

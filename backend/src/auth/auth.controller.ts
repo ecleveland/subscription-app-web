@@ -5,9 +5,15 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Req,
   Logger,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
@@ -17,6 +23,10 @@ import { AccessTokenResponseDto } from './dto/access-token-response.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MessageResponseDto } from './dto/message-response.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { LogoutDto } from './dto/logout.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { AuthenticatedRequest } from './interfaces/jwt-payload.interface';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -35,7 +45,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Log in with username and password' })
   @ApiResponse({
     status: 200,
-    description: 'Returns access token',
+    description: 'Returns access and refresh tokens',
     type: AccessTokenResponseDto,
   })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
@@ -48,7 +58,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({
     status: 201,
-    description: 'User created, returns access token',
+    description: 'User created, returns access and refresh tokens',
     type: AccessTokenResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Validation error' })
@@ -61,6 +71,31 @@ export class AuthController {
     });
     this.logger.log({ username: registerDto.username }, 'User registered');
     return this.authService.login(registerDto.username, registerDto.password);
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Refresh access token using a refresh token' })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns new access and refresh tokens',
+    type: AccessTokenResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
+  async refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto.refresh_token);
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout and revoke refresh token' })
+  @ApiResponse({ status: 204, description: 'Refresh token revoked' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async logout(@Req() req: AuthenticatedRequest, @Body() dto: LogoutDto) {
+    await this.authService.logout(req.user.userId, dto.refresh_token);
   }
 
   @Post('forgot-password')
