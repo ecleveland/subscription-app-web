@@ -26,7 +26,7 @@ import { MessageResponseDto } from './dto/message-response.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { AuthenticatedRequest } from './interfaces/jwt-payload.interface';
+import type { AuthenticatedRequest } from './interfaces/jwt-payload.interface';
 
 @ApiTags('Auth')
 @Controller('auth')
