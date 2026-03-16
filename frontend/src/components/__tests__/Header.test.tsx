@@ -16,6 +16,11 @@ vi.mock('@/components/ThemeToggle', () => ({
   default: () => <button>ThemeToggle</button>,
 }));
 
+// Mock NotificationBell since it depends on API calls and timers
+vi.mock('@/components/NotificationBell', () => ({
+  default: () => <button>NotificationBell</button>,
+}));
+
 describe('Header', () => {
   afterEach(() => {
     mockLogout.mockClear();
@@ -47,6 +52,19 @@ describe('Header', () => {
     expect(screen.getByText('+ Add')).toBeInTheDocument();
     expect(screen.getByText('Profile')).toBeInTheDocument();
     expect(screen.getByText('Logout')).toBeInTheDocument();
+  });
+
+  it('should render NotificationBell when authenticated', () => {
+    authState = {
+      isAuthenticated: true,
+      user: { userId: '1', username: 'test', role: 'user' },
+      isAdmin: false,
+      logout: mockLogout,
+    };
+
+    render(<Header />);
+
+    expect(screen.getByText('NotificationBell')).toBeInTheDocument();
   });
 
   it('should show Admin link when user is admin', () => {

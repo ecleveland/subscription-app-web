@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsBoolean,
   Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BillingCycle } from '../schemas/subscription.schema';
@@ -65,4 +66,18 @@ export class CreateSubscriptionDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Number of days before renewal to send a reminder (0 to disable)',
+    example: 3,
+    default: 3,
+    minimum: 0,
+    maximum: 30,
+  })
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(30)
+  reminderDaysBefore?: number;
 }
