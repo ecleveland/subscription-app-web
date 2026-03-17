@@ -1,0 +1,40 @@
+# Production override — use with: docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+#
+# Removes the local mongo service and uses an external MongoDB (e.g., Atlas).
+# Set MONGODB_URI, JWT_SECRET, and FRONTEND_URL in your environment or .env file.
+
+services:
+  mongo:
+    deploy:
+      replicas: 0
+
+  backend:
+    environment:
+      - MONGODB_URI=${MONGODB_URI:?MONGODB_URI is required for production}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1h}
+      - FRONTEND_URL=${FRONTEND_URL:?FRONTEND_URL is required for production}
+      - NODE_ENV=production
+    depends_on: []
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required for production}
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - NODE_ENV=production
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    restart: always
