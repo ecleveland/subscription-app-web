@@ -11,6 +11,7 @@ RUN npm run build
 
 FROM node:22-alpine AS production
 WORKDIR /app
+ENV NODE_ENV=production
 RUN addgroup -g 1001 -S nestjs && adduser -S nestjs -u 1001
 COPY --from=build --chown=nestjs:nestjs /app/dist ./dist
 COPY --from=build --chown=nestjs:nestjs /app/node_modules ./node_modules
