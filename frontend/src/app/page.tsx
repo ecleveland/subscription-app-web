@@ -3,13 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { showErrorToast } from '@/lib/toast';
-import { Subscription, PaginatedResponse, PaginationMeta } from '@/lib/types';
+import { showErrorToast, showSuccessToast } from '@/lib/toast';
+import { Subscription, PaginatedResponse, PaginationMeta, BulkAction, BulkOperationResult } from '@/lib/types';
 import DashboardSummary from '@/components/DashboardSummary';
 import SearchInput from '@/components/SearchInput';
 import SubscriptionList from '@/components/SubscriptionList';
 import Pagination from '@/components/Pagination';
 import DashboardSkeleton from '@/components/DashboardSkeleton';
+import BulkActionToolbar from '@/components/BulkActionToolbar';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import { useDebounce } from '@/hooks/useDebounce';
 
 const SORT_OPTIONS = [
@@ -30,6 +32,10 @@ export default function DashboardPage() {
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearch = useDebounce(searchTerm, 300);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{ action: BulkAction; category?: string } | null>(null);
 
   function handleSortChange(newSortKey: string) {
     setSortKey(newSortKey);
@@ -89,6 +95,72 @@ export default function DashboardPage() {
     setAllSubscriptions((prev) =>
       prev.map((sub) => (sub._id === id ? { ...sub, isActive } : sub)),
     );
+  }
+
+  function handleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function handleSelectAll() {
+    setSelectedIds(new Set(displaySubscriptions.map((s) => s._id)));
+  }
+
+  function handleDeselectAll() {
+    setSelectedIds(new Set());
+  }
+
+  function exitSelectionMode() {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }
+
+  async function handleBulkAction(action: BulkAction, category?: string) {
+    setConfirmAction(null);
+    setBulkLoading(true);
+    try {
+      const result = await apiFetch<BulkOperationResult>('/subscriptions/bulk', {
+        method: 'POST',
+        body: JSON.stringify({ ids: Array.from(selectedIds), action, category }),
+      });
+
+      if (action === 'delete') {
+        setSubscriptions((prev) => prev.filter((s) => !selectedIds.has(s._id)));
+        setAllSubscriptions((prev) => prev.filter((s) => !selectedIds.has(s._id)));
+      } else if (action === 'activate') {
+        setSubscriptions((prev) => prev.map((s) => selectedIds.has(s._id) ? { ...s, isActive: true } : s));
+        setAllSubscriptions((prev) => prev.map((s) => selectedIds.has(s._id) ? { ...s, isActive: true } : s));
+      } else if (action === 'deactivate') {
+        setSubscriptions((prev) => prev.map((s) => selectedIds.has(s._id) ? { ...s, isActive: false } : s));
+        setAllSubscriptions((prev) => prev.map((s) => selectedIds.has(s._id) ? { ...s, isActive: false } : s));
+      } else if (action === 'changeCategory' && category) {
+        setSubscriptions((prev) => prev.map((s) => selectedIds.has(s._id) ? { ...s, category } : s));
+        setAllSubscriptions((prev) => prev.map((s) => selectedIds.has(s._id) ? { ...s, category } : s));
+      }
+
+      showSuccessToast(`${result.success} subscription${result.success === 1 ? '' : 's'} updated`);
+      setSelectedIds(new Set());
+
+      if (result.failed > 0) {
+        // Refetch if some operations failed
+        const [sortBy, sortOrder] = sortKey.split('-');
+        const res = await apiFetch<PaginatedResponse<Subscription>>(
+          `/subscriptions?sortBy=${sortBy}&sortOrder=${sortOrder}&page=${page}&limit=20`,
+        );
+        setSubscriptions(res.data);
+        setMeta(res.meta);
+        const allRes = await apiFetch<PaginatedResponse<Subscription>>('/subscriptions?limit=0');
+        setAllSubscriptions(allRes.data);
+      }
+    } catch (err) {
+      showErrorToast(err instanceof Error ? err.message : 'Bulk operation failed');
+    } finally {
+      setBulkLoading(false);
+    }
   }
 
   const isSearching = debouncedSearch.trim().length > 0;
@@ -166,17 +238,55 @@ export default function DashboardPage() {
             <option key={opt.key} value={opt.key}>{opt.label}</option>
           ))}
         </select>
+        <button
+          onClick={selectionMode ? exitSelectionMode : () => setSelectionMode(true)}
+          className={`px-3 py-2 text-sm rounded-lg border ${
+            selectionMode
+              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+              : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+          }`}
+        >
+          {selectionMode ? 'Cancel' : 'Select'}
+        </button>
       </div>
+      {selectionMode && selectedIds.size > 0 && (
+        <BulkActionToolbar
+          selectedCount={selectedIds.size}
+          totalCount={displaySubscriptions.length}
+          onSelectAll={handleSelectAll}
+          onDeselectAll={handleDeselectAll}
+          onBulkDelete={() => setConfirmAction({ action: 'delete' })}
+          onBulkActivate={() => handleBulkAction('activate')}
+          onBulkDeactivate={() => handleBulkAction('deactivate')}
+          onBulkChangeCategory={(category) => handleBulkAction('changeCategory', category)}
+          loading={bulkLoading}
+        />
+      )}
       {isSearching && displaySubscriptions.length === 0 ? (
         <p className="text-gray-500 dark:text-gray-400 text-center py-8">
           No subscriptions match &ldquo;{debouncedSearch.trim()}&rdquo;
         </p>
       ) : (
-        <SubscriptionList subscriptions={displaySubscriptions} onToggleActive={handleToggleActive} />
+        <SubscriptionList
+          subscriptions={displaySubscriptions}
+          onToggleActive={handleToggleActive}
+          selectionMode={selectionMode}
+          selectedIds={selectedIds}
+          onSelect={handleSelect}
+        />
       )}
       {displayMeta && displayMeta.totalPages > 1 && (
         <Pagination page={page} totalPages={displayMeta.totalPages} onPageChange={setPage} />
       )}
+      <ConfirmDialog
+        open={!!confirmAction}
+        title="Delete subscriptions"
+        message={`Are you sure you want to delete ${selectedIds.size} subscription${selectedIds.size === 1 ? '' : 's'}? This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => confirmAction && handleBulkAction(confirmAction.action, confirmAction.category)}
+        onCancel={() => setConfirmAction(null)}
+        destructive
+      />
     </div>
   );
 }

@@ -56,6 +56,13 @@ export interface NotificationsResponse {
   unreadCount: number;
 }
 
+export type BulkAction = 'delete' | 'activate' | 'deactivate' | 'changeCategory';
+
+export interface BulkOperationResult {
+  success: number;
+  failed: number;
+}
+
 export interface PaginationMeta {
   total: number;
   page: number;

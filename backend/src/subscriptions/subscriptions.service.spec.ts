@@ -1,9 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, Logger } from '@nestjs/common';
+import { NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { SubscriptionsService } from './subscriptions.service';
 import { Subscription, BillingCycle } from './schemas/subscription.schema';
+import { BulkAction } from './dto/bulk-operation.dto';
 
 function createChainable(resolvedValue: any = null) {
   const chain: any = {};
@@ -814,6 +815,148 @@ describe('SubscriptionsService', () => {
       const result = await service.removeAllByUserId(userId);
 
       expect(result).toBe(0);
+    });
+  });
+
+  describe('bulkOperation', () => {
+    const subId2 = '507f1f77bcf86cd799439033';
+
+    it('should call deleteMany with correct filter for delete action', async () => {
+      const validDoc = { _id: new Types.ObjectId(subId) };
+      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
+      mockSubModel.deleteMany.mockReturnValueOnce(
+        createChainable({ deletedCount: 1 }),
+      );
+
+      const result = await service.bulkOperation(userId, {
+        ids: [subId],
+        action: BulkAction.DELETE,
+      });
+
+      expect(mockSubModel.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: { $in: [validDoc._id] },
+        }),
+      );
+      expect(result).toEqual({ success: 1, failed: 0 });
+    });
+
+    it('should call updateMany with isActive true for activate action', async () => {
+      const validDoc = { _id: new Types.ObjectId(subId) };
+      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
+      mockSubModel.updateMany.mockReturnValueOnce(
+        createChainable({ modifiedCount: 1 }),
+      );
+
+      const result = await service.bulkOperation(userId, {
+        ids: [subId],
+        action: BulkAction.ACTIVATE,
+      });
+
+      expect(mockSubModel.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: { $in: [validDoc._id] },
+        }),
+        { $set: { isActive: true } },
+      );
+      expect(result).toEqual({ success: 1, failed: 0 });
+    });
+
+    it('should call updateMany with isActive false for deactivate action', async () => {
+      const validDoc = { _id: new Types.ObjectId(subId) };
+      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
+      mockSubModel.updateMany.mockReturnValueOnce(
+        createChainable({ modifiedCount: 1 }),
+      );
+
+      const result = await service.bulkOperation(userId, {
+        ids: [subId],
+        action: BulkAction.DEACTIVATE,
+      });
+
+      expect(mockSubModel.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: { $in: [validDoc._id] },
+        }),
+        { $set: { isActive: false } },
+      );
+      expect(result).toEqual({ success: 1, failed: 0 });
+    });
+
+    it('should call updateMany with category for changeCategory action', async () => {
+      const validDoc = { _id: new Types.ObjectId(subId) };
+      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
+      mockSubModel.updateMany.mockReturnValueOnce(
+        createChainable({ modifiedCount: 1 }),
+      );
+
+      const result = await service.bulkOperation(userId, {
+        ids: [subId],
+        action: BulkAction.CHANGE_CATEGORY,
+        category: 'Gaming',
+      });
+
+      expect(mockSubModel.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          _id: { $in: [validDoc._id] },
+        }),
+        { $set: { category: 'Gaming' } },
+      );
+      expect(result).toEqual({ success: 1, failed: 0 });
+    });
+
+    it('should throw BadRequestException for changeCategory without category', async () => {
+      const validDoc = { _id: new Types.ObjectId(subId) };
+      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
+
+      await expect(
+        service.bulkOperation(userId, {
+          ids: [subId],
+          action: BulkAction.CHANGE_CATEGORY,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should return correct success/failed counts for mixed valid/invalid IDs', async () => {
+      const validDoc = { _id: new Types.ObjectId(subId) };
+      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
+      mockSubModel.deleteMany.mockReturnValueOnce(
+        createChainable({ deletedCount: 1 }),
+      );
+
+      const result = await service.bulkOperation(userId, {
+        ids: [subId, subId2],
+        action: BulkAction.DELETE,
+      });
+
+      expect(result).toEqual({ success: 1, failed: 1 });
+    });
+
+    it('should return early when no valid IDs found', async () => {
+      mockSubModel.find.mockReturnValueOnce(createChainable([]));
+
+      const result = await service.bulkOperation(userId, {
+        ids: [subId],
+        action: BulkAction.DELETE,
+      });
+
+      expect(result).toEqual({ success: 0, failed: 1 });
+      expect(mockSubModel.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('should filter by userId for user scoping', async () => {
+      mockSubModel.find.mockReturnValueOnce(createChainable([]));
+
+      await service.bulkOperation(userId, {
+        ids: [subId],
+        action: BulkAction.DELETE,
+      });
+
+      expect(mockSubModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: expect.any(Types.ObjectId),
+        }),
+      );
     });
   });
 

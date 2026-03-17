@@ -461,6 +461,166 @@ describe('Subscriptions (e2e)', () => {
     });
   });
 
+  describe('Bulk operations', () => {
+    let bulkSubIds: string[];
+
+    beforeAll(async () => {
+      // Create subscriptions for bulk operations using tokenA
+      bulkSubIds = [];
+      for (const name of ['BulkSub1', 'BulkSub2', 'BulkSub3']) {
+        const res = await request(app.getHttpServer())
+          .post('/api/subscriptions')
+          .set('Authorization', `Bearer ${tokenA}`)
+          .send({
+            name,
+            cost: 10,
+            billingCycle: 'monthly',
+            nextBillingDate: '2026-07-01',
+            category: 'Streaming',
+          });
+        bulkSubIds.push(res.body._id);
+      }
+    });
+
+    it('should bulk activate subscriptions', async () => {
+      // First deactivate them
+      for (const id of bulkSubIds) {
+        await request(app.getHttpServer())
+          .patch(`/api/subscriptions/${id}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .send({ isActive: false });
+      }
+
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ ids: bulkSubIds, action: 'activate' })
+        .expect(201);
+
+      expect(res.body.success).toBe(3);
+      expect(res.body.failed).toBe(0);
+
+      // Verify activated
+      for (const id of bulkSubIds) {
+        const sub = await request(app.getHttpServer())
+          .get(`/api/subscriptions/${id}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(200);
+        expect(sub.body.isActive).toBe(true);
+      }
+    });
+
+    it('should bulk deactivate subscriptions', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ ids: bulkSubIds, action: 'deactivate' })
+        .expect(201);
+
+      expect(res.body.success).toBe(3);
+      expect(res.body.failed).toBe(0);
+
+      for (const id of bulkSubIds) {
+        const sub = await request(app.getHttpServer())
+          .get(`/api/subscriptions/${id}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(200);
+        expect(sub.body.isActive).toBe(false);
+      }
+    });
+
+    it('should bulk change category', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ ids: bulkSubIds, action: 'changeCategory', category: 'Gaming' })
+        .expect(201);
+
+      expect(res.body.success).toBe(3);
+      expect(res.body.failed).toBe(0);
+
+      for (const id of bulkSubIds) {
+        const sub = await request(app.getHttpServer())
+          .get(`/api/subscriptions/${id}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(200);
+        expect(sub.body.category).toBe('Gaming');
+      }
+    });
+
+    it('should bulk delete subscriptions', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ ids: bulkSubIds, action: 'delete' })
+        .expect(201);
+
+      expect(res.body.success).toBe(3);
+      expect(res.body.failed).toBe(0);
+
+      // Verify deleted
+      for (const id of bulkSubIds) {
+        await request(app.getHttpServer())
+          .get(`/api/subscriptions/${id}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(404);
+      }
+    });
+
+    it('should not allow userB to bulk operate on userA subscriptions', async () => {
+      // Create a subscription for userA
+      const createRes = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'UserA Only',
+          cost: 5,
+          billingCycle: 'monthly',
+          nextBillingDate: '2026-07-01',
+          category: 'Other',
+        });
+      const subIdA = createRes.body._id;
+
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({ ids: [subIdA], action: 'delete' })
+        .expect(201);
+
+      expect(res.body.success).toBe(0);
+      expect(res.body.failed).toBe(1);
+
+      // Verify still exists for userA
+      await request(app.getHttpServer())
+        .get(`/api/subscriptions/${subIdA}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+    });
+
+    it('should return 400 for empty ids array', async () => {
+      await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ ids: [], action: 'delete' })
+        .expect(400);
+    });
+
+    it('should return 400 for changeCategory without category', async () => {
+      await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ ids: ['507f1f77bcf86cd799439011'], action: 'changeCategory' })
+        .expect(400);
+    });
+
+    it('should return 401 when unauthorized', async () => {
+      await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .send({ ids: ['507f1f77bcf86cd799439011'], action: 'delete' })
+        .expect(401);
+    });
+  });
+
   describe('Validation', () => {
     it('should return 400 when required fields are missing', async () => {
       await request(app.getHttpServer())
