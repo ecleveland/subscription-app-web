@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -9,7 +14,9 @@ import {
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
+import { BulkOperationDto, BulkAction } from './dto/bulk-operation.dto';
 import { PaginatedSubscriptions } from './interfaces/paginated-subscriptions.interface';
+import { BulkOperationResult } from './interfaces/bulk-operation-result.interface';
 
 @Injectable()
 export class SubscriptionsService {
@@ -225,6 +232,63 @@ export class SubscriptionsService {
       throw new NotFoundException(`Subscription with ID "${id}" not found`);
     }
     this.logger.log({ userId, subscriptionId: id }, 'Subscription deleted');
+  }
+
+  async bulkOperation(
+    userId: string,
+    dto: BulkOperationDto,
+  ): Promise<BulkOperationResult> {
+    const ids = dto.ids.map((id) => new Types.ObjectId(id));
+    const filter = {
+      _id: { $in: ids },
+      userId: new Types.ObjectId(userId),
+    } as Record<string, unknown>;
+
+    const validDocs = await this.subscriptionModel.find(filter).exec();
+    const validIds = validDocs.map((doc) => doc._id);
+    const failed = dto.ids.length - validIds.length;
+
+    if (validIds.length === 0) {
+      return { success: 0, failed };
+    }
+
+    const validFilter = {
+      _id: { $in: validIds },
+      userId: new Types.ObjectId(userId),
+    } as Record<string, unknown>;
+
+    switch (dto.action) {
+      case BulkAction.DELETE:
+        await this.subscriptionModel.deleteMany(validFilter).exec();
+        break;
+      case BulkAction.ACTIVATE:
+        await this.subscriptionModel
+          .updateMany(validFilter, { $set: { isActive: true } })
+          .exec();
+        break;
+      case BulkAction.DEACTIVATE:
+        await this.subscriptionModel
+          .updateMany(validFilter, { $set: { isActive: false } })
+          .exec();
+        break;
+      case BulkAction.CHANGE_CATEGORY:
+        if (!dto.category) {
+          throw new BadRequestException(
+            'Category is required for changeCategory action',
+          );
+        }
+        await this.subscriptionModel
+          .updateMany(validFilter, { $set: { category: dto.category } })
+          .exec();
+        break;
+    }
+
+    this.logger.log(
+      { userId, action: dto.action, count: validIds.length },
+      'Bulk operation completed',
+    );
+
+    return { success: validIds.length, failed };
   }
 
   async removeAllByUserId(userId: string): Promise<number> {

@@ -11,9 +11,15 @@ import CategoryBadge from './CategoryBadge';
 export default function SubscriptionCard({
   subscription,
   onToggleActive,
+  selectionMode,
+  isSelected,
+  onSelect,
 }: {
   subscription: Subscription;
   onToggleActive?: (id: string, isActive: boolean) => void;
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onSelect?: (id: string) => void;
 }) {
   const [isActive, setIsActive] = useState(subscription.isActive !== false);
   const [toggling, setToggling] = useState(false);
@@ -46,14 +52,26 @@ export default function SubscriptionCard({
   return (
     <Link
       href={`/subscriptions/${subscription._id}/edit`}
+      onClick={selectionMode ? (e) => { e.preventDefault(); onSelect?.(subscription._id); } : undefined}
       className={`block border rounded-lg p-4 hover:shadow-sm transition-all ${
-        isActive
-          ? 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 bg-white dark:bg-gray-800'
-          : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
+        selectionMode && isSelected
+          ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
+          : isActive
+            ? 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 bg-white dark:bg-gray-800'
+            : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-1 mb-2">
         <div className="flex items-center gap-2 min-w-0">
+          {selectionMode && (
+            <input
+              type="checkbox"
+              checked={!!isSelected}
+              onChange={(e) => { e.stopPropagation(); onSelect?.(subscription._id); }}
+              onClick={(e) => e.stopPropagation()}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+          )}
           <h3 className={`font-semibold truncate ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
             {subscription.name}
           </h3>

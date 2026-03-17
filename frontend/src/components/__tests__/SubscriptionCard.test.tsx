@@ -137,6 +137,51 @@ describe('SubscriptionCard', () => {
     });
   });
 
+  it('should render checkbox in selection mode', () => {
+    render(
+      <SubscriptionCard
+        subscription={makeSub()}
+        selectionMode={true}
+        isSelected={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('checkbox')).toBeInTheDocument();
+  });
+
+  it('should not render checkbox outside selection mode', () => {
+    render(<SubscriptionCard subscription={makeSub()} />);
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+
+  it('should call onSelect when checkbox is clicked in selection mode', async () => {
+    vi.useRealTimers();
+    const onSelect = vi.fn();
+    render(
+      <SubscriptionCard
+        subscription={makeSub()}
+        selectionMode={true}
+        isSelected={false}
+        onSelect={onSelect}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('checkbox'));
+    expect(onSelect).toHaveBeenCalledWith('sub-1');
+  });
+
+  it('should show selected state with checked checkbox', () => {
+    render(
+      <SubscriptionCard
+        subscription={makeSub()}
+        selectionMode={true}
+        isSelected={true}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('checkbox')).toBeChecked();
+  });
+
   it('should revert toggle on API failure', async () => {
     vi.useRealTimers(); // userEvent.click needs real timers
     vi.mocked(apiFetch).mockRejectedValueOnce(new Error('Network error'));

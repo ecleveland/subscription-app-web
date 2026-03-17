@@ -22,6 +22,7 @@ import { SubscriptionsService } from './subscriptions.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
+import { BulkOperationDto } from './dto/bulk-operation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 
@@ -53,6 +54,15 @@ export class SubscriptionsController {
     @Query() query: QuerySubscriptionDto,
   ) {
     return this.subscriptionsService.findAll(req.user.userId, query);
+  }
+
+  @Post('bulk')
+  @ApiOperation({ summary: 'Perform bulk operations on subscriptions' })
+  @ApiResponse({ status: 200, description: 'Bulk operation result' })
+  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  bulk(@Req() req: AuthenticatedRequest, @Body() bulkDto: BulkOperationDto) {
+    return this.subscriptionsService.bulkOperation(req.user.userId, bulkDto);
   }
 
   @Get(':id')
