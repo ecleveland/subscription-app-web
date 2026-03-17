@@ -242,3 +242,41 @@ describe('DashboardPage pagination', () => {
     });
   });
 });
+
+describe('DashboardPage bulk edit', () => {
+  beforeEach(() => {
+    vi.mocked(apiFetch).mockResolvedValue(makeEnvelope());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should render the Edit Multiple button', async () => {
+    render(<DashboardPage />);
+    expect(await screen.findByText('Edit Multiple')).toBeInTheDocument();
+  });
+
+  it('should enter selection mode when Edit Multiple is clicked', async () => {
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+
+    await user.click(await screen.findByText('Edit Multiple'));
+
+    expect(screen.getByText('Select cards to edit them in bulk')).toBeInTheDocument();
+    expect(screen.queryByText('Edit Multiple')).not.toBeInTheDocument();
+  });
+
+  it('should exit selection mode when Cancel is clicked', async () => {
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+
+    await user.click(await screen.findByText('Edit Multiple'));
+    expect(screen.getByText('Select cards to edit them in bulk')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByText('Edit Multiple')).toBeInTheDocument();
+    expect(screen.queryByText('Select cards to edit them in bulk')).not.toBeInTheDocument();
+  });
+});

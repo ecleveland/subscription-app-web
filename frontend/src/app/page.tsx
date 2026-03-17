@@ -226,6 +226,29 @@ export default function DashboardPage() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       <DashboardSummary subscriptions={allSubscriptions} />
       <SearchInput value={searchTerm} onChange={handleSearchChange} />
+      {!selectionMode ? (
+        <div className="mb-3">
+          <button
+            onClick={() => setSelectionMode(true)}
+            className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            Edit Multiple
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between p-3 mb-4 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800">
+          <span className="text-sm text-blue-700 dark:text-blue-300">Select cards to edit them in bulk</span>
+          <button
+            onClick={exitSelectionMode}
+            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 font-medium"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       <div className="flex items-center gap-2 mb-4">
         <label htmlFor="sort" className="text-sm text-gray-500 dark:text-gray-400">Sort by</label>
         <select
@@ -238,16 +261,6 @@ export default function DashboardPage() {
             <option key={opt.key} value={opt.key}>{opt.label}</option>
           ))}
         </select>
-        <button
-          onClick={selectionMode ? exitSelectionMode : () => setSelectionMode(true)}
-          className={`px-3 py-2 text-sm rounded-lg border ${
-            selectionMode
-              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-              : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-          }`}
-        >
-          {selectionMode ? 'Cancel' : 'Select'}
-        </button>
       </div>
       {selectionMode && selectedIds.size > 0 && (
         <BulkActionToolbar
