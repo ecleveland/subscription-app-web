@@ -960,6 +960,89 @@ describe('SubscriptionsService', () => {
     });
   });
 
+  describe('exportCsv', () => {
+    it('should return CSV with header and data rows', async () => {
+      const sub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-06-01'),
+        notes: 'My notes',
+      };
+      const advanceChain = createChainable([]);
+      const chain = createChainable([sub]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
+
+      const csv = await service.exportCsv(userId, {});
+
+      const lines = csv.split('\n');
+      expect(lines[0]).toBe(
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes',
+      );
+      expect(lines[1]).toBe(
+        'Netflix,15.99,monthly,Streaming,2025-06-01,Active,My notes',
+      );
+    });
+
+    it('should escape fields with commas and quotes', async () => {
+      const sub = {
+        ...mockSubscription,
+        name: 'Netflix, Premium',
+        notes: 'Has "special" chars',
+      };
+      const advanceChain = createChainable([]);
+      const chain = createChainable([sub]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
+
+      const csv = await service.exportCsv(userId, {});
+
+      const lines = csv.split('\n');
+      expect(lines[1]).toContain('"Netflix, Premium"');
+      expect(lines[1]).toContain('"Has ""special"" chars"');
+    });
+
+    it('should return header only for empty list', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
+
+      const csv = await service.exportCsv(userId, {});
+
+      const lines = csv.split('\n');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toBe(
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes',
+      );
+    });
+
+    it('should pass filter params through with limit=0', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
+
+      await service.exportCsv(userId, {
+        category: 'Streaming',
+        sortBy: 'name',
+        sortOrder: 'asc',
+      });
+
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ category: 'Streaming' }),
+      );
+    });
+  });
+
   describe('getMonthlyCost', () => {
     it('should return cost as-is for monthly billing', () => {
       expect(

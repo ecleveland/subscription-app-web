@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  Res,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -25,6 +26,7 @@ import { QuerySubscriptionDto } from './dto/query-subscription.dto';
 import { BulkOperationDto } from './dto/bulk-operation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
+import { Response } from 'express';
 
 @ApiTags('Subscriptions')
 @ApiBearerAuth()
@@ -54,6 +56,27 @@ export class SubscriptionsController {
     @Query() query: QuerySubscriptionDto,
   ) {
     return this.subscriptionsService.findAll(req.user.userId, query);
+  }
+
+  @Get('export')
+  @ApiOperation({ summary: 'Export subscriptions as CSV' })
+  @ApiResponse({ status: 200, description: 'CSV file download' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async exportCsv(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: QuerySubscriptionDto,
+    @Res() res: Response,
+  ) {
+    const csv = await this.subscriptionsService.exportCsv(
+      req.user.userId,
+      query,
+    );
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="subscriptions.csv"',
+    );
+    res.send(csv);
   }
 
   @Post('bulk')

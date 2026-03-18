@@ -621,6 +621,43 @@ describe('Subscriptions (e2e)', () => {
     });
   });
 
+  describe('CSV Export', () => {
+    it('should return CSV with correct Content-Type and Content-Disposition', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions/export')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.headers['content-type']).toContain('text/csv');
+      expect(res.headers['content-disposition']).toBe(
+        'attachment; filename="subscriptions.csv"',
+      );
+      const lines = res.text.split('\n');
+      expect(lines[0]).toBe(
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes',
+      );
+      // userB has 4 subscriptions from "Filtering and sorting" beforeAll
+      expect(lines.length).toBeGreaterThanOrEqual(5);
+    });
+
+    it('should return 401 without auth', async () => {
+      await request(app.getHttpServer())
+        .get('/api/subscriptions/export')
+        .expect(401);
+    });
+
+    it('should respect category filter', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions/export?category=Software')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      const lines = res.text.split('\n');
+      // header + 2 Software subscriptions (AWS, GitHub Pro)
+      expect(lines).toHaveLength(3);
+    });
+  });
+
   describe('Validation', () => {
     it('should return 400 when required fields are missing', async () => {
       await request(app.getHttpServer())
