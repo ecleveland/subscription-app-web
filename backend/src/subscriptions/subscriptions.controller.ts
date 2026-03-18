@@ -26,7 +26,7 @@ import { QuerySubscriptionDto } from './dto/query-subscription.dto';
 import { BulkOperationDto } from './dto/bulk-operation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
-import { Response } from 'express';
+import type { Response } from 'express';
 
 @ApiTags('Subscriptions')
 @ApiBearerAuth()
