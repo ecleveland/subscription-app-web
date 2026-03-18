@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { formatCurrency, formatDate, daysUntil, getMonthlyCost } from '@/lib/utils';
 import { showErrorToast } from '@/lib/toast';
 import CategoryBadge from './CategoryBadge';
+import TagBadge from './TagBadge';
 
 export default function SubscriptionCard({
   subscription,
@@ -113,6 +114,13 @@ export default function SubscriptionCard({
           </span>
         )}
       </div>
+      {subscription.tags && subscription.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {subscription.tags.map((tag) => (
+            <TagBadge key={tag} tag={tag} />
+          ))}
+        </div>
+      )}
       <div className="text-sm text-gray-500 dark:text-gray-400">
         Next billing: {formatDate(subscription.nextBillingDate)}
         {isActive && days >= 0 && (

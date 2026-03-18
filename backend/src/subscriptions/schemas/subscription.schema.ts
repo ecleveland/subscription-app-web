@@ -32,6 +32,9 @@ export class Subscription {
   @Prop({ trim: true })
   notes?: string;
 
+  @Prop({ type: [String], default: [] })
+  tags: string[];
+
   @Prop({ default: true })
   isActive: boolean;
 

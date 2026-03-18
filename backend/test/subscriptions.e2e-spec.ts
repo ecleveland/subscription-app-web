@@ -634,7 +634,7 @@ describe('Subscriptions (e2e)', () => {
       );
       const lines = res.text.split('\n');
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags',
       );
       // userB has 4 subscriptions from "Filtering and sorting" beforeAll
       expect(lines.length).toBeGreaterThanOrEqual(5);
@@ -655,6 +655,73 @@ describe('Subscriptions (e2e)', () => {
       const lines = res.text.split('\n');
       // header + 2 Software subscriptions (AWS, GitHub Pro)
       expect(lines).toHaveLength(3);
+    });
+  });
+
+  describe('Tags', () => {
+    let tagSubId: string;
+
+    it('should create a subscription with tags', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Tagged Sub',
+          cost: 10,
+          billingCycle: 'monthly',
+          nextBillingDate: '2026-07-01',
+          category: 'Software',
+          tags: ['shared', 'essential'],
+        })
+        .expect(201);
+
+      expect(res.body.tags).toEqual(['shared', 'essential']);
+      tagSubId = res.body._id;
+    });
+
+    it('should update tags on a subscription', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/subscriptions/${tagSubId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ tags: ['updated'] })
+        .expect(200);
+
+      expect(res.body.tags).toEqual(['updated']);
+    });
+
+    it('should filter subscriptions by tags', async () => {
+      // Create another subscription with a different tag
+      await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Other Tagged Sub',
+          cost: 20,
+          billingCycle: 'monthly',
+          nextBillingDate: '2026-07-01',
+          category: 'Software',
+          tags: ['unique-tag'],
+        });
+
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?tags=unique-tag')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(
+        res.body.data.every((s: any) => s.tags.includes('unique-tag')),
+      ).toBe(true);
+    });
+
+    it('should include tags in CSV export', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions/export')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      const lines = res.text.split('\n');
+      expect(lines[0]).toContain('Tags');
     });
   });
 

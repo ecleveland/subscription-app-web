@@ -36,7 +36,9 @@ const existingSub: Subscription = {
   nextBillingDate: '2025-06-15T00:00:00.000Z',
   category: 'Streaming',
   notes: 'Family plan',
+  tags: ['shared', 'essential'],
   isActive: true,
+  reminderDaysBefore: 3,
   createdAt: '2025-01-01',
   updatedAt: '2025-01-01',
 };
@@ -120,6 +122,8 @@ describe('SubscriptionForm', () => {
       expect(screen.getByLabelText('Name')).toHaveValue('Netflix');
       expect(screen.getByLabelText('Cost ($)')).toHaveValue(15.99);
       expect(screen.getByLabelText('Notes (optional)')).toHaveValue('Family plan');
+      expect(screen.getByText('shared')).toBeInTheDocument();
+      expect(screen.getByText('essential')).toBeInTheDocument();
     });
 
     it('should show Update button', () => {
@@ -147,6 +151,23 @@ describe('SubscriptionForm', () => {
           method: 'PATCH',
           body: expect.stringContaining('"name":"Netflix Premium"'),
         });
+      });
+    });
+
+    it('should include tags in submit body', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm subscription={existingSub} />);
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => {
+        expect(apiFetch).toHaveBeenCalled();
+        const body = JSON.parse(
+          vi.mocked(apiFetch).mock.calls[0][1]!.body as string,
+        );
+        expect(body.tags).toEqual(['shared', 'essential']);
       });
     });
 

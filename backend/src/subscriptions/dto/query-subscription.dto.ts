@@ -29,6 +29,14 @@ export class QuerySubscriptionDto {
   billingCycle?: BillingCycle;
 
   @ApiPropertyOptional({
+    description: 'Filter by tags (comma-separated)',
+    example: 'shared,essential',
+  })
+  @IsOptional()
+  @IsString()
+  tags?: string;
+
+  @ApiPropertyOptional({
     enum: ['name', 'cost', 'nextBillingDate', 'createdAt'],
     description: 'Field to sort results by',
     example: 'cost',

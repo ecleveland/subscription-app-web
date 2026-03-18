@@ -170,6 +170,19 @@ describe('SubscriptionCard', () => {
     expect(onSelect).toHaveBeenCalledWith('sub-1');
   });
 
+  it('should render tags as badges', () => {
+    render(
+      <SubscriptionCard subscription={makeSub({ tags: ['shared', 'essential'] })} />,
+    );
+    expect(screen.getByText('shared')).toBeInTheDocument();
+    expect(screen.getByText('essential')).toBeInTheDocument();
+  });
+
+  it('should not render tag section when tags are empty', () => {
+    render(<SubscriptionCard subscription={makeSub({ tags: [] })} />);
+    expect(screen.queryByText('shared')).not.toBeInTheDocument();
+  });
+
   it('should show selected state with checked checkbox', () => {
     render(
       <SubscriptionCard
