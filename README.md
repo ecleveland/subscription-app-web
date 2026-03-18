@@ -6,11 +6,18 @@ A full-stack web app for tracking and managing recurring subscriptions.
 
 - Track subscriptions with cost, billing cycle (weekly/monthly/yearly), and next billing date
 - Dashboard with daily, weekly, monthly, and yearly cost analytics
+- Calendar view for upcoming billing dates
 - Categorize subscriptions (Streaming, Software, Gaming, etc.)
+- Custom tags for flexible organization
+- Trial tracking with end-date countdown and badges
 - Toggle subscriptions active/inactive
 - Sort by name, cost, or next billing date
+- Export subscriptions as CSV
+- Bulk operations (activate, deactivate, delete)
+- In-app notification system
 - Dark mode / light mode
-- User registration and JWT authentication
+- User registration and JWT authentication with refresh tokens
+- Password reset via email (forgot password flow)
 - User profile management with avatar and password change
 - Admin panel for user management (role-based access)
 - Fully responsive (mobile-first)
@@ -98,13 +105,32 @@ All routes are prefixed with `/api`. Subscription and admin routes require a JWT
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| POST | `/api/auth/login` | No | Login — returns `{ access_token }` |
+| POST | `/api/auth/login` | No | Login — returns access and refresh tokens |
 | POST | `/api/auth/register` | No | Register a new user |
+| POST | `/api/auth/refresh` | No | Refresh access token |
+| POST | `/api/auth/logout` | Yes | Revoke refresh token (returns 204) |
+| POST | `/api/auth/forgot-password` | No | Request a password reset email |
+| POST | `/api/auth/reset-password` | No | Reset password with token |
+| GET | `/api/users/me` | Yes | Get current user profile |
+| PATCH | `/api/users/me` | Yes | Update current user profile |
+| POST | `/api/users/me/change-password` | Yes | Change password (returns 204) |
 | GET | `/api/subscriptions` | Yes | List all (query: `category`, `sortBy`, `sortOrder`) |
 | POST | `/api/subscriptions` | Yes | Create a subscription |
+| GET | `/api/subscriptions/export` | Yes | Export subscriptions as CSV |
+| POST | `/api/subscriptions/bulk` | Yes | Bulk operations (activate, deactivate, delete) |
 | GET | `/api/subscriptions/:id` | Yes | Get one subscription |
 | PATCH | `/api/subscriptions/:id` | Yes | Update (partial) |
 | DELETE | `/api/subscriptions/:id` | Yes | Delete (returns 204) |
+| GET | `/api/notifications` | Yes | List notifications |
+| GET | `/api/notifications/unread-count` | Yes | Get unread notification count |
+| PATCH | `/api/notifications/:id/read` | Yes | Mark notification as read |
+| POST | `/api/notifications/mark-all-read` | Yes | Mark all as read (returns 204) |
+| DELETE | `/api/notifications/:id` | Yes | Delete a notification (returns 204) |
+| GET | `/api/admin/users` | Admin | List all users |
+| POST | `/api/admin/users` | Admin | Create a user |
+| GET | `/api/admin/users/:id` | Admin | Get a user |
+| PATCH | `/api/admin/users/:id` | Admin | Update a user (role, etc.) |
+| DELETE | `/api/admin/users/:id` | Admin | Delete a user (returns 204) |
 
 ## Project Structure
 
@@ -113,17 +139,24 @@ subscription-app-web/
 ├── backend/
 │   └── src/
 │       ├── admin/            # Admin module (user management)
-│       ├── auth/             # Auth module (login, JWT, guards)
+│       ├── auth/             # Auth module (login, JWT, guards, password reset)
 │       ├── config/           # App configuration
+│       ├── health/           # Health check endpoint
+│       ├── mail/             # Email service (password reset emails)
+│       ├── notifications/    # Notifications module
 │       ├── subscriptions/    # Subscriptions CRUD module
 │       └── users/            # Users module (profiles, registration)
 ├── frontend/
 │   └── src/
 │       ├── app/              # Next.js App Router pages
 │       │   ├── admin/        # Admin panel
+│       │   ├── analytics/    # Cost analytics dashboard
+│       │   ├── calendar/     # Billing calendar view
+│       │   ├── forgot-password/ # Forgot password page
 │       │   ├── login/        # Login page
 │       │   ├── profile/      # User profile page
 │       │   ├── register/     # Registration page
+│       │   ├── reset-password/  # Reset password page
 │       │   └── subscriptions/# Subscription management
 │       ├── components/       # Shared React components
 │       └── lib/              # API client, utilities
