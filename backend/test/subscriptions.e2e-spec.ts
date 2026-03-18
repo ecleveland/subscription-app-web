@@ -634,7 +634,7 @@ describe('Subscriptions (e2e)', () => {
       );
       const lines = res.text.split('\n');
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With',
       );
       // userB has 4 subscriptions from "Filtering and sorting" beforeAll
       expect(lines.length).toBeGreaterThanOrEqual(5);
@@ -722,6 +722,82 @@ describe('Subscriptions (e2e)', () => {
 
       const lines = res.text.split('\n');
       expect(lines[0]).toContain('Tags');
+    });
+  });
+
+  describe('Shared subscriptions', () => {
+    let sharedSubId: string;
+
+    it('should create a subscription with sharedWith', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Family Plan',
+          cost: 30,
+          billingCycle: 'monthly',
+          nextBillingDate: '2026-07-01',
+          category: 'Streaming',
+          sharedWith: 3,
+        })
+        .expect(201);
+
+      expect(res.body.sharedWith).toBe(3);
+      sharedSubId = res.body._id;
+    });
+
+    it('should update sharedWith to null to clear it', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ sharedWith: null })
+        .expect(200);
+
+      expect(res.body.sharedWith).toBeNull();
+    });
+
+    it('should reject sharedWith of 1 (minimum is 2)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Bad Share',
+          cost: 10,
+          billingCycle: 'monthly',
+          nextBillingDate: '2026-07-01',
+          category: 'Other',
+          sharedWith: 1,
+        })
+        .expect(400);
+    });
+
+    it('should filter shared subscriptions with ?shared=shared', async () => {
+      // Re-set sharedWith on the sub
+      await request(app.getHttpServer())
+        .patch(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ sharedWith: 3 });
+
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?shared=shared&limit=0')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.data.every((s: any) => s.sharedWith >= 2)).toBe(true);
+    });
+
+    it('should filter individual subscriptions with ?shared=individual', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?shared=individual&limit=0')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      expect(
+        res.body.data.every(
+          (s: any) => s.sharedWith == null || s.sharedWith < 2,
+        ),
+      ).toBe(true);
     });
   });
 

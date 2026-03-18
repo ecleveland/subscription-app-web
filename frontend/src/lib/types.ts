@@ -22,6 +22,7 @@ export interface Subscription {
   isActive: boolean;
   reminderDaysBefore: number;
   trialEndDate?: string;
+  sharedWith?: number | null;
   createdAt: string;
   updatedAt: string;
 }

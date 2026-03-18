@@ -39,6 +39,7 @@ export default function DashboardPage() {
   const [confirmAction, setConfirmAction] = useState<{ action: BulkAction; category?: string } | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [sharedFilter, setSharedFilter] = useState<'all' | 'shared' | 'individual'>('all');
 
   function handleSortChange(newSortKey: string) {
     setSortKey(newSortKey);
@@ -199,8 +200,10 @@ export default function DashboardPage() {
 
   const isTagFiltering = selectedTags.size > 0;
 
+  const isSharedFiltering = sharedFilter !== 'all';
+
   const { displaySubscriptions, displayMeta } = useMemo(() => {
-    if (!isSearching && !isTagFiltering) {
+    if (!isSearching && !isTagFiltering && !isSharedFiltering) {
       return { displaySubscriptions: subscriptions, displayMeta: meta };
     }
 
@@ -218,6 +221,14 @@ export default function DashboardPage() {
     if (isTagFiltering) {
       filtered = filtered.filter(
         (sub) => sub.tags?.some((t) => selectedTags.has(t)),
+      );
+    }
+
+    if (isSharedFiltering) {
+      filtered = filtered.filter((sub) =>
+        sharedFilter === 'shared'
+          ? sub.sharedWith != null && sub.sharedWith >= 2
+          : sub.sharedWith == null || sub.sharedWith < 2,
       );
     }
 
@@ -256,7 +267,7 @@ export default function DashboardPage() {
         hasNextPage: page < totalPages,
       } as PaginationMeta,
     };
-  }, [isSearching, isTagFiltering, debouncedSearch, selectedTags, allSubscriptions, subscriptions, meta, sortKey, page]);
+  }, [isSearching, isTagFiltering, isSharedFiltering, debouncedSearch, selectedTags, sharedFilter, allSubscriptions, subscriptions, meta, sortKey, page]);
 
   if (loading) {
     return (
@@ -287,6 +298,21 @@ export default function DashboardPage() {
           ))}
         </div>
       )}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {(['all', 'shared', 'individual'] as const).map((value) => (
+          <button
+            key={value}
+            onClick={() => { setSharedFilter(value); setPage(1); }}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+              sharedFilter === value
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            {value === 'all' ? 'All' : value === 'shared' ? 'Shared' : 'Individual'}
+          </button>
+        ))}
+      </div>
       {!selectionMode ? (
         <div className="mb-3">
           <button

@@ -45,6 +45,14 @@ export function getWeeklyCost(
   return billingCycle === 'yearly' ? cost / (365 / 7) : cost / (365 / 12 / 7);
 }
 
+export function getPersonalShare(
+  cost: number,
+  sharedWith?: number | null,
+): number {
+  if (sharedWith != null && sharedWith >= 2) return cost / sharedWith;
+  return cost;
+}
+
 export function daysUntil(date: Date | string): number {
   const now = new Date();
   const target = new Date(date);

@@ -1,4 +1,4 @@
-import { formatCurrency, formatDate, getDailyCost, getWeeklyCost, getMonthlyCost, getYearlyCost, daysUntil } from '../utils';
+import { formatCurrency, formatDate, getDailyCost, getWeeklyCost, getMonthlyCost, getYearlyCost, getPersonalShare, daysUntil } from '../utils';
 
 describe('formatCurrency', () => {
   it('should format a typical price', () => {
@@ -86,6 +86,28 @@ describe('getWeeklyCost', () => {
 
   it('should return cost as-is for weekly billing', () => {
     expect(getWeeklyCost(25, 'weekly')).toBe(25);
+  });
+});
+
+describe('getPersonalShare', () => {
+  it('should return full cost when sharedWith is undefined', () => {
+    expect(getPersonalShare(30, undefined)).toBe(30);
+  });
+
+  it('should return full cost when sharedWith is null', () => {
+    expect(getPersonalShare(30, null)).toBe(30);
+  });
+
+  it('should return full cost when sharedWith is 1', () => {
+    expect(getPersonalShare(30, 1)).toBe(30);
+  });
+
+  it('should divide cost by sharedWith when >= 2', () => {
+    expect(getPersonalShare(30, 3)).toBe(10);
+  });
+
+  it('should split evenly for 2 people', () => {
+    expect(getPersonalShare(20, 2)).toBe(10);
   });
 });
 

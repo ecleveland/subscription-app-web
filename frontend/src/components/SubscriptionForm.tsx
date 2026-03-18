@@ -32,6 +32,12 @@ export default function SubscriptionForm({ subscription }: Props) {
   const [reminderDaysBefore, setReminderDaysBefore] = useState(
     subscription?.reminderDaysBefore?.toString() ?? '3',
   );
+  const [isShared, setIsShared] = useState(
+    subscription?.sharedWith != null && subscription.sharedWith >= 2,
+  );
+  const [sharedWith, setSharedWith] = useState(
+    subscription?.sharedWith?.toString() ?? '',
+  );
   const [hasTrial, setHasTrial] = useState(!!subscription?.trialEndDate);
   const [trialEndDate, setTrialEndDate] = useState(
     subscription?.trialEndDate
@@ -62,6 +68,12 @@ export default function SubscriptionForm({ subscription }: Props) {
       body.trialEndDate = trialEndDate;
     } else if (!hasTrial && isEditing) {
       body.trialEndDate = null;
+    }
+
+    if (isShared && sharedWith) {
+      body.sharedWith = parseInt(sharedWith, 10);
+    } else if (!isShared && isEditing) {
+      body.sharedWith = null;
     }
 
     try {
@@ -256,6 +268,36 @@ export default function SubscriptionForm({ subscription }: Props) {
             value={trialEndDate}
             onChange={(e) => setTrialEndDate(e.target.value)}
             className={inputClasses}
+          />
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <input
+          id="isShared"
+          type="checkbox"
+          checked={isShared}
+          onChange={(e) => setIsShared(e.target.checked)}
+          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+        />
+        <label htmlFor="isShared" className={labelClasses}>
+          Shared subscription
+        </label>
+      </div>
+
+      {isShared && (
+        <div>
+          <label htmlFor="sharedWith" className={labelClasses}>
+            Number of people sharing (including you)
+          </label>
+          <input
+            id="sharedWith"
+            type="number"
+            min="2"
+            value={sharedWith}
+            onChange={(e) => setSharedWith(e.target.value)}
+            className={inputClasses}
+            placeholder="2"
           />
         </div>
       )}
