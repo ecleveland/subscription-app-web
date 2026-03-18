@@ -27,6 +27,10 @@ export default function SubscriptionCard({
   const days = daysUntil(subscription.nextBillingDate);
   const monthly = getMonthlyCost(subscription.cost, subscription.billingCycle);
 
+  const trialDays = subscription.trialEndDate ? daysUntil(subscription.trialEndDate) : -1;
+  const isTrialActive = trialDays > 0;
+  const isTrialExpiringSoon = isTrialActive && trialDays <= 3;
+
   async function handleToggle(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -57,9 +61,11 @@ export default function SubscriptionCard({
       className={`block border rounded-lg p-4 hover:shadow-sm transition-all ${
         selectionMode && isSelected
           ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
-          : isActive
-            ? 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 bg-white dark:bg-gray-800'
-            : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
+          : isTrialExpiringSoon
+            ? 'border-orange-400 dark:border-orange-500 bg-orange-50 dark:bg-orange-900/20'
+            : isActive
+              ? 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 bg-white dark:bg-gray-800'
+              : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-1 mb-2">
@@ -79,6 +85,15 @@ export default function SubscriptionCard({
           {!isActive && (
             <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-500 dark:text-gray-400">
               Inactive
+            </span>
+          )}
+          {isTrialActive && (
+            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+              isTrialExpiringSoon
+                ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
+                : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+            }`}>
+              Trial
             </span>
           )}
         </div>
@@ -119,6 +134,13 @@ export default function SubscriptionCard({
           {subscription.tags.map((tag) => (
             <TagBadge key={tag} tag={tag} />
           ))}
+        </div>
+      )}
+      {isTrialActive && (
+        <div className={`text-sm font-medium mb-1 ${
+          isTrialExpiringSoon ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'
+        }`}>
+          Trial ends in {trialDays} day{trialDays === 1 ? '' : 's'}
         </div>
       )}
       <div className="text-sm text-gray-500 dark:text-gray-400">

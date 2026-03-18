@@ -319,10 +319,13 @@ export class SubscriptionsService {
     const { data } = await this.findAll(userId, { ...query, limit: 0 });
 
     const header =
-      'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags';
+      'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date';
     const rows = data.map((sub) => {
       const date = sub.nextBillingDate
         ? new Date(sub.nextBillingDate).toISOString().split('T')[0]
+        : '';
+      const trialDate = sub.trialEndDate
+        ? new Date(sub.trialEndDate).toISOString().split('T')[0]
         : '';
       return [
         this.escapeCsvField(sub.name),
@@ -333,6 +336,7 @@ export class SubscriptionsService {
         sub.isActive ? 'Active' : 'Inactive',
         this.escapeCsvField(sub.notes || ''),
         this.escapeCsvField((sub.tags || []).join('; ')),
+        trialDate,
       ].join(',');
     });
 

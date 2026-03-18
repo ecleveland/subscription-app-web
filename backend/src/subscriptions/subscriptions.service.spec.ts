@@ -995,10 +995,10 @@ describe('SubscriptionsService', () => {
 
       const lines = csv.split('\n');
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date',
       );
       expect(lines[1]).toBe(
-        'Netflix,15.99,monthly,Streaming,2025-06-01,Active,My notes,shared; essential',
+        'Netflix,15.99,monthly,Streaming,2025-06-01,Active,My notes,shared; essential,',
       );
     });
 
@@ -1042,6 +1042,49 @@ describe('SubscriptionsService', () => {
       expect(lines[1]).toContain('work; team');
     });
 
+    it('should include trialEndDate in CSV when set', async () => {
+      const sub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-06-01'),
+        notes: '',
+        tags: [],
+        trialEndDate: new Date('2025-07-15'),
+      };
+      const advanceChain = createChainable([]);
+      const chain = createChainable([sub]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
+
+      const csv = await service.exportCsv(userId, {});
+
+      const lines = csv.split('\n');
+      expect(lines[1]).toContain(',2025-07-15');
+    });
+
+    it('should have empty trialEndDate field when unset', async () => {
+      const sub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-06-01'),
+        notes: '',
+        tags: [],
+      };
+      const advanceChain = createChainable([]);
+      const chain = createChainable([sub]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
+
+      const csv = await service.exportCsv(userId, {});
+
+      const lines = csv.split('\n');
+      // Last field should be empty (trailing comma produces empty string)
+      const fields = lines[1].split(',');
+      expect(fields[fields.length - 1]).toBe('');
+    });
+
     it('should return header only for empty list', async () => {
       const advanceChain = createChainable([]);
       const chain = createChainable([]);
@@ -1055,7 +1098,7 @@ describe('SubscriptionsService', () => {
       const lines = csv.split('\n');
       expect(lines).toHaveLength(1);
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date',
       );
     });
 

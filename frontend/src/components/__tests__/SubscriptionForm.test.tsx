@@ -200,6 +200,77 @@ describe('SubscriptionForm', () => {
     });
   });
 
+  describe('trial tracking', () => {
+    it('should hide trial date input by default', () => {
+      render(<SubscriptionForm />);
+      expect(screen.queryByLabelText('Trial End Date')).not.toBeInTheDocument();
+    });
+
+    it('should show trial date input when checkbox is checked', async () => {
+      const user = userEvent.setup();
+      render(<SubscriptionForm />);
+
+      await user.click(screen.getByLabelText('Has free trial'));
+      expect(screen.getByLabelText('Trial End Date')).toBeInTheDocument();
+    });
+
+    it('should pre-fill trial fields in edit mode when subscription has trialEndDate', () => {
+      render(
+        <SubscriptionForm
+          subscription={{ ...existingSub, trialEndDate: '2025-07-15T00:00:00.000Z' }}
+        />,
+      );
+      expect(screen.getByLabelText('Has free trial')).toBeChecked();
+      expect(screen.getByLabelText('Trial End Date')).toHaveValue('2025-07-15');
+    });
+
+    it('should include trialEndDate in submit when enabled', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm />);
+
+      await user.type(screen.getByLabelText('Name'), 'Test');
+      await user.type(screen.getByLabelText('Cost ($)'), '5');
+      await user.type(screen.getByLabelText('Next Billing Date'), '2025-07-01');
+      await user.click(screen.getByLabelText('Has free trial'));
+      await user.type(screen.getByLabelText('Trial End Date'), '2025-08-01');
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => {
+        expect(apiFetch).toHaveBeenCalled();
+        const body = JSON.parse(
+          vi.mocked(apiFetch).mock.calls[0][1]!.body as string,
+        );
+        expect(body.trialEndDate).toBe('2025-08-01');
+      });
+    });
+
+    it('should send null trialEndDate when toggle unchecked in edit mode', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(
+        <SubscriptionForm
+          subscription={{ ...existingSub, trialEndDate: '2025-07-15T00:00:00.000Z' }}
+        />,
+      );
+
+      // Uncheck the trial checkbox
+      await user.click(screen.getByLabelText('Has free trial'));
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => {
+        expect(apiFetch).toHaveBeenCalled();
+        const body = JSON.parse(
+          vi.mocked(apiFetch).mock.calls[0][1]!.body as string,
+        );
+        expect(body.trialEndDate).toBeNull();
+      });
+    });
+  });
+
   describe('loading state', () => {
     it('should show Saving... and disable button during submission', async () => {
       const user = userEvent.setup();

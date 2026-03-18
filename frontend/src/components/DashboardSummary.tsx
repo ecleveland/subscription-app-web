@@ -5,6 +5,7 @@ import {
   getWeeklyCost,
   getMonthlyCost,
   getYearlyCost,
+  daysUntil,
 } from '@/lib/utils';
 
 export default function DashboardSummary({
@@ -32,6 +33,13 @@ export default function DashboardSummary({
   const totalYearly = activeSubscriptions.reduce(
     (sum, sub) => sum + getYearlyCost(sub.cost, sub.billingCycle),
     0,
+  );
+
+  const activeTrials = subscriptions.filter(
+    (sub) => sub.trialEndDate && daysUntil(sub.trialEndDate) > 0,
+  );
+  const expiringSoonTrials = activeTrials.filter(
+    (sub) => daysUntil(sub.trialEndDate!) <= 3,
   );
 
   const tileClass =
@@ -77,6 +85,22 @@ export default function DashboardSummary({
           {inactiveCount} inactive
         </p>
       </div>
+      {activeTrials.length > 0 && (
+        <div className={tileClass}>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Trials</p>
+          <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {activeTrials.length}{' '}
+            <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+              active
+            </span>
+          </p>
+          {expiringSoonTrials.length > 0 && (
+            <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">
+              {expiringSoonTrials.length} expiring soon
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

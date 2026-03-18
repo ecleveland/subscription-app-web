@@ -634,7 +634,7 @@ describe('Subscriptions (e2e)', () => {
       );
       const lines = res.text.split('\n');
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date',
       );
       // userB has 4 subscriptions from "Filtering and sorting" beforeAll
       expect(lines.length).toBeGreaterThanOrEqual(5);

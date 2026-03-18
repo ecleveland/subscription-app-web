@@ -40,6 +40,9 @@ export class Subscription {
 
   @Prop({ default: 3, min: 0, max: 30 })
   reminderDaysBefore: number;
+
+  @Prop({ required: false })
+  trialEndDate?: Date;
 }
 
 export const SubscriptionSchema = SchemaFactory.createForClass(Subscription);

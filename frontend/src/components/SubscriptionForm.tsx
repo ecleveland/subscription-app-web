@@ -32,6 +32,12 @@ export default function SubscriptionForm({ subscription }: Props) {
   const [reminderDaysBefore, setReminderDaysBefore] = useState(
     subscription?.reminderDaysBefore?.toString() ?? '3',
   );
+  const [hasTrial, setHasTrial] = useState(!!subscription?.trialEndDate);
+  const [trialEndDate, setTrialEndDate] = useState(
+    subscription?.trialEndDate
+      ? new Date(subscription.trialEndDate).toISOString().split('T')[0]
+      : '',
+  );
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -40,7 +46,7 @@ export default function SubscriptionForm({ subscription }: Props) {
     setError('');
     setLoading(true);
 
-    const body = {
+    const body: Record<string, unknown> = {
       name,
       cost: parseFloat(cost),
       billingCycle,
@@ -51,6 +57,12 @@ export default function SubscriptionForm({ subscription }: Props) {
       ...(notes ? { notes } : {}),
       tags,
     };
+
+    if (hasTrial && trialEndDate) {
+      body.trialEndDate = trialEndDate;
+    } else if (!hasTrial && isEditing) {
+      body.trialEndDate = null;
+    }
 
     try {
       if (isEditing) {
@@ -219,6 +231,34 @@ export default function SubscriptionForm({ subscription }: Props) {
           Set to 0 to disable reminders for this subscription.
         </p>
       </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          id="hasTrial"
+          type="checkbox"
+          checked={hasTrial}
+          onChange={(e) => setHasTrial(e.target.checked)}
+          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+        />
+        <label htmlFor="hasTrial" className={labelClasses}>
+          Has free trial
+        </label>
+      </div>
+
+      {hasTrial && (
+        <div>
+          <label htmlFor="trialEndDate" className={labelClasses}>
+            Trial End Date
+          </label>
+          <input
+            id="trialEndDate"
+            type="date"
+            value={trialEndDate}
+            onChange={(e) => setTrialEndDate(e.target.value)}
+            className={inputClasses}
+          />
+        </div>
+      )}
 
       <div>
         <label htmlFor="notes" className={labelClasses}>
