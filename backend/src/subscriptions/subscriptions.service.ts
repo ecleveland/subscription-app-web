@@ -149,6 +149,15 @@ export class SubscriptionsService {
     if (query.billingCycle) {
       filter.billingCycle = query.billingCycle;
     }
+    if (query.tags) {
+      const tagList = query.tags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      if (tagList.length > 0) {
+        filter.tags = { $in: tagList };
+      }
+    }
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -310,7 +319,7 @@ export class SubscriptionsService {
     const { data } = await this.findAll(userId, { ...query, limit: 0 });
 
     const header =
-      'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes';
+      'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags';
     const rows = data.map((sub) => {
       const date = sub.nextBillingDate
         ? new Date(sub.nextBillingDate).toISOString().split('T')[0]
@@ -323,6 +332,7 @@ export class SubscriptionsService {
         date,
         sub.isActive ? 'Active' : 'Inactive',
         this.escapeCsvField(sub.notes || ''),
+        this.escapeCsvField((sub.tags || []).join('; ')),
       ].join(',');
     });
 

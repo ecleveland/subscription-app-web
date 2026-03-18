@@ -433,6 +433,22 @@ describe('SubscriptionsService', () => {
       );
     });
 
+    it('should filter by tags when provided', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
+
+      await service.findAll(userId, { tags: 'shared,essential' });
+
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ tags: { $in: ['shared', 'essential'] } }),
+      );
+    });
+
     it('should filter by weekly billingCycle when provided', async () => {
       const advanceChain = createChainable([]);
       const chain = createChainable([]);
@@ -966,6 +982,7 @@ describe('SubscriptionsService', () => {
         ...mockSubscription,
         nextBillingDate: new Date('2025-06-01'),
         notes: 'My notes',
+        tags: ['shared', 'essential'],
       };
       const advanceChain = createChainable([]);
       const chain = createChainable([sub]);
@@ -978,10 +995,10 @@ describe('SubscriptionsService', () => {
 
       const lines = csv.split('\n');
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags',
       );
       expect(lines[1]).toBe(
-        'Netflix,15.99,monthly,Streaming,2025-06-01,Active,My notes',
+        'Netflix,15.99,monthly,Streaming,2025-06-01,Active,My notes,shared; essential',
       );
     });
 
@@ -1005,6 +1022,26 @@ describe('SubscriptionsService', () => {
       expect(lines[1]).toContain('"Has ""special"" chars"');
     });
 
+    it('should include tags in CSV export', async () => {
+      const sub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-06-01'),
+        notes: '',
+        tags: ['work', 'team'],
+      };
+      const advanceChain = createChainable([]);
+      const chain = createChainable([sub]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
+
+      const csv = await service.exportCsv(userId, {});
+
+      const lines = csv.split('\n');
+      expect(lines[1]).toContain('work; team');
+    });
+
     it('should return header only for empty list', async () => {
       const advanceChain = createChainable([]);
       const chain = createChainable([]);
@@ -1018,7 +1055,7 @@ describe('SubscriptionsService', () => {
       const lines = csv.split('\n');
       expect(lines).toHaveLength(1);
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags',
       );
     });
 

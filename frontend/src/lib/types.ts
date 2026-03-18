@@ -18,6 +18,7 @@ export interface Subscription {
   nextBillingDate: string;
   category: string;
   notes?: string;
+  tags?: string[];
   isActive: boolean;
   reminderDaysBefore: number;
   createdAt: string;

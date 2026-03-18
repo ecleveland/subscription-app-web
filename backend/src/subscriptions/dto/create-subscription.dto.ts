@@ -6,6 +6,7 @@ import {
   IsDateString,
   IsOptional,
   IsBoolean,
+  IsArray,
   Min,
   Max,
 } from 'class-validator';
@@ -57,6 +58,16 @@ export class CreateSubscriptionDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Custom tags for organizing subscriptions',
+    example: ['shared', 'essential'],
+    type: [String],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  tags?: string[];
 
   @ApiPropertyOptional({
     description: 'Whether the subscription is currently active',

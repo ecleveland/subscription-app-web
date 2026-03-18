@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ action: BulkAction; category?: string } | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
 
   function handleSortChange(newSortKey: string) {
     setSortKey(newSortKey);
@@ -178,19 +179,47 @@ export default function DashboardPage() {
     }
   }
 
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    allSubscriptions.forEach((sub) => sub.tags?.forEach((t) => tagSet.add(t)));
+    return Array.from(tagSet).sort();
+  }, [allSubscriptions]);
+
+  function toggleTag(tag: string) {
+    setSelectedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+    setPage(1);
+  }
+
   const isSearching = debouncedSearch.trim().length > 0;
 
+  const isTagFiltering = selectedTags.size > 0;
+
   const { displaySubscriptions, displayMeta } = useMemo(() => {
-    if (!isSearching) {
+    if (!isSearching && !isTagFiltering) {
       return { displaySubscriptions: subscriptions, displayMeta: meta };
     }
 
-    const query = debouncedSearch.trim().toLowerCase();
-    const filtered = allSubscriptions.filter(
-      (sub) =>
-        sub.name.toLowerCase().includes(query) ||
-        (sub.notes && sub.notes.toLowerCase().includes(query)),
-    );
+    let filtered = allSubscriptions;
+
+    if (isSearching) {
+      const query = debouncedSearch.trim().toLowerCase();
+      filtered = filtered.filter(
+        (sub) =>
+          sub.name.toLowerCase().includes(query) ||
+          (sub.notes && sub.notes.toLowerCase().includes(query)),
+      );
+    }
+
+    if (isTagFiltering) {
+      filtered = filtered.filter(
+        (sub) => sub.tags?.some((t) => selectedTags.has(t)),
+      );
+    }
 
     const [sortBy, sortOrder] = sortKey.split('-');
     const sorted = [...filtered].sort((a, b) => {
@@ -227,7 +256,7 @@ export default function DashboardPage() {
         hasNextPage: page < totalPages,
       } as PaginationMeta,
     };
-  }, [isSearching, debouncedSearch, allSubscriptions, subscriptions, meta, sortKey, page]);
+  }, [isSearching, isTagFiltering, debouncedSearch, selectedTags, allSubscriptions, subscriptions, meta, sortKey, page]);
 
   if (loading) {
     return (
@@ -241,6 +270,23 @@ export default function DashboardPage() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       <DashboardSummary subscriptions={allSubscriptions} />
       <SearchInput value={searchTerm} onChange={handleSearchChange} />
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {allTags.map((tag) => (
+            <button
+              key={tag}
+              onClick={() => toggleTag(tag)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                selectedTags.has(tag)
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              }`}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      )}
       {!selectionMode ? (
         <div className="mb-3">
           <button

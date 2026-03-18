@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { Subscription, CATEGORIES } from '@/lib/types';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
+import TagInput from './TagInput';
 
 interface Props {
   subscription?: Subscription;
@@ -26,6 +27,7 @@ export default function SubscriptionForm({ subscription }: Props) {
   );
   const [category, setCategory] = useState(subscription?.category ?? CATEGORIES[0]);
   const [notes, setNotes] = useState(subscription?.notes ?? '');
+  const [tags, setTags] = useState<string[]>(subscription?.tags ?? []);
   const [isActive, setIsActive] = useState(subscription?.isActive !== false);
   const [reminderDaysBefore, setReminderDaysBefore] = useState(
     subscription?.reminderDaysBefore?.toString() ?? '3',
@@ -47,6 +49,7 @@ export default function SubscriptionForm({ subscription }: Props) {
       isActive,
       reminderDaysBefore: parseInt(reminderDaysBefore, 10),
       ...(notes ? { notes } : {}),
+      tags,
     };
 
     try {
@@ -229,6 +232,14 @@ export default function SubscriptionForm({ subscription }: Props) {
           className={inputClasses}
           placeholder="Family plan, shared with..."
         />
+      </div>
+
+      <div>
+        <label className={labelClasses}>Tags</label>
+        <TagInput tags={tags} onChange={setTags} />
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          Press Enter or comma to add a tag.
+        </p>
       </div>
 
       {error && <p className="text-red-500 text-sm">{error}</p>}
