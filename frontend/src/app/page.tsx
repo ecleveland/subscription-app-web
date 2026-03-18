@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
+import { downloadSubscriptionsCsv } from '@/lib/csv';
 import { Subscription, PaginatedResponse, PaginationMeta, BulkAction, BulkOperationResult } from '@/lib/types';
 import DashboardSummary from '@/components/DashboardSummary';
 import SearchInput from '@/components/SearchInput';
@@ -36,6 +37,7 @@ export default function DashboardPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ action: BulkAction; category?: string } | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   function handleSortChange(newSortKey: string) {
     setSortKey(newSortKey);
@@ -163,6 +165,19 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleExportCsv() {
+    setExportLoading(true);
+    try {
+      const [sortBy, sortOrder] = sortKey.split('-');
+      const params = `sortBy=${sortBy}&sortOrder=${sortOrder}`;
+      await downloadSubscriptionsCsv(params);
+    } catch (err) {
+      showErrorToast(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
   const isSearching = debouncedSearch.trim().length > 0;
 
   const { displaySubscriptions, displayMeta } = useMemo(() => {
@@ -261,6 +276,13 @@ export default function DashboardPage() {
             <option key={opt.key} value={opt.key}>{opt.label}</option>
           ))}
         </select>
+        <button
+          onClick={handleExportCsv}
+          disabled={allSubscriptions.length === 0 || exportLoading}
+          className="ml-auto px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {exportLoading ? 'Exporting…' : 'Export CSV'}
+        </button>
       </div>
       {selectionMode && selectedIds.size > 0 && (
         <BulkActionToolbar

@@ -291,6 +291,44 @@ export class SubscriptionsService {
     return { success: validIds.length, failed };
   }
 
+  private escapeCsvField(field: string): string {
+    if (
+      field.includes(',') ||
+      field.includes('"') ||
+      field.includes('\n') ||
+      field.includes('\r')
+    ) {
+      return `"${field.replace(/"/g, '""')}"`;
+    }
+    return field;
+  }
+
+  async exportCsv(
+    userId: string,
+    query: QuerySubscriptionDto,
+  ): Promise<string> {
+    const { data } = await this.findAll(userId, { ...query, limit: 0 });
+
+    const header =
+      'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes';
+    const rows = data.map((sub) => {
+      const date = sub.nextBillingDate
+        ? new Date(sub.nextBillingDate).toISOString().split('T')[0]
+        : '';
+      return [
+        this.escapeCsvField(sub.name),
+        sub.cost.toString(),
+        sub.billingCycle,
+        this.escapeCsvField(sub.category || ''),
+        date,
+        sub.isActive ? 'Active' : 'Inactive',
+        this.escapeCsvField(sub.notes || ''),
+      ].join(',');
+    });
+
+    return [header, ...rows].join('\n');
+  }
+
   async removeAllByUserId(userId: string): Promise<number> {
     const result = await this.subscriptionModel
       .deleteMany({ userId: new Types.ObjectId(userId) } as Record<
