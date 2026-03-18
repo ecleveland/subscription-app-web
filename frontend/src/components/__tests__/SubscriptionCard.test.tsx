@@ -195,6 +195,46 @@ describe('SubscriptionCard', () => {
     expect(screen.getByRole('checkbox')).toBeChecked();
   });
 
+  describe('trial tracking', () => {
+    it('should show Trial badge when trialEndDate is in the future', () => {
+      // System time is June 15, trial ends July 1 = 16 days
+      render(
+        <SubscriptionCard subscription={makeSub({ trialEndDate: '2025-07-01T00:00:00' })} />,
+      );
+      expect(screen.getByText('Trial')).toBeInTheDocument();
+    });
+
+    it('should show countdown text with correct days', () => {
+      // June 15 → July 1 = 16 days
+      render(
+        <SubscriptionCard subscription={makeSub({ trialEndDate: '2025-07-01T00:00:00' })} />,
+      );
+      expect(screen.getByText(/Trial ends in 16 days/)).toBeInTheDocument();
+    });
+
+    it('should show orange styling when trial expires within 3 days', () => {
+      // June 15 → June 17 = 2 days
+      render(
+        <SubscriptionCard subscription={makeSub({ trialEndDate: '2025-06-17T00:00:00' })} />,
+      );
+      const badge = screen.getByText('Trial');
+      expect(badge.className).toContain('orange');
+      expect(screen.getByText(/Trial ends in 2 days/)).toBeInTheDocument();
+    });
+
+    it('should not show Trial badge when trialEndDate is in the past', () => {
+      render(
+        <SubscriptionCard subscription={makeSub({ trialEndDate: '2025-06-01T00:00:00' })} />,
+      );
+      expect(screen.queryByText('Trial')).not.toBeInTheDocument();
+    });
+
+    it('should not show Trial badge when trialEndDate is undefined', () => {
+      render(<SubscriptionCard subscription={makeSub()} />);
+      expect(screen.queryByText('Trial')).not.toBeInTheDocument();
+    });
+  });
+
   it('should revert toggle on API failure', async () => {
     vi.useRealTimers(); // userEvent.click needs real timers
     vi.mocked(apiFetch).mockRejectedValueOnce(new Error('Network error'));

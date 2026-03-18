@@ -21,6 +21,7 @@ export interface Subscription {
   tags?: string[];
   isActive: boolean;
   reminderDaysBefore: number;
+  trialEndDate?: string;
   createdAt: string;
   updatedAt: string;
 }

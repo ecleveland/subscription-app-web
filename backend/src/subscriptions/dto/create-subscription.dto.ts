@@ -91,4 +91,12 @@ export class CreateSubscriptionDto {
   @Min(0)
   @Max(30)
   reminderDaysBefore?: number;
+
+  @ApiPropertyOptional({
+    description: 'Trial end date in ISO 8601 format',
+    example: '2026-04-15',
+  })
+  @IsDateString()
+  @IsOptional()
+  trialEndDate?: string;
 }
