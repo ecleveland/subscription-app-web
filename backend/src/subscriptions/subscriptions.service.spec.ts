@@ -449,6 +449,38 @@ describe('SubscriptionsService', () => {
       );
     });
 
+    it('should filter shared subscriptions when shared=shared', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
+
+      await service.findAll(userId, { shared: 'shared' });
+
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ sharedWith: { $gte: 2 } }),
+      );
+    });
+
+    it('should filter individual subscriptions when shared=individual', async () => {
+      const advanceChain = createChainable([]);
+      const chain = createChainable([]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
+
+      await service.findAll(userId, { shared: 'individual' });
+
+      expect(mockSubModel.find).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ sharedWith: { $in: [null, undefined] } }),
+      );
+    });
+
     it('should filter by weekly billingCycle when provided', async () => {
       const advanceChain = createChainable([]);
       const chain = createChainable([]);
@@ -995,10 +1027,10 @@ describe('SubscriptionsService', () => {
 
       const lines = csv.split('\n');
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With',
       );
       expect(lines[1]).toBe(
-        'Netflix,15.99,monthly,Streaming,2025-06-01,Active,My notes,shared; essential,',
+        'Netflix,15.99,monthly,Streaming,2025-06-01,Active,My notes,shared; essential,,',
       );
     });
 
@@ -1063,6 +1095,28 @@ describe('SubscriptionsService', () => {
       expect(lines[1]).toContain(',2025-07-15');
     });
 
+    it('should include sharedWith value in CSV when set', async () => {
+      const sub = {
+        ...mockSubscription,
+        nextBillingDate: new Date('2025-06-01'),
+        notes: '',
+        tags: [],
+        sharedWith: 3,
+      };
+      const advanceChain = createChainable([]);
+      const chain = createChainable([sub]);
+      mockSubModel.find
+        .mockReturnValueOnce(advanceChain)
+        .mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
+
+      const csv = await service.exportCsv(userId, {});
+
+      const lines = csv.split('\n');
+      const fields = lines[1].split(',');
+      expect(fields[fields.length - 1]).toBe('3');
+    });
+
     it('should have empty trialEndDate field when unset', async () => {
       const sub = {
         ...mockSubscription,
@@ -1098,7 +1152,7 @@ describe('SubscriptionsService', () => {
       const lines = csv.split('\n');
       expect(lines).toHaveLength(1);
       expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date',
+        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With',
       );
     });
 

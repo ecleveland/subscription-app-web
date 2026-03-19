@@ -158,6 +158,11 @@ export class SubscriptionsService {
         filter.tags = { $in: tagList };
       }
     }
+    if (query.shared === 'shared') {
+      filter.sharedWith = { $gte: 2 };
+    } else if (query.shared === 'individual') {
+      filter.sharedWith = { $in: [null, undefined] };
+    }
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -319,7 +324,7 @@ export class SubscriptionsService {
     const { data } = await this.findAll(userId, { ...query, limit: 0 });
 
     const header =
-      'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date';
+      'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With';
     const rows = data.map((sub) => {
       const date = sub.nextBillingDate
         ? new Date(sub.nextBillingDate).toISOString().split('T')[0]
@@ -337,6 +342,7 @@ export class SubscriptionsService {
         this.escapeCsvField(sub.notes || ''),
         this.escapeCsvField((sub.tags || []).join('; ')),
         trialDate,
+        sub.sharedWith != null ? sub.sharedWith.toString() : '',
       ].join(',');
     });
 

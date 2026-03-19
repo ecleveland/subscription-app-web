@@ -195,6 +195,41 @@ describe('SubscriptionCard', () => {
     expect(screen.getByRole('checkbox')).toBeChecked();
   });
 
+  describe('shared subscription', () => {
+    it('should show Split badge when sharedWith is set', () => {
+      render(
+        <SubscriptionCard subscription={makeSub({ sharedWith: 3 })} />,
+      );
+      expect(screen.getByText('Split 3 ways')).toBeInTheDocument();
+    });
+
+    it('should not show Split badge when sharedWith is null', () => {
+      render(<SubscriptionCard subscription={makeSub({ sharedWith: null })} />);
+      expect(screen.queryByText(/Split/)).not.toBeInTheDocument();
+    });
+
+    it('should not show Split badge when sharedWith is undefined', () => {
+      render(<SubscriptionCard subscription={makeSub()} />);
+      expect(screen.queryByText(/Split/)).not.toBeInTheDocument();
+    });
+
+    it('should display personal share for shared subscription', () => {
+      // $30/mo shared 3 ways = $10/mo
+      render(
+        <SubscriptionCard subscription={makeSub({ cost: 30, sharedWith: 3 })} />,
+      );
+      expect(screen.getByText(/Your share: \$10\.00\/mo/)).toBeInTheDocument();
+    });
+
+    it('should use personal share for monthly equivalent', () => {
+      // $120/yr shared 2 ways = $60/yr = $5/mo
+      render(
+        <SubscriptionCard subscription={makeSub({ cost: 120, billingCycle: 'yearly', sharedWith: 2 })} />,
+      );
+      expect(screen.getByText('($5.00/mo)')).toBeInTheDocument();
+    });
+  });
+
   describe('trial tracking', () => {
     it('should show Trial badge when trialEndDate is in the future', () => {
       // System time is June 15, trial ends July 1 = 16 days

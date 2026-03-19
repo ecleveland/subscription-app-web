@@ -55,6 +55,15 @@ export class QuerySubscriptionDto {
   sortOrder?: 'asc' | 'desc';
 
   @ApiPropertyOptional({
+    enum: ['shared', 'individual'],
+    description: 'Filter by shared status',
+    example: 'shared',
+  })
+  @IsOptional()
+  @IsIn(['shared', 'individual'])
+  shared?: 'shared' | 'individual';
+
+  @ApiPropertyOptional({
     description: 'Page number (1-indexed)',
     example: 1,
     minimum: 1,

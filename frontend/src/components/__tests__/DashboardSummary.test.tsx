@@ -83,6 +83,17 @@ describe('DashboardSummary', () => {
     expect(screen.getByText('1 inactive')).toBeInTheDocument();
   });
 
+  it('should use personal share for shared subscriptions in totals', () => {
+    const subs = [
+      makeSub({ _id: '1', cost: 30, billingCycle: 'monthly', sharedWith: 3 }), // $10/mo personal share
+    ];
+
+    render(<DashboardSummary subscriptions={subs} />);
+
+    // Monthly should be $10.00 (personal share), not $30.00
+    expect(screen.getByText('$10.00')).toBeInTheDocument();
+  });
+
   it('should exclude inactive subscriptions from cost totals', () => {
     const subs = [
       makeSub({ _id: '1', cost: 10, billingCycle: 'monthly', isActive: true }),

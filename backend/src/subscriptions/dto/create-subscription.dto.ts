@@ -7,8 +7,10 @@ import {
   IsOptional,
   IsBoolean,
   IsArray,
+  IsInt,
   Min,
   Max,
+  ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BillingCycle } from '../schemas/subscription.schema';
@@ -99,4 +101,16 @@ export class CreateSubscriptionDto {
   @IsDateString()
   @IsOptional()
   trialEndDate?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Number of people sharing this subscription (including the user). Minimum 2.',
+    example: 3,
+    minimum: 2,
+  })
+  @ValidateIf((o: CreateSubscriptionDto) => o.sharedWith !== null)
+  @IsInt()
+  @Min(2)
+  @IsOptional()
+  sharedWith?: number | null;
 }

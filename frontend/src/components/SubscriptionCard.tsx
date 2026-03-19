@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Subscription } from '@/lib/types';
 import { apiFetch } from '@/lib/api';
-import { formatCurrency, formatDate, daysUntil, getMonthlyCost } from '@/lib/utils';
+import { formatCurrency, formatDate, daysUntil, getMonthlyCost, getPersonalShare } from '@/lib/utils';
 import { showErrorToast } from '@/lib/toast';
 import CategoryBadge from './CategoryBadge';
 import TagBadge from './TagBadge';
@@ -25,7 +25,9 @@ export default function SubscriptionCard({
   const [isActive, setIsActive] = useState(subscription.isActive !== false);
   const [toggling, setToggling] = useState(false);
   const days = daysUntil(subscription.nextBillingDate);
-  const monthly = getMonthlyCost(subscription.cost, subscription.billingCycle);
+  const personalCost = getPersonalShare(subscription.cost, subscription.sharedWith);
+  const monthly = getMonthlyCost(personalCost, subscription.billingCycle);
+  const isShared = subscription.sharedWith != null && subscription.sharedWith >= 2;
 
   const trialDays = subscription.trialEndDate ? daysUntil(subscription.trialEndDate) : -1;
   const isTrialActive = trialDays > 0;
@@ -96,6 +98,11 @@ export default function SubscriptionCard({
               Trial
             </span>
           )}
+          {isShared && (
+            <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+              Split {subscription.sharedWith} ways
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className={`text-lg font-bold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
@@ -121,6 +128,11 @@ export default function SubscriptionCard({
           </button>
         </div>
       </div>
+      {isShared && (
+        <div className="text-sm text-purple-600 dark:text-purple-400 mb-1">
+          Your share: {formatCurrency(personalCost)}/{subscription.billingCycle === 'monthly' ? 'mo' : subscription.billingCycle === 'yearly' ? 'yr' : 'wk'}
+        </div>
+      )}
       <div className="flex items-center gap-2 mb-2">
         <CategoryBadge category={subscription.category} />
         {subscription.billingCycle !== 'monthly' && (

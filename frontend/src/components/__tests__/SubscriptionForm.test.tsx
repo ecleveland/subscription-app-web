@@ -271,6 +271,76 @@ describe('SubscriptionForm', () => {
     });
   });
 
+  describe('shared subscription', () => {
+    it('should hide shared input by default', () => {
+      render(<SubscriptionForm />);
+      expect(screen.queryByLabelText(/Number of people sharing/)).not.toBeInTheDocument();
+    });
+
+    it('should show shared input when checkbox is checked', async () => {
+      const user = userEvent.setup();
+      render(<SubscriptionForm />);
+
+      await user.click(screen.getByLabelText('Shared subscription'));
+      expect(screen.getByLabelText(/Number of people sharing/)).toBeInTheDocument();
+    });
+
+    it('should pre-fill shared fields in edit mode', () => {
+      render(
+        <SubscriptionForm
+          subscription={{ ...existingSub, sharedWith: 4 }}
+        />,
+      );
+      expect(screen.getByLabelText('Shared subscription')).toBeChecked();
+      expect(screen.getByLabelText(/Number of people sharing/)).toHaveValue(4);
+    });
+
+    it('should include sharedWith in submit when enabled', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(
+        <SubscriptionForm
+          subscription={{ ...existingSub, sharedWith: 3 }}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => {
+        expect(apiFetch).toHaveBeenCalled();
+        const body = JSON.parse(
+          vi.mocked(apiFetch).mock.calls[0][1]!.body as string,
+        );
+        expect(body.sharedWith).toBe(3);
+      });
+    });
+
+    it('should send null sharedWith when unchecked in edit mode', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(
+        <SubscriptionForm
+          subscription={{ ...existingSub, sharedWith: 3 }}
+        />,
+      );
+
+      await user.click(screen.getByLabelText('Shared subscription'));
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => {
+        expect(apiFetch).toHaveBeenCalled();
+        const body = JSON.parse(
+          vi.mocked(apiFetch).mock.calls[0][1]!.body as string,
+        );
+        expect(body.sharedWith).toBeNull();
+      });
+    });
+  });
+
   describe('loading state', () => {
     it('should show Saving... and disable button during submission', async () => {
       const user = userEvent.setup();

@@ -5,6 +5,7 @@ import {
   getWeeklyCost,
   getMonthlyCost,
   getYearlyCost,
+  getPersonalShare,
   daysUntil,
 } from '@/lib/utils';
 
@@ -19,19 +20,19 @@ export default function DashboardSummary({
   const inactiveCount = subscriptions.length - activeSubscriptions.length;
 
   const totalDaily = activeSubscriptions.reduce(
-    (sum, sub) => sum + getDailyCost(sub.cost, sub.billingCycle),
+    (sum, sub) => sum + getDailyCost(getPersonalShare(sub.cost, sub.sharedWith), sub.billingCycle),
     0,
   );
   const totalWeekly = activeSubscriptions.reduce(
-    (sum, sub) => sum + getWeeklyCost(sub.cost, sub.billingCycle),
+    (sum, sub) => sum + getWeeklyCost(getPersonalShare(sub.cost, sub.sharedWith), sub.billingCycle),
     0,
   );
   const totalMonthly = activeSubscriptions.reduce(
-    (sum, sub) => sum + getMonthlyCost(sub.cost, sub.billingCycle),
+    (sum, sub) => sum + getMonthlyCost(getPersonalShare(sub.cost, sub.sharedWith), sub.billingCycle),
     0,
   );
   const totalYearly = activeSubscriptions.reduce(
-    (sum, sub) => sum + getYearlyCost(sub.cost, sub.billingCycle),
+    (sum, sub) => sum + getYearlyCost(getPersonalShare(sub.cost, sub.sharedWith), sub.billingCycle),
     0,
   );
 

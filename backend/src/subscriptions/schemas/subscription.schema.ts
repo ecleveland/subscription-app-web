@@ -43,6 +43,9 @@ export class Subscription {
 
   @Prop({ required: false })
   trialEndDate?: Date;
+
+  @Prop({ required: false, min: 2 })
+  sharedWith?: number;
 }
 
 export const SubscriptionSchema = SchemaFactory.createForClass(Subscription);
