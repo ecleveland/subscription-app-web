@@ -27,7 +27,7 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy Backend
-        run: railway up --service backend --detach
+        run: railway up --service backend --detach -d ./backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
@@ -44,6 +44,6 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy Frontend
-        run: railway up --service frontend --detach
+        run: railway up --service frontend --detach -d ./frontend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
