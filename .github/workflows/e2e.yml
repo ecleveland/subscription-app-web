@@ -2,9 +2,12 @@ name: E2E
 
 # Playwright end-to-end tests run on PRs to master. They boot MongoDB, the
 # backend, and the frontend, then exercise the critical user flows in a browser.
+# `workflow_call` lets the deploy pipeline reuse this suite as a pre-deploy gate
+# on push to master (where `pull_request` would not fire).
 on:
   pull_request:
     branches: [master]
+  workflow_call:
 
 jobs:
   e2e:

@@ -14,9 +14,13 @@ jobs:
     name: CI
     uses: ./.github/workflows/ci.yml
 
+  e2e:
+    name: E2E
+    uses: ./.github/workflows/e2e.yml
+
   deploy-backend:
     name: Deploy Backend
-    needs: ci
+    needs: [ci, e2e]
     runs-on: ubuntu-latest
     environment: production
 
@@ -26,14 +30,19 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # No `--detach`: `railway up` streams the remote Docker build and fails
+      # this job if the build fails (the gap that let compile errors ship).
+      # Railway then gates the rollout on the healthcheck in backend/railway.toml
+      # (`/api/health`) with its restart policy, so an unhealthy image is never
+      # promoted to serve traffic.
       - name: Deploy Backend
-        run: railway up --service backend --detach -d ./backend
+        run: railway up --service backend ./backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
   deploy-frontend:
     name: Deploy Frontend
-    needs: ci
+    needs: [ci, e2e]
     runs-on: ubuntu-latest
     environment: production
 
@@ -43,7 +52,10 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # No `--detach`: streams the remote build and fails the job on a build
+      # error. Railway gates the rollout on the healthcheck in
+      # frontend/railway.toml (`/login`) before routing traffic.
       - name: Deploy Frontend
-        run: railway up --service frontend --detach -d ./frontend
+        run: railway up --service frontend ./frontend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
