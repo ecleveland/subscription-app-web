@@ -30,9 +30,11 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      # No `--detach`: `railway up` streams the remote Docker build and waits for
-      # the deployment to pass the healthcheck configured in backend/railway.toml
-      # (`/api/health`). A failed build or an unhealthy deploy fails this job.
+      # No `--detach`: `railway up` streams the remote Docker build and fails
+      # this job if the build fails (the gap that let compile errors ship).
+      # Railway then gates the rollout on the healthcheck in backend/railway.toml
+      # (`/api/health`) with its restart policy, so an unhealthy image is never
+      # promoted to serve traffic.
       - name: Deploy Backend
         run: railway up --service backend ./backend
         env:
@@ -50,8 +52,9 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      # No `--detach`: waits for the remote build and the healthcheck in
-      # frontend/railway.toml (`/login`) before the job succeeds.
+      # No `--detach`: streams the remote build and fails the job on a build
+      # error. Railway gates the rollout on the healthcheck in
+      # frontend/railway.toml (`/login`) before routing traffic.
       - name: Deploy Frontend
         run: railway up --service frontend ./frontend
         env:
