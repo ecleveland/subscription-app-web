@@ -23,11 +23,16 @@ jobs:
           --health-retries 5
 
     env:
-      MONGODB_URI: mongodb://localhost:27017/subscriptions
+      # CI boots the servers itself (Playwright's webServer is disabled when CI
+      # is set), so point the suite at these ports. A dedicated `_e2e` database
+      # keeps the run isolated; it is dropped in global.teardown.ts.
+      MONGODB_URI: mongodb://localhost:27017/subscriptions_e2e
       JWT_SECRET: e2e-test-secret
       JWT_EXPIRES_IN: 24h
       FRONTEND_URL: http://localhost:3000
       NEXT_PUBLIC_API_URL: http://localhost:3001/api
+      E2E_BASE_URL: http://localhost:3000
+      E2E_API_URL: http://localhost:3001/api
       # Disable auth rate limiting so retries/reruns don't trip the throttler.
       THROTTLE_DISABLED: 'true'
 

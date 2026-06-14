@@ -32,27 +32,30 @@ npm run test:cov    # with coverage
 
 ### End-to-end tests (Playwright)
 
-E2E tests live in `e2e/` and drive a real browser against a running stack
-(MongoDB + backend on `:3001` + frontend on `:3000`).
-
-1. Install browsers once: `npx playwright install chromium`
-2. Start the full dev environment from the **repo root**: `./dev.sh`
-3. Run the suite:
+E2E tests live in `e2e/` and drive a real browser. The suite runs against its
+**own isolated stack** — a dedicated backend (`:3101`) and frontend (`:3100`)
+backed by a throwaway **`subscriptions_e2e`** database — so it never touches your
+dev data. Playwright starts those servers for you; you only need MongoDB running.
 
 ```bash
-npm run test:e2e        # headless
-npm run test:e2e:ui     # interactive Playwright UI
+npx playwright install chromium     # once
+docker compose up -d mongo          # from the repo root, if Mongo isn't running
+cd frontend
+npm run test:e2e                    # headless
+npm run test:e2e:ui                 # interactive Playwright UI
 ```
 
-> The backend rate-limits auth endpoints. For repeated local runs within a
-> minute, start the backend with `THROTTLE_DISABLED=true` (CI sets this
-> automatically). Never set it in production.
+You do **not** need `./dev.sh` for E2E — Playwright boots its own backend and
+frontend on ports 3100/3101, so the suite can run alongside your dev session
+without colliding with it.
 
-The first run seeds two accounts (`e2e-user` and `e2e-admin`) via the API and
-saves their login state under `e2e/.auth/` (gitignored), so subsequent tests
-start already authenticated. The admin account is promoted directly in MongoDB;
-override the connection with `E2E_MONGODB_URI` if your DB isn't at the default
-`mongodb://localhost:27017/subscriptions`.
+- The first run seeds two accounts (`e2e-user` and `e2e-admin`) via the API and
+  saves their login state under `e2e/.auth/` (gitignored), so tests start
+  already authenticated. The admin account is promoted directly in MongoDB.
+- The `subscriptions_e2e` database is **dropped automatically** after the run
+  (see `e2e/global.teardown.ts`), leaving nothing behind.
+- Override defaults with `E2E_MONGODB_URI`, `E2E_BASE_URL`, `E2E_API_URL`, or
+  `E2E_BACKEND_PORT` / `E2E_FRONTEND_PORT` if needed.
 
 These tests also run automatically on every PR to `master` via the `E2E` GitHub
 Actions workflow.

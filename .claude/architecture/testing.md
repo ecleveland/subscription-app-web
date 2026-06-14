@@ -112,17 +112,25 @@ coverage of new code; add both where each applies.
   Authenticated specs reuse that state via the `chromium` / `chromium-admin`
   projects; logged-out flows override it with `test.use({ storageState: … })`.
 - Tests create uniquely-named data and locate it via the dashboard search box,
-  so they are independent of pagination and leftover data on the shared dev DB.
-  Tests that create data delete it again when practical.
+  so they are independent of pagination and leftover data.
 - Select by role/label/visible text — never add `data-testid` hooks unless a flow
   is otherwise unreachable.
 
+### Isolation — never touch dev data
+
+The suite runs against its **own stack**: a dedicated backend (`:3101`) and
+frontend (`:3100`) backed by a throwaway **`subscriptions_e2e`** database,
+separate from the dev `subscriptions` DB. Locally, Playwright's `webServer`
+config starts those servers (the dev backend is never used for E2E); in CI the
+workflow boots them and sets `E2E_BASE_URL` / `E2E_API_URL`. The E2E database is
+dropped in `e2e/global.teardown.ts` after every run, so nothing is left behind.
+
 ### Run command
 
-E2E needs MongoDB + backend (`:3001`) + frontend (`:3000`) running first:
+E2E only needs MongoDB running — Playwright starts the backend and frontend:
 
 ```bash
-./dev.sh                 # from the repo root — starts all three
+docker compose up -d mongo   # from the repo root
 cd frontend && npm run test:e2e
 ```
 
