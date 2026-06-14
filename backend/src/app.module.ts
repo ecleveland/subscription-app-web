@@ -57,13 +57,19 @@ import { HealthModule } from './health/health.module';
         },
       }),
     }),
-    ThrottlerModule.forRoot([
-      {
-        name: 'default',
-        ttl: 60000,
-        limit: 60,
-      },
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          name: 'default',
+          ttl: 60000,
+          limit: 60,
+        },
+      ],
+      // Allow disabling rate limiting in automated test environments (e.g. the
+      // Playwright E2E suite), where repeated auth requests would otherwise trip
+      // the per-route limits. Never set THROTTLE_DISABLED in production.
+      skipIf: () => process.env.THROTTLE_DISABLED === 'true',
+    }),
     MongooseModule.forRootAsync({
       useFactory: (configService: ConfigService) => ({
         uri: configService.get<string>('database.uri'),

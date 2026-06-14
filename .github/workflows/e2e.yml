@@ -1,0 +1,92 @@
+name: E2E
+
+# Playwright end-to-end tests run on PRs to master. They boot MongoDB, the
+# backend, and the frontend, then exercise the critical user flows in a browser.
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  e2e:
+    name: Playwright
+    runs-on: ubuntu-latest
+
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")' --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MONGODB_URI: mongodb://localhost:27017/subscriptions
+      JWT_SECRET: e2e-test-secret
+      JWT_EXPIRES_IN: 24h
+      FRONTEND_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:3001/api
+      # Disable auth rate limiting so retries/reruns don't trip the throttler.
+      THROTTLE_DISABLED: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Build backend
+        run: npm run build
+        working-directory: backend
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
+      - name: Prepare standalone frontend assets
+        working-directory: frontend
+        run: |
+          cp -r .next/static .next/standalone/.next/static
+          if [ -d public ]; then cp -r public .next/standalone/public; fi
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Run E2E tests
+        working-directory: frontend
+        run: |
+          # Start the backend (compiled) and the frontend (standalone) in the
+          # background; the Playwright global setup polls both for readiness.
+          (cd ../backend && PORT=3001 node dist/main > /tmp/backend.log 2>&1 &)
+          PORT=3000 HOSTNAME=127.0.0.1 node .next/standalone/server.js > /tmp/frontend.log 2>&1 &
+          npm run test:e2e
+
+      - name: Dump server logs on failure
+        if: failure()
+        run: |
+          echo '----- backend.log -----'; cat /tmp/backend.log || true
+          echo '----- frontend.log -----'; cat /tmp/frontend.log || true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

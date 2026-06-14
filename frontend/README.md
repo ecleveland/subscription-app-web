@@ -20,6 +20,43 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Testing
+
+### Unit & component tests (Vitest)
+
+```bash
+npm test            # run once
+npm run test:watch  # watch mode
+npm run test:cov    # with coverage
+```
+
+### End-to-end tests (Playwright)
+
+E2E tests live in `e2e/` and drive a real browser against a running stack
+(MongoDB + backend on `:3001` + frontend on `:3000`).
+
+1. Install browsers once: `npx playwright install chromium`
+2. Start the full dev environment from the **repo root**: `./dev.sh`
+3. Run the suite:
+
+```bash
+npm run test:e2e        # headless
+npm run test:e2e:ui     # interactive Playwright UI
+```
+
+> The backend rate-limits auth endpoints. For repeated local runs within a
+> minute, start the backend with `THROTTLE_DISABLED=true` (CI sets this
+> automatically). Never set it in production.
+
+The first run seeds two accounts (`e2e-user` and `e2e-admin`) via the API and
+saves their login state under `e2e/.auth/` (gitignored), so subsequent tests
+start already authenticated. The admin account is promoted directly in MongoDB;
+override the connection with `E2E_MONGODB_URI` if your DB isn't at the default
+`mongodb://localhost:27017/subscriptions`.
+
+These tests also run automatically on every PR to `master` via the `E2E` GitHub
+Actions workflow.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
