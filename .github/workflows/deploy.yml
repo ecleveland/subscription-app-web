@@ -14,9 +14,13 @@ jobs:
     name: CI
     uses: ./.github/workflows/ci.yml
 
+  e2e:
+    name: E2E
+    uses: ./.github/workflows/e2e.yml
+
   deploy-backend:
     name: Deploy Backend
-    needs: ci
+    needs: [ci, e2e]
     runs-on: ubuntu-latest
     environment: production
 
@@ -26,14 +30,17 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # No `--detach`: `railway up` streams the remote Docker build and waits for
+      # the deployment to pass the healthcheck configured in backend/railway.toml
+      # (`/api/health`). A failed build or an unhealthy deploy fails this job.
       - name: Deploy Backend
-        run: railway up --service backend --detach -d ./backend
+        run: railway up --service backend ./backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
   deploy-frontend:
     name: Deploy Frontend
-    needs: ci
+    needs: [ci, e2e]
     runs-on: ubuntu-latest
     environment: production
 
@@ -43,7 +50,9 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # No `--detach`: waits for the remote build and the healthcheck in
+      # frontend/railway.toml (`/login`) before the job succeeds.
       - name: Deploy Frontend
-        run: railway up --service frontend --detach -d ./frontend
+        run: railway up --service frontend ./frontend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
