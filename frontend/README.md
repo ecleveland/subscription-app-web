@@ -20,6 +20,46 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Testing
+
+### Unit & component tests (Vitest)
+
+```bash
+npm test            # run once
+npm run test:watch  # watch mode
+npm run test:cov    # with coverage
+```
+
+### End-to-end tests (Playwright)
+
+E2E tests live in `e2e/` and drive a real browser. The suite runs against its
+**own isolated stack** — a dedicated backend (`:3101`) and frontend (`:3100`)
+backed by a throwaway **`subscriptions_e2e`** database — so it never touches your
+dev data. Playwright starts those servers for you; you only need MongoDB running.
+
+```bash
+npx playwright install chromium     # once
+docker compose up -d mongo          # from the repo root, if Mongo isn't running
+cd frontend
+npm run test:e2e                    # headless
+npm run test:e2e:ui                 # interactive Playwright UI
+```
+
+You do **not** need `./dev.sh` for E2E — Playwright boots its own backend and
+frontend on ports 3100/3101, so the suite can run alongside your dev session
+without colliding with it.
+
+- The first run seeds two accounts (`e2e-user` and `e2e-admin`) via the API and
+  saves their login state under `e2e/.auth/` (gitignored), so tests start
+  already authenticated. The admin account is promoted directly in MongoDB.
+- The `subscriptions_e2e` database is **dropped automatically** after the run
+  (see `e2e/global.teardown.ts`), leaving nothing behind.
+- Override defaults with `E2E_MONGODB_URI`, `E2E_BASE_URL`, `E2E_API_URL`, or
+  `E2E_BACKEND_PORT` / `E2E_FRONTEND_PORT` if needed.
+
+These tests also run automatically on every PR to `master` via the `E2E` GitHub
+Actions workflow.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

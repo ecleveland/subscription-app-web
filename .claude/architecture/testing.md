@@ -84,6 +84,56 @@ cd backend && npm run test:e2e  # E2E tests
 cd frontend && npm test
 ```
 
+## End-to-End Tests (Playwright)
+
+E2E tests live in `frontend/e2e/*.spec.ts` and run a real browser (Chromium)
+against a running dev environment. They are the only layer that exercises full
+user journeys across pages, the auth token lifecycle, and middleware redirects.
+
+### When to add an E2E test vs. a component test
+
+| Use a **component test** (Vitest) when… | Use an **E2E test** (Playwright) when… |
+|---|---|
+| Testing one component's logic, rendering, or event handling in isolation | Testing a multi-page flow (e.g. login → create → dashboard → logout) |
+| You can mock `apiFetch` and assert on local behavior | The behavior depends on the real backend, persisted data, or JWT/cookie state |
+| Verifying validation messages, conditional rendering, formatting | Verifying middleware redirects, role-based route access, or storageState reuse |
+| The fast inner-loop suite is the right place for it | A regression would only surface when the pieces are wired together |
+
+Default to a component test — it's faster and more focused. Reach for E2E only
+for genuinely cross-cutting flows. E2E is **not** a substitute for unit/component
+coverage of new code; add both where each applies.
+
+### Conventions
+
+- One spec per flow (`auth`, `subscriptions`, `trial`, `cost-splitting`,
+  `csv-export`, `admin`). Shared UI steps live in `e2e/actions.ts`.
+- Auth is seeded once in `e2e/global.setup.ts`, which registers a regular user
+  and an admin (promoted directly in Mongo) and saves each `storageState`.
+  Authenticated specs reuse that state via the `chromium` / `chromium-admin`
+  projects; logged-out flows override it with `test.use({ storageState: … })`.
+- Tests create uniquely-named data and locate it via the dashboard search box,
+  so they are independent of pagination and leftover data.
+- Select by role/label/visible text — never add `data-testid` hooks unless a flow
+  is otherwise unreachable.
+
+### Isolation — never touch dev data
+
+The suite runs against its **own stack**: a dedicated backend (`:3101`) and
+frontend (`:3100`) backed by a throwaway **`subscriptions_e2e`** database,
+separate from the dev `subscriptions` DB. Locally, Playwright's `webServer`
+config starts those servers (the dev backend is never used for E2E); in CI the
+workflow boots them and sets `E2E_BASE_URL` / `E2E_API_URL`. The E2E database is
+dropped in `e2e/global.teardown.ts` after every run, so nothing is left behind.
+
+### Run command
+
+E2E only needs MongoDB running — Playwright starts the backend and frontend:
+
+```bash
+docker compose up -d mongo   # from the repo root
+cd frontend && npm run test:e2e
+```
+
 ## Verification
 
 Before considering any work complete, run the relevant test suites:
@@ -92,3 +142,4 @@ Before considering any work complete, run the relevant test suites:
 - Both → run all three commands
 
 CI runs these automatically on push and PR to `master` via `.github/workflows/ci.yml`.
+The Playwright E2E suite runs on PRs to `master` via `.github/workflows/e2e.yml`.
