@@ -456,5 +456,38 @@ describe('UsersService', () => {
         expect.objectContaining({ role: UserRole.ADMIN }),
       );
     });
+
+    it('should swallow a duplicate-key error from a concurrent boot', async () => {
+      mockUserModel.countDocuments.mockReturnValue(createChainable(0));
+      mockUserModel.findOne.mockReturnValue(createChainable(null));
+      const dupError: Error & { code?: number } = new Error('dup key');
+      dupError.code = 11000;
+      const saveMock = jest.fn().mockRejectedValue(dupError);
+      mockUserModel.mockImplementation((dto: any) => ({
+        ...dto,
+        save: saveMock,
+      }));
+
+      await expect(
+        service.seedAdmin('admin', 'pre-hashed'),
+      ).resolves.toBeUndefined();
+      expect(saveMock).toHaveBeenCalled();
+    });
+
+    it('should rethrow non-duplicate errors during seeding', async () => {
+      mockUserModel.countDocuments.mockReturnValue(createChainable(0));
+      mockUserModel.findOne.mockReturnValue(createChainable(null));
+      const saveMock = jest
+        .fn()
+        .mockRejectedValue(new Error('connection lost'));
+      mockUserModel.mockImplementation((dto: any) => ({
+        ...dto,
+        save: saveMock,
+      }));
+
+      await expect(service.seedAdmin('admin', 'pre-hashed')).rejects.toThrow(
+        'connection lost',
+      );
+    });
   });
 });

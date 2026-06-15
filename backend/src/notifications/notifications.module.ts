@@ -11,6 +11,7 @@ import {
   Subscription,
   SubscriptionSchema,
 } from '../subscriptions/schemas/subscription.schema';
+import { CronLockModule } from '../common/cron-lock/cron-lock.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import {
       { name: Notification.name, schema: NotificationSchema },
       { name: Subscription.name, schema: SubscriptionSchema },
     ]),
+    CronLockModule,
   ],
   controllers: [NotificationsController],
   providers: [NotificationsService, NotificationsCronService],

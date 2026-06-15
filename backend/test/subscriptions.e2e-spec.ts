@@ -2,6 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
+import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
+import { SubscriptionsCronService } from '../src/subscriptions/subscriptions-cron.service';
 
 describe('Subscriptions (e2e)', () => {
   let app: INestApplication<App>;
@@ -338,126 +340,149 @@ describe('Subscriptions (e2e)', () => {
   });
 
   describe('Billing date advancement', () => {
-    it('should advance overdue monthly billing date on GET /subscriptions', async () => {
-      const pastDate = new Date();
-      pastDate.setMonth(pastDate.getMonth() - 2);
+    // Advancement now runs from the scheduled cron, never the read path. These
+    // tests invoke the service/cron directly (the GET endpoint no longer writes).
+    let subsService: SubscriptionsService;
 
-      const createRes = await request(app.getHttpServer())
+    const createSub = async (body: Record<string, unknown>): Promise<string> => {
+      const res = await request(app.getHttpServer())
         .post('/api/subscriptions')
         .set('Authorization', `Bearer ${tokenA}`)
-        .send({
-          name: 'Overdue Monthly',
-          cost: 9.99,
-          billingCycle: 'monthly',
-          nextBillingDate: pastDate.toISOString(),
-          category: 'Software',
-        })
+        .send(body)
         .expect(201);
+      return res.body._id;
+    };
 
-      const subId = createRes.body._id;
-
-      const listRes = await request(app.getHttpServer())
+    const getSub = async (subId: string): Promise<any> => {
+      const res = await request(app.getHttpServer())
         .get('/api/subscriptions?limit=0')
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(200);
+      return res.body.data.find((s: any) => s._id === subId);
+    };
 
-      const updated = listRes.body.data.find((s: any) => s._id === subId);
+    beforeAll(() => {
+      subsService = app.get(SubscriptionsService);
+    });
+
+    it('does not advance overdue dates from the read path (GET /subscriptions)', async () => {
+      const pastDate = new Date();
+      pastDate.setMonth(pastDate.getMonth() - 2);
+      const subId = await createSub({
+        name: 'Read Path Overdue',
+        cost: 9.99,
+        billingCycle: 'monthly',
+        nextBillingDate: pastDate.toISOString(),
+        category: 'Software',
+      });
+
+      const before = await getSub(subId);
+      expect(new Date(before.nextBillingDate).getTime()).toBeLessThan(Date.now());
+    });
+
+    it('advances an overdue monthly billing date when advancement runs', async () => {
+      const pastDate = new Date();
+      pastDate.setMonth(pastDate.getMonth() - 2);
+      const subId = await createSub({
+        name: 'Overdue Monthly',
+        cost: 9.99,
+        billingCycle: 'monthly',
+        nextBillingDate: pastDate.toISOString(),
+        category: 'Software',
+      });
+
+      await subsService.advanceOverdueDates();
+
+      const updated = await getSub(subId);
       expect(updated).toBeDefined();
       expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
         Date.now(),
       );
     });
 
-    it('should not advance billing date for inactive subscriptions', async () => {
+    it('does not advance billing date for inactive subscriptions', async () => {
       const pastDate = new Date();
       pastDate.setMonth(pastDate.getMonth() - 1);
+      const subId = await createSub({
+        name: 'Inactive Service',
+        cost: 5.99,
+        billingCycle: 'monthly',
+        nextBillingDate: pastDate.toISOString(),
+        category: 'Software',
+        isActive: false,
+      });
 
-      const createRes = await request(app.getHttpServer())
-        .post('/api/subscriptions')
-        .set('Authorization', `Bearer ${tokenA}`)
-        .send({
-          name: 'Inactive Service',
-          cost: 5.99,
-          billingCycle: 'monthly',
-          nextBillingDate: pastDate.toISOString(),
-          category: 'Software',
-          isActive: false,
-        })
-        .expect(201);
+      await subsService.advanceOverdueDates();
 
-      const subId = createRes.body._id;
-
-      const listRes = await request(app.getHttpServer())
-        .get('/api/subscriptions?limit=0')
-        .set('Authorization', `Bearer ${tokenA}`)
-        .expect(200);
-
-      const unchanged = listRes.body.data.find((s: any) => s._id === subId);
+      const unchanged = await getSub(subId);
       expect(unchanged).toBeDefined();
       expect(new Date(unchanged.nextBillingDate).getTime()).toBeLessThan(
         Date.now(),
       );
     });
 
-    it('should advance overdue weekly billing date on GET /subscriptions', async () => {
+    it('advances an overdue weekly billing date', async () => {
       const pastDate = new Date();
       pastDate.setDate(pastDate.getDate() - 10);
+      const subId = await createSub({
+        name: 'Overdue Weekly',
+        cost: 25,
+        billingCycle: 'weekly',
+        nextBillingDate: pastDate.toISOString(),
+        category: 'Other',
+      });
 
-      const createRes = await request(app.getHttpServer())
-        .post('/api/subscriptions')
-        .set('Authorization', `Bearer ${tokenA}`)
-        .send({
-          name: 'Overdue Weekly',
-          cost: 25,
-          billingCycle: 'weekly',
-          nextBillingDate: pastDate.toISOString(),
-          category: 'Other',
-        })
-        .expect(201);
+      await subsService.advanceOverdueDates();
 
-      const subId = createRes.body._id;
-
-      const listRes = await request(app.getHttpServer())
-        .get('/api/subscriptions?limit=0')
-        .set('Authorization', `Bearer ${tokenA}`)
-        .expect(200);
-
-      const updated = listRes.body.data.find((s: any) => s._id === subId);
+      const updated = await getSub(subId);
       expect(updated).toBeDefined();
       expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
         Date.now(),
       );
     });
 
-    it('should advance overdue yearly billing date', async () => {
+    it('advances an overdue yearly billing date', async () => {
       const pastDate = new Date();
       pastDate.setFullYear(pastDate.getFullYear() - 1);
       pastDate.setMonth(pastDate.getMonth() - 1);
+      const subId = await createSub({
+        name: 'Annual License',
+        cost: 99.99,
+        billingCycle: 'yearly',
+        nextBillingDate: pastDate.toISOString(),
+        category: 'Software',
+      });
 
-      const createRes = await request(app.getHttpServer())
-        .post('/api/subscriptions')
-        .set('Authorization', `Bearer ${tokenA}`)
-        .send({
-          name: 'Annual License',
-          cost: 99.99,
-          billingCycle: 'yearly',
-          nextBillingDate: pastDate.toISOString(),
-          category: 'Software',
-        })
-        .expect(201);
+      await subsService.advanceOverdueDates();
 
-      const subId = createRes.body._id;
-
-      const listRes = await request(app.getHttpServer())
-        .get('/api/subscriptions?limit=0')
-        .set('Authorization', `Bearer ${tokenA}`)
-        .expect(200);
-
-      const updated = listRes.body.data.find((s: any) => s._id === subId);
+      const updated = await getSub(subId);
       expect(updated).toBeDefined();
       expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
         Date.now(),
       );
+    });
+
+    it('runs via the scheduled cron under a daily leader lock', async () => {
+      const cron = app.get(SubscriptionsCronService);
+      const pastDate = new Date();
+      pastDate.setMonth(pastDate.getMonth() - 3);
+      const subId = await createSub({
+        name: 'Cron Overdue',
+        cost: 12.5,
+        billingCycle: 'monthly',
+        nextBillingDate: pastDate.toISOString(),
+        category: 'Software',
+      });
+
+      // First run wins the lock and advances the overdue subscription.
+      await cron.handleOverdueAdvancement();
+      const updated = await getSub(subId);
+      expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+
+      // Second run the same day finds the lock held and is a no-op (no throw).
+      await expect(cron.handleOverdueAdvancement()).resolves.toBeUndefined();
     });
   });
 

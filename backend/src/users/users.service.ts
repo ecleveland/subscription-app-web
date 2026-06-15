@@ -156,8 +156,26 @@ export class UsersService {
           displayName: 'Admin',
           role: UserRole.ADMIN,
         });
-        await admin.save();
-        this.logger.log({ username }, 'Seeded admin user');
+        try {
+          await admin.save();
+          this.logger.log({ username }, 'Seeded admin user');
+        } catch (error: unknown) {
+          // Concurrent boots (multiple replicas/restarts) can race to insert
+          // the same admin. The loser's duplicate-key error is benign — the
+          // admin now exists — so swallow it rather than crash startup.
+          if (
+            error instanceof Error &&
+            'code' in error &&
+            (error as { code: number }).code === 11000
+          ) {
+            this.logger.warn(
+              { username },
+              'Admin already seeded by another instance; skipping',
+            );
+            return;
+          }
+          throw error;
+        }
       }
     }
   }

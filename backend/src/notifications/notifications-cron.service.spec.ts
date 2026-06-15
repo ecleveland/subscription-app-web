@@ -4,11 +4,16 @@ import { Types } from 'mongoose';
 import { NotificationsCronService } from './notifications-cron.service';
 import { NotificationsService } from './notifications.service';
 import { Subscription } from '../subscriptions/schemas/subscription.schema';
+import { CronLockService } from '../common/cron-lock/cron-lock.service';
 
-function createChainable(resolvedValue: any = null) {
+function cursorOf(items: any[] = []) {
   const chain: any = {};
-  chain.sort = jest.fn().mockReturnValue(chain);
-  chain.exec = jest.fn().mockResolvedValue(resolvedValue);
+  chain.lean = jest.fn().mockReturnValue(chain);
+  chain.cursor = jest.fn().mockReturnValue({
+    async *[Symbol.asyncIterator]() {
+      for (const item of items) yield await Promise.resolve(item);
+    },
+  });
   return chain;
 }
 
@@ -16,30 +21,40 @@ describe('NotificationsCronService', () => {
   let cronService: NotificationsCronService;
   let mockSubModel: any;
   let mockNotificationsService: any;
+  let mockCronLock: any;
 
   const userId = '507f1f77bcf86cd799439011';
   const subId = '507f1f77bcf86cd799439022';
 
+  function makeSub(overrides: Record<string, any> = {}) {
+    return {
+      _id: new Types.ObjectId(subId),
+      userId: new Types.ObjectId(userId),
+      name: 'Netflix',
+      nextBillingDate: new Date('2026-03-19'),
+      reminderDaysBefore: 3,
+      isActive: true,
+      ...overrides,
+    };
+  }
+
   beforeEach(async () => {
     mockSubModel = {
-      find: jest.fn().mockReturnValue(createChainable([])),
+      find: jest.fn().mockReturnValue(cursorOf([])),
     };
-
     mockNotificationsService = {
       createRenewalReminder: jest.fn().mockResolvedValue(undefined),
+    };
+    mockCronLock = {
+      tryAcquire: jest.fn().mockResolvedValue(true),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationsCronService,
-        {
-          provide: getModelToken(Subscription.name),
-          useValue: mockSubModel,
-        },
-        {
-          provide: NotificationsService,
-          useValue: mockNotificationsService,
-        },
+        { provide: getModelToken(Subscription.name), useValue: mockSubModel },
+        { provide: NotificationsService, useValue: mockNotificationsService },
+        { provide: CronLockService, useValue: mockCronLock },
       ],
     }).compile();
 
@@ -53,20 +68,44 @@ describe('NotificationsCronService', () => {
     jest.useRealTimers();
   });
 
-  it('should create notifications for subscriptions in the reminder window', async () => {
+  it('skips the run when another instance holds the daily lock', async () => {
+    mockCronLock.tryAcquire.mockResolvedValue(false);
+    mockSubModel.find.mockReturnValue(cursorOf([makeSub()]));
+
+    await cronService.handleRenewalReminders();
+
+    expect(mockSubModel.find).not.toHaveBeenCalled();
+    expect(
+      mockNotificationsService.createRenewalReminder,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('acquires the lock with the UTC run-date key for the day', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
 
-    const sub = {
-      _id: new Types.ObjectId(subId),
-      userId: new Types.ObjectId(userId),
-      name: 'Netflix',
-      nextBillingDate: new Date('2026-03-19'),
-      reminderDaysBefore: 3,
-      isActive: true,
-    };
+    await cronService.handleRenewalReminders();
 
-    mockSubModel.find.mockReturnValue(createChainable([sub]));
+    expect(mockCronLock.tryAcquire).toHaveBeenCalledWith(
+      'renewal-reminders',
+      '2026-03-17',
+    );
+  });
+
+  it('streams subscriptions with a lean cursor', async () => {
+    const chain = cursorOf([]);
+    mockSubModel.find.mockReturnValue(chain);
+
+    await cronService.handleRenewalReminders();
+
+    expect(chain.lean).toHaveBeenCalled();
+    expect(chain.cursor).toHaveBeenCalled();
+  });
+
+  it('should create notifications for subscriptions in the reminder window', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
+    mockSubModel.find.mockReturnValue(cursorOf([makeSub()]));
 
     await cronService.handleRenewalReminders();
 
@@ -82,17 +121,9 @@ describe('NotificationsCronService', () => {
   it('should not create notifications for subscriptions outside the reminder window', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-10T10:00:00Z'));
-
-    const sub = {
-      _id: new Types.ObjectId(subId),
-      userId: new Types.ObjectId(userId),
-      name: 'Netflix',
-      nextBillingDate: new Date('2026-03-20'),
-      reminderDaysBefore: 3,
-      isActive: true,
-    };
-
-    mockSubModel.find.mockReturnValue(createChainable([sub]));
+    mockSubModel.find.mockReturnValue(
+      cursorOf([makeSub({ nextBillingDate: new Date('2026-03-20') })]),
+    );
 
     await cronService.handleRenewalReminders();
 
@@ -103,7 +134,7 @@ describe('NotificationsCronService', () => {
   });
 
   it('should handle empty subscription list', async () => {
-    mockSubModel.find.mockReturnValue(createChainable([]));
+    mockSubModel.find.mockReturnValue(cursorOf([]));
 
     await cronService.handleRenewalReminders();
 
@@ -115,27 +146,17 @@ describe('NotificationsCronService', () => {
   it('should process multiple subscriptions', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
-
-    const subs = [
-      {
-        _id: new Types.ObjectId(subId),
-        userId: new Types.ObjectId(userId),
-        name: 'Netflix',
-        nextBillingDate: new Date('2026-03-19'),
-        reminderDaysBefore: 3,
-        isActive: true,
-      },
-      {
-        _id: new Types.ObjectId('507f1f77bcf86cd799439044'),
-        userId: new Types.ObjectId(userId),
-        name: 'Spotify',
-        nextBillingDate: new Date('2026-03-18'),
-        reminderDaysBefore: 2,
-        isActive: true,
-      },
-    ];
-
-    mockSubModel.find.mockReturnValue(createChainable(subs));
+    mockSubModel.find.mockReturnValue(
+      cursorOf([
+        makeSub(),
+        makeSub({
+          _id: new Types.ObjectId('507f1f77bcf86cd799439044'),
+          name: 'Spotify',
+          nextBillingDate: new Date('2026-03-18'),
+          reminderDaysBefore: 2,
+        }),
+      ]),
+    );
 
     await cronService.handleRenewalReminders();
 
