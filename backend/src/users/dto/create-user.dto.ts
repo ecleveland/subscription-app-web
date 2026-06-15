@@ -4,11 +4,11 @@ import {
   IsEmail,
   IsOptional,
   IsEnum,
-  MinLength,
   IsUrl,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from '../schemas/user.schema';
+import { StrongPassword } from '../../common/validators/strong-password.decorator';
 
 export class CreateUserDto {
   @ApiProperty({ description: 'Unique username', example: 'johndoe' })
@@ -17,12 +17,12 @@ export class CreateUserDto {
   username: string;
 
   @ApiProperty({
-    description: 'Account password',
+    description:
+      'Account password (min 8 chars, with upper-, lower-case and a digit)',
     example: 'P@ssw0rd123',
     minLength: 8,
   })
-  @IsString()
-  @MinLength(8)
+  @StrongPassword()
   password: string;
 
   @ApiPropertyOptional({

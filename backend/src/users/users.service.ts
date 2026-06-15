@@ -117,6 +117,8 @@ export class UsersService {
       throw new UnauthorizedException('Current password is incorrect');
     }
     user.passwordHash = await bcrypt.hash(newPassword, 10);
+    // Bump tokenVersion so existing access tokens are rejected immediately.
+    user.tokenVersion += 1;
     await user.save();
 
     await this.refreshTokenModel
@@ -130,6 +132,14 @@ export class UsersService {
       .exec();
 
     this.logger.log({ userId: id }, 'Password changed');
+  }
+
+  async incrementTokenVersion(id: string): Promise<void> {
+    await this.userModel
+      .updateOne({ _id: new Types.ObjectId(id) } as Record<string, unknown>, {
+        $inc: { tokenVersion: 1 },
+      })
+      .exec();
   }
 
   async remove(id: string): Promise<void> {

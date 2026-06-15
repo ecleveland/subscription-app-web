@@ -17,7 +17,10 @@ jest.mock('bcryptjs');
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: jest.Mocked<
-    Pick<UsersService, 'findByUsername' | 'findByEmail' | 'findOne'>
+    Pick<
+      UsersService,
+      'findByUsername' | 'findByEmail' | 'findOne' | 'incrementTokenVersion'
+    >
   >;
   let jwtService: jest.Mocked<Pick<JwtService, 'sign'>>;
   let mailService: { sendPasswordResetEmail: jest.Mock };
@@ -30,6 +33,7 @@ describe('AuthService', () => {
     email: 'test@example.com',
     passwordHash: 'hashed-password',
     role: 'user',
+    tokenVersion: 0,
     save: jest.fn(),
   };
 
@@ -38,6 +42,7 @@ describe('AuthService', () => {
       findByUsername: jest.fn(),
       findByEmail: jest.fn(),
       findOne: jest.fn(),
+      incrementTokenVersion: jest.fn().mockResolvedValue(undefined),
     };
     jwtService = {
       sign: jest.fn().mockReturnValue('signed-jwt-token'),
@@ -52,6 +57,9 @@ describe('AuthService', () => {
     }));
     mockPasswordResetModel.findOne = jest.fn().mockReturnValue({
       exec: jest.fn().mockResolvedValue(null),
+    });
+    mockPasswordResetModel.updateMany = jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
     });
 
     const refreshSaveMock = jest.fn().mockResolvedValue(undefined);
@@ -130,6 +138,7 @@ describe('AuthService', () => {
         sub: '507f1f77bcf86cd799439011',
         username: 'testuser',
         role: 'user',
+        tokenVersion: 0,
       });
     });
 
@@ -244,6 +253,14 @@ describe('AuthService', () => {
         expect.objectContaining({ revokedAt: expect.any(Date) }),
       );
     });
+
+    it('should bump the user tokenVersion to revoke access tokens', async () => {
+      await service.logout('507f1f77bcf86cd799439011', 'plain-token');
+
+      expect(usersService.incrementTokenVersion).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
+      );
+    });
   });
 
   describe('revokeAllRefreshTokens', () => {
@@ -267,6 +284,14 @@ describe('AuthService', () => {
       await service.forgotPassword('test@example.com');
 
       expect(usersService.findByEmail).toHaveBeenCalledWith('test@example.com');
+      // Prior unused reset tokens are invalidated before issuing a new one.
+      expect(mockPasswordResetModel.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'test@example.com',
+          usedAt: { $exists: false },
+        }),
+        expect.objectContaining({ usedAt: expect.any(Date) }),
+      );
       expect(mockPasswordResetModel).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'test@example.com',
@@ -320,6 +345,9 @@ describe('AuthService', () => {
       expect(resetDoc.usedAt).toBeInstanceOf(Date);
       expect(resetDoc.save).toHaveBeenCalled();
       expect(mockRefreshTokenModel.updateMany).toHaveBeenCalled();
+      expect(usersService.incrementTokenVersion).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
+      );
     });
 
     it('should throw BadRequestException for invalid token', async () => {

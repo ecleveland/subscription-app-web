@@ -82,7 +82,7 @@ export default defineConfig({
           env: {
             PORT: BACKEND_PORT,
             MONGODB_URI: MONGO_URI,
-            JWT_SECRET: 'e2e-test-secret',
+            JWT_SECRET: 'e2e-jwt-secret-at-least-32-chars-long',
             JWT_EXPIRES_IN: '24h',
             FRONTEND_URL: BASE_URL,
             // Disable auth rate limiting so reruns don't trip the throttler.

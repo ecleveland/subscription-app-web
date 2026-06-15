@@ -18,7 +18,7 @@ describe('Admin (e2e)', () => {
     // Register the first user (will become admin)
     const adminRegRes = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ username: 'admin', password: 'password123' });
+      .send({ username: 'admin', password: 'Password123' });
     adminToken = adminRegRes.body.access_token;
 
     // Get admin's profile to get their ID
@@ -34,13 +34,13 @@ describe('Admin (e2e)', () => {
     // Re-login to get a token with the admin role in the JWT
     const adminLoginRes = await request(app.getHttpServer())
       .post('/api/auth/login')
-      .send({ username: 'admin', password: 'password123' });
+      .send({ username: 'admin', password: 'Password123' });
     adminToken = adminLoginRes.body.access_token;
 
     // Register a regular user
     const userRegRes = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ username: 'regularuser', password: 'password123' });
+      .send({ username: 'regularuser', password: 'Password123' });
     userToken = userRegRes.body.access_token;
 
     const userProfile = await request(app.getHttpServer())
@@ -93,7 +93,7 @@ describe('Admin (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({
           username: 'newuser',
-          password: 'password123',
+          password: 'Password123',
         })
         .expect(201);
 
@@ -139,7 +139,7 @@ describe('Admin (e2e)', () => {
       const createRes = await request(app.getHttpServer())
         .post('/api/admin/users')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ username: 'todelete', password: 'password123' });
+        .send({ username: 'todelete', password: 'Password123' });
 
       await request(app.getHttpServer())
         .delete(`/api/admin/users/${createRes.body._id}`)
@@ -154,13 +154,13 @@ describe('Admin (e2e)', () => {
       const createRes = await request(app.getHttpServer())
         .post('/api/admin/users')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ username: 'cascadeuser', password: 'password123' });
+        .send({ username: 'cascadeuser', password: 'Password123' });
       const targetUserId = createRes.body._id;
 
       // Log in as the target user and create a subscription
       const loginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ username: 'cascadeuser', password: 'password123' });
+        .send({ username: 'cascadeuser', password: 'Password123' });
       const targetToken = loginRes.body.access_token;
 
       await request(app.getHttpServer())

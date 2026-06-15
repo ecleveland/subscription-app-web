@@ -34,12 +34,12 @@ describe('Auth rate limiting (e2e)', () => {
     for (let i = 0; i < 3; i++) {
       await request(app.getHttpServer())
         .post('/api/auth/register')
-        .send({ username: `ratelimit${i}`, password: 'password123' });
+        .send({ username: `ratelimit${i}`, password: 'Password123' });
     }
 
     await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ username: 'ratelimit3', password: 'password123' })
+      .send({ username: 'ratelimit3', password: 'Password123' })
       .expect(429);
   });
 });
@@ -61,7 +61,7 @@ describe('Auth (e2e)', () => {
         .post('/api/auth/register')
         .send({
           username: 'testuser',
-          password: 'password123',
+          password: 'Password123',
         })
         .expect(201)
         .expect((res) => {
@@ -77,7 +77,7 @@ describe('Auth (e2e)', () => {
         .post('/api/auth/register')
         .send({
           username: 'testuser',
-          password: 'password123',
+          password: 'Password123',
         })
         .expect(409);
     });
@@ -100,6 +100,16 @@ describe('Auth (e2e)', () => {
         })
         .expect(400);
     });
+
+    it('should return 400 for a long password lacking complexity (no uppercase/digit)', () => {
+      return request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({
+          username: 'weakpass',
+          password: 'alllowercaseletters',
+        })
+        .expect(400);
+    });
   });
 
   describe('POST /api/auth/login', () => {
@@ -108,7 +118,7 @@ describe('Auth (e2e)', () => {
         .post('/api/auth/login')
         .send({
           username: 'testuser',
-          password: 'password123',
+          password: 'Password123',
         })
         .expect(200)
         .expect((res) => {
@@ -132,7 +142,7 @@ describe('Auth (e2e)', () => {
         .post('/api/auth/login')
         .send({
           username: 'nobody',
-          password: 'password123',
+          password: 'Password123',
         })
         .expect(401);
     });
@@ -142,7 +152,7 @@ describe('Auth (e2e)', () => {
     it('should return new token pair for valid refresh token', async () => {
       const loginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ username: 'testuser', password: 'password123' });
+        .send({ username: 'testuser', password: 'Password123' });
 
       const refreshToken = loginRes.body.refresh_token;
 
@@ -161,7 +171,7 @@ describe('Auth (e2e)', () => {
     it('should reject old refresh token after rotation', async () => {
       const loginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ username: 'testuser', password: 'password123' });
+        .send({ username: 'testuser', password: 'Password123' });
 
       const oldRefreshToken = loginRes.body.refresh_token;
 
@@ -190,7 +200,7 @@ describe('Auth (e2e)', () => {
     it('should revoke refresh token so it cannot be used afterwards', async () => {
       const loginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ username: 'testuser', password: 'password123' });
+        .send({ username: 'testuser', password: 'Password123' });
 
       const { access_token, refresh_token } = loginRes.body;
 
@@ -221,7 +231,7 @@ describe('Auth (e2e)', () => {
       // Register a fresh user
       const regRes = await request(app.getHttpServer())
         .post('/api/auth/register')
-        .send({ username: 'pwchangeuser', password: 'password123' });
+        .send({ username: 'pwchangeuser', password: 'Password123' });
 
       const { access_token, refresh_token } = regRes.body;
 
@@ -229,13 +239,63 @@ describe('Auth (e2e)', () => {
       await request(app.getHttpServer())
         .post('/api/users/me/change-password')
         .set('Authorization', `Bearer ${access_token}`)
-        .send({ currentPassword: 'password123', newPassword: 'newpass123' })
+        .send({ currentPassword: 'Password123', newPassword: 'Newpass123' })
         .expect(204);
 
       // Old refresh token should be rejected
       await request(app.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refresh_token })
+        .expect(401);
+    });
+
+    it('should reject the old access token after a password change (tokenVersion bump)', async () => {
+      const regRes = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ username: 'pwchangeaccess', password: 'Password123' });
+      const { access_token } = regRes.body;
+
+      // The access token works before the change.
+      await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .post('/api/users/me/change-password')
+        .set('Authorization', `Bearer ${access_token}`)
+        .send({ currentPassword: 'Password123', newPassword: 'Newpass123' })
+        .expect(204);
+
+      // The same access token is now rejected — tokenVersion changed.
+      await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(401);
+    });
+  });
+
+  describe('DB-backed token validation', () => {
+    it('rejects a cryptographically-valid access token after the user is deleted', async () => {
+      const regRes = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ username: 'deleteduser', password: 'Password123' });
+      const { access_token } = regRes.body;
+
+      await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(200);
+
+      // Remove the user directly; the JWT itself is still unexpired and signed.
+      const connection = app.get<Connection>(getConnectionToken());
+      await connection
+        .collection('users')
+        .deleteOne({ username: 'deleteduser' });
+
+      await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${access_token}`)
         .expect(401);
     });
   });
@@ -273,7 +333,7 @@ describe('Auth (e2e)', () => {
     it('should return 400 for an invalid token', () => {
       return request(app.getHttpServer())
         .post('/api/auth/reset-password')
-        .send({ token: 'invalid-token', password: 'newpassword123' })
+        .send({ token: 'invalid-token', password: 'NewPassword123' })
         .expect(400);
     });
 
@@ -290,7 +350,7 @@ describe('Auth (e2e)', () => {
       // Register a user with an email
       await request(app.getHttpServer()).post('/api/auth/register').send({
         username: 'resetuser',
-        password: 'oldpassword123',
+        password: 'OldPassword123',
         email: 'resetuser@example.com',
       });
 
@@ -307,11 +367,12 @@ describe('Auth (e2e)', () => {
         .findOne({ email: 'resetuser@example.com' });
       expect(resetDoc).toBeDefined();
 
-      // We need the plain token, not the hash. Since we can't recover it,
-      // we'll generate one and insert it manually for the test.
+      // We can't recover the plain token from the stored HMAC, so generate one
+      // and insert it manually, hashed the same way the service does (HMAC-SHA256
+      // keyed by the token pepper, which defaults to JWT_SECRET in tests).
       const plainToken = crypto.randomBytes(32).toString('hex');
       const tokenHash = crypto
-        .createHash('sha256')
+        .createHmac('sha256', process.env.JWT_SECRET as string)
         .update(plainToken)
         .digest('hex');
 
@@ -326,13 +387,13 @@ describe('Auth (e2e)', () => {
       // Reset password with the token
       await request(app.getHttpServer())
         .post('/api/auth/reset-password')
-        .send({ token: plainToken, password: 'newpassword123' })
+        .send({ token: plainToken, password: 'NewPassword123' })
         .expect(200);
 
       // Login with new password should succeed
       await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ username: 'resetuser', password: 'newpassword123' })
+        .send({ username: 'resetuser', password: 'NewPassword123' })
         .expect(200)
         .expect((res) => {
           expect(res.body.access_token).toBeDefined();
@@ -342,13 +403,13 @@ describe('Auth (e2e)', () => {
       // Login with old password should fail
       await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ username: 'resetuser', password: 'oldpassword123' })
+        .send({ username: 'resetuser', password: 'OldPassword123' })
         .expect(401);
 
       // Reusing the same token should fail
       await request(app.getHttpServer())
         .post('/api/auth/reset-password')
-        .send({ token: plainToken, password: 'anotherpassword' })
+        .send({ token: plainToken, password: 'Anotherpass1' })
         .expect(400);
     });
   });
@@ -357,7 +418,7 @@ describe('Auth (e2e)', () => {
     it('should access protected route with valid token', async () => {
       const loginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
-        .send({ username: 'testuser', password: 'password123' });
+        .send({ username: 'testuser', password: 'Password123' });
 
       return request(app.getHttpServer())
         .get('/api/users/me')

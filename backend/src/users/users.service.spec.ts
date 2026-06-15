@@ -34,6 +34,7 @@ describe('UsersService', () => {
     displayName: 'Test User',
     email: 'test@example.com',
     role: UserRole.USER,
+    tokenVersion: 0,
     save: jest.fn(),
   };
 
@@ -58,6 +59,9 @@ describe('UsersService', () => {
     mockUserModel.countDocuments = jest
       .fn()
       .mockReturnValue(createChainable(0));
+    mockUserModel.updateOne = jest
+      .fn()
+      .mockReturnValue(createChainable({ modifiedCount: 1 }));
 
     mockRefreshTokenModel = {
       updateMany: jest.fn().mockReturnValue({
@@ -305,6 +309,7 @@ describe('UsersService', () => {
       expect(bcrypt.compare).toHaveBeenCalledWith('old', 'hashed-password');
       expect(bcrypt.hash).toHaveBeenCalledWith('new', 10);
       expect(userDoc.passwordHash).toBe('new-hash');
+      expect(userDoc.tokenVersion).toBe(1); // bumped to revoke old access tokens
       expect(userDoc.save).toHaveBeenCalled();
       expect(logSpy).toHaveBeenCalledWith(
         { userId: '507f1f77bcf86cd799439011' },
@@ -339,6 +344,17 @@ describe('UsersService', () => {
       await expect(
         service.changePassword('507f1f77bcf86cd799439011', 'wrong', 'new'),
       ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('incrementTokenVersion', () => {
+    it('should atomically $inc the user tokenVersion', async () => {
+      await service.incrementTokenVersion('507f1f77bcf86cd799439011');
+
+      expect(mockUserModel.updateOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: expect.anything() }),
+        { $inc: { tokenVersion: 1 } },
+      );
     });
   });
 
