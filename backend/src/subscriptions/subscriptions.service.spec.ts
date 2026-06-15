@@ -132,22 +132,54 @@ describe('SubscriptionsService', () => {
 
       await service.advanceOverdueDates();
 
-      expect(mockSubModel.bulkWrite).toHaveBeenCalledWith([
-        {
-          updateOne: {
-            filter: {
-              _id: subId,
-              nextBillingDate: { $lte: expect.any(Date) },
+      expect(mockSubModel.bulkWrite).toHaveBeenCalledWith(
+        [
+          {
+            updateOne: {
+              filter: {
+                _id: subId,
+                nextBillingDate: { $lte: expect.any(Date) },
+              },
+              update: { $set: { nextBillingDate: expect.any(Date) } },
             },
-            update: { $set: { nextBillingDate: expect.any(Date) } },
           },
-        },
-      ]);
+        ],
+        { ordered: false },
+      );
       const newDate =
         mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
           .nextBillingDate;
       expect(newDate.getUTCMonth()).toBe(7); // August
       expect(newDate.getUTCDate()).toBe(1);
+
+      jest.useRealTimers();
+    });
+
+    it('flushes bulkWrite in batches of ADVANCE_BATCH_SIZE and sums modified counts', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
+
+      const overdue = Array.from({ length: 1001 }, (_, i) => ({
+        ...mockSubscription,
+        _id: `sub${i}`,
+        nextBillingDate: new Date('2025-07-01'),
+        billingCycle: BillingCycle.MONTHLY,
+      }));
+      mockSubModel.find.mockReturnValueOnce(createChainable(overdue));
+      mockSubModel.bulkWrite
+        .mockResolvedValueOnce({ modifiedCount: 500 })
+        .mockResolvedValueOnce({ modifiedCount: 500 })
+        .mockResolvedValueOnce({ modifiedCount: 1 });
+
+      const advanced = await service.advanceOverdueDates();
+
+      // 1001 ops → batches of 500, 500, 1
+      expect(mockSubModel.bulkWrite).toHaveBeenCalledTimes(3);
+      expect(mockSubModel.bulkWrite.mock.calls[0][0]).toHaveLength(500);
+      expect(mockSubModel.bulkWrite.mock.calls[1][0]).toHaveLength(500);
+      expect(mockSubModel.bulkWrite.mock.calls[2][0]).toHaveLength(1);
+      // modifiedCount summed across every flushed batch
+      expect(advanced).toBe(1001);
 
       jest.useRealTimers();
     });

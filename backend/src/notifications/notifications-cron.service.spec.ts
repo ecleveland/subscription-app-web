@@ -143,6 +143,30 @@ describe('NotificationsCronService', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it('continues processing after a per-item failure (one bad sub does not drop the run)', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
+    mockSubModel.find.mockReturnValue(
+      cursorOf([
+        makeSub({ name: 'Bad' }),
+        makeSub({
+          _id: new Types.ObjectId('507f1f77bcf86cd799439044'),
+          name: 'Good',
+        }),
+      ]),
+    );
+    mockNotificationsService.createRenewalReminder
+      .mockRejectedValueOnce(new Error('write failed'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(cronService.handleRenewalReminders()).resolves.toBeUndefined();
+
+    // The second subscription is still attempted despite the first throwing.
+    expect(
+      mockNotificationsService.createRenewalReminder,
+    ).toHaveBeenCalledTimes(2);
+  });
+
   it('should process multiple subscriptions', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));

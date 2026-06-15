@@ -52,10 +52,12 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   // Legacy startup tasks: seed the env-configured admin and migrate any
-  // pre-multi-user subscriptions to it. Both are idempotent, but they run on
-  // every boot of every replica, so the whole block is wrapped — a transient
-  // failure (e.g. a concurrent boot racing the same write) logs a warning
-  // instead of crashing the process during startup.
+  // pre-multi-user subscriptions to it. Both are idempotent and run on every
+  // boot of every replica. seedAdmin already swallows its own benign
+  // concurrent-boot duplicate; this outer guard keeps any *other* failure in
+  // these non-critical legacy tasks from crashing startup — the app can serve
+  // traffic without them — so it logs a warning and continues rather than
+  // aborting the process.
   try {
     const usersService = app.get(UsersService);
     const seedPasswordHash =

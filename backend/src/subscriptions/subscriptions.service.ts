@@ -101,7 +101,10 @@ export class SubscriptionsService {
 
     const flush = async (): Promise<void> => {
       if (bulkOps.length === 0) return;
-      const result = await this.subscriptionModel.bulkWrite(bulkOps);
+      // `ordered: false` so one failing op doesn't abort the rest of the batch.
+      const result = await this.subscriptionModel.bulkWrite(bulkOps, {
+        ordered: false,
+      });
       advanced += result.modifiedCount ?? 0;
       bulkOps = [];
     };

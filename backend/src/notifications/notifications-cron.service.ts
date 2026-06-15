@@ -55,6 +55,7 @@ export class NotificationsCronService {
 
     let checked = 0;
     let created = 0;
+    let failed = 0;
     for await (const sub of cursor) {
       checked++;
       const billingDate = new Date(sub.nextBillingDate);
@@ -68,17 +69,32 @@ export class NotificationsCronService {
         const ownerId = (
           sub.userId as unknown as { toHexString(): string }
         ).toHexString();
-        await this.notificationsService.createRenewalReminder(
-          ownerId,
-          docId,
-          sub.name,
-          billingDate,
-          sub.reminderDaysBefore,
-        );
-        created++;
+        // Isolate per-subscription failures so one bad write doesn't drop
+        // reminders for everyone after it (the daily lock prevents a retry).
+        try {
+          await this.notificationsService.createRenewalReminder(
+            ownerId,
+            docId,
+            sub.name,
+            billingDate,
+            sub.reminderDaysBefore,
+          );
+          created++;
+        } catch (error: unknown) {
+          failed++;
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            { subscriptionId: docId, userId: ownerId },
+            `Failed to create renewal reminder: ${message}`,
+          );
+        }
       }
     }
 
-    this.logger.log({ checked, created }, 'Renewal reminder cron job complete');
+    this.logger.log(
+      { checked, created, failed },
+      'Renewal reminder cron job complete',
+    );
   }
 }
