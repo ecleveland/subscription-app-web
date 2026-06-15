@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
   Inject,
   Logger,
 } from '@nestjs/common';
@@ -39,19 +40,24 @@ export class AuthService {
     @Inject(MAIL_SERVICE) private mailService: MailService,
   ) {}
 
+  // HMAC (keyed hash) so a leaked DB dump of token hashes can't be brute-forced
+  // without the server-side pepper — unlike a bare SHA-256 of the token.
+  private hashToken(plain: string): string {
+    const pepper = this.configService.get<string>('auth.tokenPepper') ?? '';
+    return crypto.createHmac('sha256', pepper).update(plain).digest('hex');
+  }
+
   private async generateTokenPair(
     userId: string,
     username: string,
     role: string,
+    tokenVersion: number,
   ): Promise<{ access_token: string; refresh_token: string }> {
-    const payload = { sub: userId, username, role };
+    const payload = { sub: userId, username, role, tokenVersion };
     const access_token = this.jwtService.sign(payload);
 
     const plainToken = crypto.randomBytes(32).toString('hex');
-    const tokenHash = crypto
-      .createHash('sha256')
-      .update(plainToken)
-      .digest('hex');
+    const tokenHash = this.hashToken(plainToken);
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
@@ -92,16 +98,14 @@ export class AuthService {
       user._id.toString(),
       user.username,
       user.role,
+      user.tokenVersion,
     );
   }
 
   async refresh(
     refreshToken: string,
   ): Promise<{ access_token: string; refresh_token: string }> {
-    const tokenHash = crypto
-      .createHash('sha256')
-      .update(refreshToken)
-      .digest('hex');
+    const tokenHash = this.hashToken(refreshToken);
 
     const tokenDoc = await this.refreshTokenModel
       .findOne({
@@ -115,12 +119,17 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    // Verify user still exists
+    // Verify user still exists. A missing user invalidates the token; an
+    // infrastructure error must propagate as 500 rather than masquerade as a
+    // bad token (which would force a needless re-login during a DB blip).
     let user: UserDocument;
     try {
       user = await this.usersService.findOne(tokenDoc.userId.toString());
-    } catch {
-      throw new UnauthorizedException('Invalid or expired refresh token');
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
+      throw error;
     }
 
     // Revoke old token
@@ -131,14 +140,12 @@ export class AuthService {
       user._id.toString(),
       user.username,
       user.role,
+      user.tokenVersion,
     );
   }
 
   async logout(userId: string, refreshToken: string): Promise<void> {
-    const tokenHash = crypto
-      .createHash('sha256')
-      .update(refreshToken)
-      .digest('hex');
+    const tokenHash = this.hashToken(refreshToken);
 
     await this.refreshTokenModel
       .findOneAndUpdate(
@@ -150,6 +157,9 @@ export class AuthService {
         { revokedAt: new Date() },
       )
       .exec();
+
+    // Invalidate any outstanding access tokens for this user.
+    await this.usersService.incrementTokenVersion(userId);
   }
 
   async revokeAllRefreshTokens(userId: string): Promise<void> {
@@ -166,7 +176,18 @@ export class AuthService {
 
   async forgotPassword(email: string): Promise<void> {
     const user = await this.usersService.findByEmail(email);
-    if (!user) {
+
+    // Generate the token + hash unconditionally, and send mail fire-and-forget
+    // (below), so the dominant timing signals (token work + SMTP round-trip) no
+    // longer distinguish known from unknown emails. A residual signal remains —
+    // the known path does an extra updateMany + insert — but the constant
+    // response body plus the 3-req/60s throttle on this route make enumeration
+    // impractical.
+    const plainToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = this.hashToken(plainToken);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    if (!user || !user.email) {
       this.logger.log('Password reset requested for unknown email');
       return;
     }
@@ -176,13 +197,16 @@ export class AuthService {
       'Password reset requested',
     );
 
-    const plainToken = crypto.randomBytes(32).toString('hex');
-    const tokenHash = crypto
-      .createHash('sha256')
-      .update(plainToken)
-      .digest('hex');
-
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    // Invalidate any prior unused reset tokens so only the newest one is valid.
+    await this.passwordResetModel
+      .updateMany(
+        { email: user.email, usedAt: { $exists: false } } as Record<
+          string,
+          unknown
+        >,
+        { usedAt: new Date() },
+      )
+      .exec();
 
     await new this.passwordResetModel({
       email: user.email,
@@ -194,11 +218,18 @@ export class AuthService {
       this.configService.get<string>('frontendUrl') || 'http://localhost:3000';
     const resetUrl = `${frontendUrl}/reset-password?token=${plainToken}`;
 
-    await this.mailService.sendPasswordResetEmail(user.email!, resetUrl);
+    // Fire-and-forget so the SMTP round-trip neither blocks the response nor
+    // leaks (via timing) whether the email exists.
+    void this.mailService
+      .sendPasswordResetEmail(user.email, resetUrl)
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`Failed to send password reset email: ${message}`);
+      });
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const tokenHash = this.hashToken(token);
 
     const resetDoc = await this.passwordResetModel
       .findOne({
@@ -225,6 +256,8 @@ export class AuthService {
     await resetDoc.save();
 
     await this.revokeAllRefreshTokens(user._id.toString());
+    // Invalidate any outstanding access tokens issued before the reset.
+    await this.usersService.incrementTokenVersion(user._id.toString());
 
     this.logger.log(
       { userId: user._id.toString() },

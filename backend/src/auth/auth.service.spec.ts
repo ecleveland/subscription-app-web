@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
@@ -17,7 +21,10 @@ jest.mock('bcryptjs');
 describe('AuthService', () => {
   let service: AuthService;
   let usersService: jest.Mocked<
-    Pick<UsersService, 'findByUsername' | 'findByEmail' | 'findOne'>
+    Pick<
+      UsersService,
+      'findByUsername' | 'findByEmail' | 'findOne' | 'incrementTokenVersion'
+    >
   >;
   let jwtService: jest.Mocked<Pick<JwtService, 'sign'>>;
   let mailService: { sendPasswordResetEmail: jest.Mock };
@@ -30,6 +37,7 @@ describe('AuthService', () => {
     email: 'test@example.com',
     passwordHash: 'hashed-password',
     role: 'user',
+    tokenVersion: 0,
     save: jest.fn(),
   };
 
@@ -38,6 +46,7 @@ describe('AuthService', () => {
       findByUsername: jest.fn(),
       findByEmail: jest.fn(),
       findOne: jest.fn(),
+      incrementTokenVersion: jest.fn().mockResolvedValue(undefined),
     };
     jwtService = {
       sign: jest.fn().mockReturnValue('signed-jwt-token'),
@@ -52,6 +61,9 @@ describe('AuthService', () => {
     }));
     mockPasswordResetModel.findOne = jest.fn().mockReturnValue({
       exec: jest.fn().mockResolvedValue(null),
+    });
+    mockPasswordResetModel.updateMany = jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
     });
 
     const refreshSaveMock = jest.fn().mockResolvedValue(undefined);
@@ -130,6 +142,7 @@ describe('AuthService', () => {
         sub: '507f1f77bcf86cd799439011',
         username: 'testuser',
         role: 'user',
+        tokenVersion: 0,
       });
     });
 
@@ -221,11 +234,28 @@ describe('AuthService', () => {
       mockRefreshTokenModel.findOne.mockReturnValue({
         exec: jest.fn().mockResolvedValue(tokenDoc),
       });
-      usersService.findOne.mockRejectedValue(new Error('Not found'));
+      usersService.findOne.mockRejectedValue(new NotFoundException());
 
       await expect(service.refresh(plainToken)).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+
+    it('should propagate infrastructure errors during user lookup (not mask as 401)', async () => {
+      const plainToken = crypto.randomBytes(32).toString('hex');
+      const tokenDoc = {
+        userId: { toString: () => '507f1f77bcf86cd799439011' },
+        tokenHash: 'irrelevant',
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        save: jest.fn(),
+      };
+      mockRefreshTokenModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(tokenDoc),
+      });
+      const dbError = new Error('connection timed out');
+      usersService.findOne.mockRejectedValue(dbError);
+
+      await expect(service.refresh(plainToken)).rejects.toThrow(dbError);
     });
   });
 
@@ -242,6 +272,14 @@ describe('AuthService', () => {
           revokedAt: { $exists: false },
         }),
         expect.objectContaining({ revokedAt: expect.any(Date) }),
+      );
+    });
+
+    it('should bump the user tokenVersion to revoke access tokens', async () => {
+      await service.logout('507f1f77bcf86cd799439011', 'plain-token');
+
+      expect(usersService.incrementTokenVersion).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
       );
     });
   });
@@ -267,6 +305,14 @@ describe('AuthService', () => {
       await service.forgotPassword('test@example.com');
 
       expect(usersService.findByEmail).toHaveBeenCalledWith('test@example.com');
+      // Prior unused reset tokens are invalidated before issuing a new one.
+      expect(mockPasswordResetModel.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'test@example.com',
+          usedAt: { $exists: false },
+        }),
+        expect.objectContaining({ usedAt: expect.any(Date) }),
+      );
       expect(mockPasswordResetModel).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'test@example.com',
@@ -320,6 +366,9 @@ describe('AuthService', () => {
       expect(resetDoc.usedAt).toBeInstanceOf(Date);
       expect(resetDoc.save).toHaveBeenCalled();
       expect(mockRefreshTokenModel.updateMany).toHaveBeenCalled();
+      expect(usersService.incrementTokenVersion).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
+      );
     });
 
     it('should throw BadRequestException for invalid token', async () => {

@@ -23,7 +23,7 @@ services:
       - MONGODB_URI=mongodb://mongo:27017/subscriptions
       - AUTH_PASSWORD_HASH=${AUTH_PASSWORD_HASH:-}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-15m}
       - FRONTEND_URL=http://localhost:3000
     depends_on:
       mongo:

@@ -16,12 +16,12 @@ describe('Subscriptions (e2e)', () => {
     // Create two users
     const resA = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ username: 'usera', password: 'password123' });
+      .send({ username: 'usera', password: 'Password123' });
     tokenA = resA.body.access_token;
 
     const resB = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ username: 'userb', password: 'password123' });
+      .send({ username: 'userb', password: 'Password123' });
     tokenB = resB.body.access_token;
   });
 
@@ -344,7 +344,9 @@ describe('Subscriptions (e2e)', () => {
     // tests invoke the service/cron directly (the GET endpoint no longer writes).
     let subsService: SubscriptionsService;
 
-    const createSub = async (body: Record<string, unknown>): Promise<string> => {
+    const createSub = async (
+      body: Record<string, unknown>,
+    ): Promise<string> => {
       const res = await request(app.getHttpServer())
         .post('/api/subscriptions')
         .set('Authorization', `Bearer ${tokenA}`)
@@ -377,7 +379,9 @@ describe('Subscriptions (e2e)', () => {
       });
 
       const before = await getSub(subId);
-      expect(new Date(before.nextBillingDate).getTime()).toBeLessThan(Date.now());
+      expect(new Date(before.nextBillingDate).getTime()).toBeLessThan(
+        Date.now(),
+      );
     });
 
     it('advances an overdue monthly billing date when advancement runs', async () => {

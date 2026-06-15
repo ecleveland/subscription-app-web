@@ -16,12 +16,12 @@ describe('Notifications (e2e)', () => {
 
     const resA = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ username: 'notif_usera', password: 'password123' });
+      .send({ username: 'notif_usera', password: 'Password123' });
     tokenA = resA.body.access_token;
 
     const resB = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ username: 'notif_userb', password: 'password123' });
+      .send({ username: 'notif_userb', password: 'Password123' });
     tokenB = resB.body.access_token;
   });
 

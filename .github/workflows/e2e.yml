@@ -30,7 +30,7 @@ jobs:
       # is set), so point the suite at these ports. A dedicated `_e2e` database
       # keeps the run isolated; it is dropped in global.teardown.ts.
       MONGODB_URI: mongodb://localhost:27017/subscriptions_e2e
-      JWT_SECRET: e2e-test-secret
+      JWT_SECRET: e2e-jwt-secret-at-least-32-chars-long
       JWT_EXPIRES_IN: 24h
       FRONTEND_URL: http://localhost:3000
       NEXT_PUBLIC_API_URL: http://localhost:3001/api

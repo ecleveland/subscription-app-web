@@ -5,7 +5,6 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from '../../src/app.module';
-import { SubscriptionsService } from '../../src/subscriptions/subscriptions.service';
 
 // Track mongod instances per app for proper cleanup
 const mongodInstances = new WeakMap<INestApplication, MongoMemoryServer>();
@@ -20,12 +19,9 @@ export async function createTestApp(
   const mongod = await MongoMemoryServer.create();
 
   process.env.MONGODB_URI = mongod.getUri();
-  process.env.JWT_SECRET = 'test-secret';
+  process.env.JWT_SECRET = 'test-jwt-secret-at-least-32-chars-long';
   process.env.JWT_EXPIRES_IN = '1h';
   process.env.AUTH_PASSWORD_HASH = '';
-
-  // Disable advance cooldown in E2E tests so billing date tests work
-  SubscriptionsService.ADVANCE_COOLDOWN_MS = 0;
 
   let builder = Test.createTestingModule({
     imports: [AppModule],
