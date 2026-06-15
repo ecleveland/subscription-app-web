@@ -11,6 +11,13 @@ function createChainable(resolvedValue: any = null) {
   chain.sort = jest.fn().mockReturnValue(chain);
   chain.skip = jest.fn().mockReturnValue(chain);
   chain.limit = jest.fn().mockReturnValue(chain);
+  chain.lean = jest.fn().mockReturnValue(chain);
+  chain.cursor = jest.fn().mockReturnValue({
+    async *[Symbol.asyncIterator]() {
+      const items = Array.isArray(resolvedValue) ? resolvedValue : [];
+      for (const item of items) yield await Promise.resolve(item);
+    },
+  });
   chain.exec = jest.fn().mockResolvedValue(resolvedValue);
   return chain;
 }
@@ -123,24 +130,56 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
-      expect(mockSubModel.bulkWrite).toHaveBeenCalledWith([
-        {
-          updateOne: {
-            filter: {
-              _id: subId,
-              nextBillingDate: { $lte: expect.any(Date) },
+      expect(mockSubModel.bulkWrite).toHaveBeenCalledWith(
+        [
+          {
+            updateOne: {
+              filter: {
+                _id: subId,
+                nextBillingDate: { $lte: expect.any(Date) },
+              },
+              update: { $set: { nextBillingDate: expect.any(Date) } },
             },
-            update: { $set: { nextBillingDate: expect.any(Date) } },
           },
-        },
-      ]);
+        ],
+        { ordered: false },
+      );
       const newDate =
         mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
           .nextBillingDate;
       expect(newDate.getUTCMonth()).toBe(7); // August
       expect(newDate.getUTCDate()).toBe(1);
+
+      jest.useRealTimers();
+    });
+
+    it('flushes bulkWrite in batches of ADVANCE_BATCH_SIZE and sums modified counts', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
+
+      const overdue = Array.from({ length: 1001 }, (_, i) => ({
+        ...mockSubscription,
+        _id: `sub${i}`,
+        nextBillingDate: new Date('2025-07-01'),
+        billingCycle: BillingCycle.MONTHLY,
+      }));
+      mockSubModel.find.mockReturnValueOnce(createChainable(overdue));
+      mockSubModel.bulkWrite
+        .mockResolvedValueOnce({ modifiedCount: 500 })
+        .mockResolvedValueOnce({ modifiedCount: 500 })
+        .mockResolvedValueOnce({ modifiedCount: 1 });
+
+      const advanced = await service.advanceOverdueDates();
+
+      // 1001 ops → batches of 500, 500, 1
+      expect(mockSubModel.bulkWrite).toHaveBeenCalledTimes(3);
+      expect(mockSubModel.bulkWrite.mock.calls[0][0]).toHaveLength(500);
+      expect(mockSubModel.bulkWrite.mock.calls[1][0]).toHaveLength(500);
+      expect(mockSubModel.bulkWrite.mock.calls[2][0]).toHaveLength(1);
+      // modifiedCount summed across every flushed batch
+      expect(advanced).toBe(1001);
 
       jest.useRealTimers();
     });
@@ -157,7 +196,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       const newDate =
         mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
@@ -180,7 +219,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       // June 2024 → June 2025 (still <= July 15) → June 2026
       const newDate =
@@ -204,7 +243,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       const newDate =
         mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
@@ -227,7 +266,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       // Jan 31 → Feb 28 (still <= Mar 15) → Mar 31 (> Mar 15, stop)
       const newDate =
@@ -251,7 +290,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       // Feb 29, 2024 → Feb 28, 2025 (still <= Mar 1) → Feb 28, 2026
       const newDate =
@@ -276,7 +315,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       expect(mockSubModel.bulkWrite).toHaveBeenCalled();
       const newDate =
@@ -300,7 +339,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       // June 15 + (4*7=28) = July 13 (still <= July 15), + 7 = July 20
       const newDate =
@@ -324,7 +363,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       // July 28 + 7 = August 4
       const newDate =
@@ -339,7 +378,7 @@ describe('SubscriptionsService', () => {
     it('should not call bulkWrite when no overdue subscriptions exist', async () => {
       mockSubModel.find.mockReturnValueOnce(createChainable([]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       expect(mockSubModel.bulkWrite).not.toHaveBeenCalled();
     });
@@ -347,7 +386,7 @@ describe('SubscriptionsService', () => {
     it('should only query active subscriptions with past billing dates', async () => {
       mockSubModel.find.mockReturnValueOnce(createChainable([]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -369,7 +408,7 @@ describe('SubscriptionsService', () => {
       };
       mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
 
-      await service.advanceOverdueDates(userId);
+      await service.advanceOverdueDates();
 
       const filter =
         mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.filter;
@@ -384,17 +423,13 @@ describe('SubscriptionsService', () => {
     // Each test mocks find twice: first call for advanceOverdueDates (returns []),
     // second call for the main query. Also mocks countDocuments.
     it('should filter by userId', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([mockSubscription]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       await service.findAll(userId, {});
 
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        2,
+      expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: expect.any(Types.ObjectId),
         }),
@@ -402,107 +437,80 @@ describe('SubscriptionsService', () => {
     });
 
     it('should add category filter when provided', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { category: 'Streaming' });
 
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        2,
+      expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ category: 'Streaming' }),
       );
     });
 
     it('should add billingCycle filter when provided', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { billingCycle: BillingCycle.MONTHLY });
 
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        2,
+      expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ billingCycle: BillingCycle.MONTHLY }),
       );
     });
 
     it('should filter by tags when provided', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { tags: 'shared,essential' });
 
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        2,
+      expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ tags: { $in: ['shared', 'essential'] } }),
       );
     });
 
     it('should filter shared subscriptions when shared=shared', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { shared: 'shared' });
 
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        2,
+      expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ sharedWith: { $gte: 2 } }),
       );
     });
 
     it('should filter individual subscriptions when shared=individual', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { shared: 'individual' });
 
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        2,
+      expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ sharedWith: { $in: [null, undefined] } }),
       );
     });
 
     it('should filter by weekly billingCycle when provided', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { billingCycle: BillingCycle.WEEKLY });
 
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        2,
+      expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ billingCycle: BillingCycle.WEEKLY }),
       );
     });
 
     it('should default to sort by createdAt descending', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, {});
@@ -530,11 +538,8 @@ describe('SubscriptionsService', () => {
         billingCycle: BillingCycle.YEARLY,
       };
 
-      const advanceChain = createChainable([]);
       const chain = createChainable([monthlySub, weeklySub, yearlySub]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(3));
 
       const result = await service.findAll(userId, {
@@ -571,11 +576,8 @@ describe('SubscriptionsService', () => {
         billingCycle: BillingCycle.YEARLY,
       };
 
-      const advanceChain = createChainable([]);
       const chain = createChainable([monthlySub, weeklySub, yearlySub]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(3));
 
       const result = await service.findAll(userId, {
@@ -592,11 +594,8 @@ describe('SubscriptionsService', () => {
     });
 
     it('should use MongoDB sort for non-cost fields', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, { sortBy: 'name', sortOrder: 'asc' });
@@ -604,51 +603,21 @@ describe('SubscriptionsService', () => {
       expect(chain.sort).toHaveBeenCalledWith({ name: 1 });
     });
 
-    it('should advance overdue dates before returning results', async () => {
-      const advanceChain = createChainable([]);
+    it('should not advance overdue dates from the read path', async () => {
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.findAll(userId, {});
 
-      // First find call should be the advance query for overdue active subs
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          isActive: true,
-          nextBillingDate: { $lte: expect.any(Date) },
-        }),
-      );
-    });
-
-    it('should skip advanceOverdueDates on second call within cooldown', async () => {
-      const advanceChain = createChainable([]);
-      const chain1 = createChainable([mockSubscription]);
-      const chain2 = createChainable([mockSubscription]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain1)
-        .mockReturnValueOnce(chain2);
-      mockSubModel.countDocuments
-        .mockReturnValueOnce(createChainable(1))
-        .mockReturnValueOnce(createChainable(1));
-
-      await service.findAll(userId, {});
-      await service.findAll(userId, {});
-
-      // find called 3 times: advance + main query + main query (no advance)
-      expect(mockSubModel.find).toHaveBeenCalledTimes(3);
+      // findAll must query exactly once (the user's list) and never write.
+      expect(mockSubModel.find).toHaveBeenCalledTimes(1);
+      expect(mockSubModel.bulkWrite).not.toHaveBeenCalled();
     });
 
     it('should return paginated envelope with correct meta', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([mockSubscription]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       const result = await service.findAll(userId, {});
@@ -664,11 +633,8 @@ describe('SubscriptionsService', () => {
     });
 
     it('should apply skip and limit for non-cost sort', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(25));
 
       const result = await service.findAll(userId, { page: 2, limit: 10 });
@@ -685,11 +651,8 @@ describe('SubscriptionsService', () => {
     });
 
     it('should compute hasNextPage correctly on last page', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(25));
 
       const result = await service.findAll(userId, { page: 3, limit: 10 });
@@ -699,11 +662,8 @@ describe('SubscriptionsService', () => {
 
     it('should return all results when limit=0', async () => {
       const subs = [mockSubscription, { ...mockSubscription, _id: 'sub2' }];
-      const advanceChain = createChainable([]);
       const chain = createChainable(subs);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(2));
 
       const result = await service.findAll(userId, { limit: 0 });
@@ -728,11 +688,8 @@ describe('SubscriptionsService', () => {
         cost: (i + 1) * 10,
         billingCycle: BillingCycle.MONTHLY,
       }));
-      const advanceChain = createChainable([]);
       const chain = createChainable(subs);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(5));
 
       const result = await service.findAll(userId, {
@@ -1016,11 +973,8 @@ describe('SubscriptionsService', () => {
         notes: 'My notes',
         tags: ['shared', 'essential'],
       };
-      const advanceChain = createChainable([]);
       const chain = createChainable([sub]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       const csv = await service.exportCsv(userId, {});
@@ -1040,11 +994,8 @@ describe('SubscriptionsService', () => {
         name: 'Netflix, Premium',
         notes: 'Has "special" chars',
       };
-      const advanceChain = createChainable([]);
       const chain = createChainable([sub]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       const csv = await service.exportCsv(userId, {});
@@ -1061,11 +1012,8 @@ describe('SubscriptionsService', () => {
         notes: '',
         tags: ['work', 'team'],
       };
-      const advanceChain = createChainable([]);
       const chain = createChainable([sub]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       const csv = await service.exportCsv(userId, {});
@@ -1082,11 +1030,8 @@ describe('SubscriptionsService', () => {
         tags: [],
         trialEndDate: new Date('2025-07-15'),
       };
-      const advanceChain = createChainable([]);
       const chain = createChainable([sub]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       const csv = await service.exportCsv(userId, {});
@@ -1103,11 +1048,8 @@ describe('SubscriptionsService', () => {
         tags: [],
         sharedWith: 3,
       };
-      const advanceChain = createChainable([]);
       const chain = createChainable([sub]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       const csv = await service.exportCsv(userId, {});
@@ -1124,11 +1066,8 @@ describe('SubscriptionsService', () => {
         notes: '',
         tags: [],
       };
-      const advanceChain = createChainable([]);
       const chain = createChainable([sub]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
       const csv = await service.exportCsv(userId, {});
@@ -1140,11 +1079,8 @@ describe('SubscriptionsService', () => {
     });
 
     it('should return header only for empty list', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       const csv = await service.exportCsv(userId, {});
@@ -1157,11 +1093,8 @@ describe('SubscriptionsService', () => {
     });
 
     it('should pass filter params through with limit=0', async () => {
-      const advanceChain = createChainable([]);
       const chain = createChainable([]);
-      mockSubModel.find
-        .mockReturnValueOnce(advanceChain)
-        .mockReturnValueOnce(chain);
+      mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
       await service.exportCsv(userId, {
@@ -1170,8 +1103,7 @@ describe('SubscriptionsService', () => {
         sortOrder: 'asc',
       });
 
-      expect(mockSubModel.find).toHaveBeenNthCalledWith(
-        2,
+      expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ category: 'Streaming' }),
       );
     });

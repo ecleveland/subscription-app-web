@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, Types, AnyBulkWriteOperation } from 'mongoose';
 import {
   Subscription,
   SubscriptionDocument,
@@ -21,8 +21,7 @@ import { BulkOperationResult } from './interfaces/bulk-operation-result.interfac
 @Injectable()
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
-  private advanceCooldowns = new Map<string, number>();
-  static ADVANCE_COOLDOWN_MS = 60_000;
+  static readonly ADVANCE_BATCH_SIZE = 500;
 
   constructor(
     @InjectModel(Subscription.name)
@@ -80,25 +79,43 @@ export class SubscriptionsService {
     return billingCycle === BillingCycle.YEARLY ? cost / 12 : cost;
   }
 
-  async advanceOverdueDates(userId: string): Promise<void> {
+  /**
+   * Advance every active subscription whose billing date is in the past to its
+   * next future date. Runs from a scheduled cron (see SubscriptionsCronService)
+   * — never from a read path — and streams matches with a cursor, flushing
+   * `bulkWrite` batches so memory stays bounded regardless of dataset size.
+   * The per-op `nextBillingDate: { $lte: now }` guard keeps each update atomic.
+   */
+  async advanceOverdueDates(): Promise<number> {
     const now = new Date();
-    const overdue = await this.subscriptionModel
+    const cursor = this.subscriptionModel
       .find({
-        userId: new Types.ObjectId(userId),
         isActive: true,
         nextBillingDate: { $lte: now },
       } as Record<string, unknown>)
-      .exec();
+      .lean()
+      .cursor();
 
-    if (overdue.length === 0) return;
+    let bulkOps: AnyBulkWriteOperation<SubscriptionDocument>[] = [];
+    let advanced = 0;
 
-    const bulkOps = overdue.map((sub) => {
+    const flush = async (): Promise<void> => {
+      if (bulkOps.length === 0) return;
+      // `ordered: false` so one failing op doesn't abort the rest of the batch.
+      const result = await this.subscriptionModel.bulkWrite(bulkOps, {
+        ordered: false,
+      });
+      advanced += result.modifiedCount ?? 0;
+      bulkOps = [];
+    };
+
+    for await (const sub of cursor) {
       const newDate = SubscriptionsService.advanceToFutureDate(
         sub.nextBillingDate,
         sub.billingCycle,
         now,
       );
-      return {
+      bulkOps.push({
         updateOne: {
           filter: {
             _id: sub._id,
@@ -106,10 +123,14 @@ export class SubscriptionsService {
           },
           update: { $set: { nextBillingDate: newDate } },
         },
-      };
-    });
+      });
+      if (bulkOps.length >= SubscriptionsService.ADVANCE_BATCH_SIZE) {
+        await flush();
+      }
+    }
+    await flush();
 
-    await this.subscriptionModel.bulkWrite(bulkOps);
+    return advanced;
   }
 
   async create(
@@ -132,13 +153,6 @@ export class SubscriptionsService {
     userId: string,
     query: QuerySubscriptionDto,
   ): Promise<PaginatedSubscriptions> {
-    const lastAdvance = this.advanceCooldowns.get(userId) ?? 0;
-    const now = Date.now();
-    if (now - lastAdvance >= SubscriptionsService.ADVANCE_COOLDOWN_MS) {
-      this.advanceCooldowns.set(userId, now);
-      await this.advanceOverdueDates(userId);
-    }
-
     const filter: Record<string, unknown> = {
       userId: new Types.ObjectId(userId),
     };

@@ -185,13 +185,13 @@ describe('NotificationsService', () => {
   });
 
   describe('createRenewalReminder', () => {
-    it('should create a notification', async () => {
-      const saveMock = jest.fn().mockResolvedValue(mockNotification);
-      mockModel.mockImplementation((data: any) => ({
-        ...data,
-        save: saveMock,
-      }));
+    beforeEach(() => {
+      mockModel.updateOne = jest
+        .fn()
+        .mockReturnValue(createChainable({ upsertedCount: 1 }));
+    });
 
+    it('upserts a reminder on the unique { userId, subscriptionId, billingDate } key', async () => {
       await service.createRenewalReminder(
         userId,
         subId,
@@ -200,23 +200,25 @@ describe('NotificationsService', () => {
         3,
       );
 
-      expect(mockModel).toHaveBeenCalledWith(
+      expect(mockModel.updateOne).toHaveBeenCalledWith(
         expect.objectContaining({
-          type: NotificationType.RENEWAL_REMINDER,
-          title: 'Netflix renewing soon',
-          message: 'Your Netflix subscription renews in 3 days.',
+          userId: expect.any(Types.ObjectId),
+          subscriptionId: expect.any(Types.ObjectId),
+          billingDate: new Date('2026-03-20'),
         }),
+        expect.objectContaining({
+          $setOnInsert: expect.objectContaining({
+            type: NotificationType.RENEWAL_REMINDER,
+            title: 'Netflix renewing soon',
+            message: 'Your Netflix subscription renews in 3 days.',
+            read: false,
+          }),
+        }),
+        { upsert: true },
       );
-      expect(saveMock).toHaveBeenCalled();
     });
 
     it('should handle singular day text', async () => {
-      const saveMock = jest.fn().mockResolvedValue(mockNotification);
-      mockModel.mockImplementation((data: any) => ({
-        ...data,
-        save: saveMock,
-      }));
-
       await service.createRenewalReminder(
         userId,
         subId,
@@ -225,21 +227,21 @@ describe('NotificationsService', () => {
         1,
       );
 
-      expect(mockModel).toHaveBeenCalledWith(
+      expect(mockModel.updateOne).toHaveBeenCalledWith(
+        expect.anything(),
         expect.objectContaining({
-          message: 'Your Netflix subscription renews in 1 day.',
+          $setOnInsert: expect.objectContaining({
+            message: 'Your Netflix subscription renews in 1 day.',
+          }),
         }),
+        { upsert: true },
       );
     });
 
-    it('should silently skip duplicate key errors', async () => {
-      const dupError: any = new Error('Duplicate key');
-      dupError.code = 11000;
-      const saveMock = jest.fn().mockRejectedValue(dupError);
-      mockModel.mockImplementation((data: any) => ({
-        ...data,
-        save: saveMock,
-      }));
+    it('is idempotent: an already-existing reminder is matched, not duplicated', async () => {
+      mockModel.updateOne = jest
+        .fn()
+        .mockReturnValue(createChainable({ upsertedCount: 0 }));
 
       await expect(
         service.createRenewalReminder(
@@ -250,15 +252,14 @@ describe('NotificationsService', () => {
           3,
         ),
       ).resolves.toBeUndefined();
+
+      expect(mockModel.updateOne).toHaveBeenCalledTimes(1);
     });
 
-    it('should rethrow non-duplicate errors', async () => {
-      const otherError = new Error('Some other error');
-      const saveMock = jest.fn().mockRejectedValue(otherError);
-      mockModel.mockImplementation((data: any) => ({
-        ...data,
-        save: saveMock,
-      }));
+    it('propagates unexpected errors', async () => {
+      mockModel.updateOne = jest.fn().mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('Some other error')),
+      });
 
       await expect(
         service.createRenewalReminder(

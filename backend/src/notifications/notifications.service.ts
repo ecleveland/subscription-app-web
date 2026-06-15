@@ -101,31 +101,33 @@ export class NotificationsService {
     billingDate: Date,
     daysBefore: number,
   ): Promise<void> {
-    try {
-      const notification = new this.notificationModel({
-        userId: new Types.ObjectId(userId),
-        subscriptionId: new Types.ObjectId(subscriptionId),
-        type: NotificationType.RENEWAL_REMINDER,
-        title: `${subscriptionName} renewing soon`,
-        message: `Your ${subscriptionName} subscription renews in ${daysBefore} day${daysBefore === 1 ? '' : 's'}.`,
-        billingDate,
-        read: false,
-      });
-      await notification.save();
+    // Idempotent upsert keyed on the unique { userId, subscriptionId,
+    // billingDate } index. Concurrent or repeated cron runs converge on a
+    // single notification without relying on catching duplicate-key errors.
+    const result = await this.notificationModel
+      .updateOne(
+        {
+          userId: new Types.ObjectId(userId),
+          subscriptionId: new Types.ObjectId(subscriptionId),
+          billingDate,
+        } as Record<string, unknown>,
+        {
+          $setOnInsert: {
+            type: NotificationType.RENEWAL_REMINDER,
+            title: `${subscriptionName} renewing soon`,
+            message: `Your ${subscriptionName} subscription renews in ${daysBefore} day${daysBefore === 1 ? '' : 's'}.`,
+            read: false,
+          },
+        },
+        { upsert: true },
+      )
+      .exec();
+
+    if (result.upsertedCount > 0) {
       this.logger.log(
         { userId, subscriptionId, billingDate },
         'Renewal reminder created',
       );
-    } catch (error: unknown) {
-      // Silently skip duplicate key errors (notification already exists)
-      if (
-        error instanceof Error &&
-        'code' in error &&
-        (error as Record<string, unknown>).code === 11000
-      ) {
-        return;
-      }
-      throw error;
     }
   }
 }
