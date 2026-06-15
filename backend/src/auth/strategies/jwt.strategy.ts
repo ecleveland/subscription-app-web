@@ -1,8 +1,13 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../../users/users.service';
+import { UserDocument } from '../../users/schemas/user.schema';
 import { JwtPayload, JwtUser } from '../interfaces/jwt-payload.interface';
 
 @Injectable()
@@ -27,9 +32,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   // immediately, and a stale token (issued before a tokenVersion bump from
   // logout/password-change/reset) is rejected.
   async validate(payload: JwtPayload): Promise<JwtUser> {
-    const user = await this.usersService.findOne(payload.sub).catch(() => null);
-    if (!user) {
-      throw new UnauthorizedException('User no longer exists');
+    let user: UserDocument;
+    try {
+      user = await this.usersService.findOne(payload.sub);
+    } catch (error) {
+      // Only a genuinely missing user is an auth failure; an infrastructure
+      // error (DB unavailable) must surface as 500, not silently 401 every
+      // in-flight request and log legitimate users out during a blip.
+      if (error instanceof NotFoundException) {
+        throw new UnauthorizedException('User no longer exists');
+      }
+      throw error;
     }
 
     if (payload.tokenVersion !== user.tokenVersion) {

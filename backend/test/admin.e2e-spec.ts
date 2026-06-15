@@ -64,6 +64,39 @@ describe('Admin (e2e)', () => {
     it('should deny unauthenticated access to admin routes', async () => {
       await request(app.getHttpServer()).get('/api/admin/users').expect(401);
     });
+
+    it('denies a demoted admin immediately (role derived from DB, not the token)', async () => {
+      const usersService = app.get(UsersService);
+
+      await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ username: 'demoteme', password: 'Password123' });
+      const me = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ username: 'demoteme', password: 'Password123' });
+      const profile = await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${me.body.access_token}`);
+
+      // Promote, then mint a token that carries the admin role.
+      await usersService.update(profile.body._id, { role: 'admin' } as never);
+      const adminLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ username: 'demoteme', password: 'Password123' });
+      const staleAdminToken = adminLogin.body.access_token;
+
+      await request(app.getHttpServer())
+        .get('/api/admin/users')
+        .set('Authorization', `Bearer ${staleAdminToken}`)
+        .expect(200);
+
+      // Demote in the DB; the still-valid token must now be denied (403).
+      await usersService.update(profile.body._id, { role: 'user' } as never);
+      await request(app.getHttpServer())
+        .get('/api/admin/users')
+        .set('Authorization', `Bearer ${staleAdminToken}`)
+        .expect(403);
+    });
   });
 
   describe('Admin user management', () => {

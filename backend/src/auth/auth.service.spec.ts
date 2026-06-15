@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getModelToken } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
@@ -230,11 +234,28 @@ describe('AuthService', () => {
       mockRefreshTokenModel.findOne.mockReturnValue({
         exec: jest.fn().mockResolvedValue(tokenDoc),
       });
-      usersService.findOne.mockRejectedValue(new Error('Not found'));
+      usersService.findOne.mockRejectedValue(new NotFoundException());
 
       await expect(service.refresh(plainToken)).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+
+    it('should propagate infrastructure errors during user lookup (not mask as 401)', async () => {
+      const plainToken = crypto.randomBytes(32).toString('hex');
+      const tokenDoc = {
+        userId: { toString: () => '507f1f77bcf86cd799439011' },
+        tokenHash: 'irrelevant',
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        save: jest.fn(),
+      };
+      mockRefreshTokenModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(tokenDoc),
+      });
+      const dbError = new Error('connection timed out');
+      usersService.findOne.mockRejectedValue(dbError);
+
+      await expect(service.refresh(plainToken)).rejects.toThrow(dbError);
     });
   });
 

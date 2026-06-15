@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtStrategy } from './jwt.strategy';
 import { UsersService } from '../../users/users.service';
@@ -44,10 +44,21 @@ describe('JwtStrategy', () => {
     });
   });
 
-  it('rejects when the user no longer exists', async () => {
-    usersService.findOne.mockRejectedValue(new Error('not found'));
+  it('rejects (401) when the user no longer exists', async () => {
+    usersService.findOne.mockRejectedValue(new NotFoundException());
 
     await expect(strategy.validate(payload)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('propagates infrastructure errors instead of masking them as 401', async () => {
+    const dbError = new Error('connection timed out');
+    usersService.findOne.mockRejectedValue(dbError);
+
+    // A transient DB failure must surface (→ 500), not log the user out.
+    await expect(strategy.validate(payload)).rejects.toThrow(dbError);
+    await expect(strategy.validate(payload)).rejects.not.toBeInstanceOf(
       UnauthorizedException,
     );
   });

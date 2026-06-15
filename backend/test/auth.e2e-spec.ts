@@ -216,6 +216,12 @@ describe('Auth (e2e)', () => {
         .post('/api/auth/refresh')
         .send({ refresh_token })
         .expect(401);
+
+      // The access token used for logout is also rejected (tokenVersion bumped).
+      await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set('Authorization', `Bearer ${access_token}`)
+        .expect(401);
     });
 
     it('should return 401 without a JWT', () => {

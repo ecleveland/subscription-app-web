@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
   Inject,
   Logger,
 } from '@nestjs/common';
@@ -118,12 +119,17 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    // Verify user still exists
+    // Verify user still exists. A missing user invalidates the token; an
+    // infrastructure error must propagate as 500 rather than masquerade as a
+    // bad token (which would force a needless re-login during a DB blip).
     let user: UserDocument;
     try {
       user = await this.usersService.findOne(tokenDoc.userId.toString());
-    } catch {
-      throw new UnauthorizedException('Invalid or expired refresh token');
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
+      throw error;
     }
 
     // Revoke old token
@@ -171,8 +177,12 @@ export class AuthService {
   async forgotPassword(email: string): Promise<void> {
     const user = await this.usersService.findByEmail(email);
 
-    // Generate the token + hash unconditionally so the response time doesn't
-    // differ measurably between known and unknown emails (timing oracle).
+    // Generate the token + hash unconditionally, and send mail fire-and-forget
+    // (below), so the dominant timing signals (token work + SMTP round-trip) no
+    // longer distinguish known from unknown emails. A residual signal remains —
+    // the known path does an extra updateMany + insert — but the constant
+    // response body plus the 3-req/60s throttle on this route make enumeration
+    // impractical.
     const plainToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = this.hashToken(plainToken);
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
