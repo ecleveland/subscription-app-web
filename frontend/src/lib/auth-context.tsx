@@ -10,7 +10,7 @@ import {
   ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch } from './api';
+import { apiFetch, setAccessToken, clearStoredAuth } from './api';
 import type { User } from './types';
 
 interface UserInfo {
@@ -114,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ username, password }),
       });
 
@@ -122,9 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const data = await res.json();
-      localStorage.setItem('token', data.access_token);
-      localStorage.setItem('refresh_token', data.refresh_token);
-      document.cookie = 'auth-flag=1; path=/; SameSite=Lax';
+      setAccessToken(data.access_token);
       setIsAuthenticated(true);
 
       const payload = parseJwt(data.access_token);
@@ -144,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(data),
       });
 
@@ -153,9 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const responseData = await res.json();
-      localStorage.setItem('token', responseData.access_token);
-      localStorage.setItem('refresh_token', responseData.refresh_token);
-      document.cookie = 'auth-flag=1; path=/; SameSite=Lax';
+      setAccessToken(responseData.access_token);
       setIsAuthenticated(true);
 
       const payload = parseJwt(responseData.access_token);
@@ -167,29 +165,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     const token = localStorage.getItem('token');
-    const refreshToken = localStorage.getItem('refresh_token');
 
-    // Best-effort backend logout
-    if (token && refreshToken) {
+    // Best-effort backend logout: revokes the refresh token (sent via the
+    // httpOnly cookie) and bumps tokenVersion to invalidate access tokens.
+    if (token) {
       try {
         await fetch(`${API_URL}/auth/logout`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ refresh_token: refreshToken }),
+          headers: { Authorization: `Bearer ${token}` },
+          credentials: 'include',
         });
       } catch {
         // Ignore errors — we're logging out anyway
       }
     }
 
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('refresh_token');
-    document.cookie =
-      'auth-flag=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    clearStoredAuth();
     setIsAuthenticated(false);
     setUser(null);
     router.push('/login');

@@ -96,7 +96,6 @@ describe('useAuth', () => {
 
   it('should clear state and redirect on logout', async () => {
     window.localStorage.setItem('token', 'some-jwt');
-    window.localStorage.setItem('refresh_token', 'some-refresh');
     window.localStorage.setItem(
       'user',
       JSON.stringify({ userId: '123', username: 'test', role: 'user' }),
@@ -122,13 +121,11 @@ describe('useAuth', () => {
     expect(result.current.user).toBeNull();
     expect(window.localStorage.getItem('token')).toBeNull();
     expect(window.localStorage.getItem('user')).toBeNull();
-    expect(window.localStorage.getItem('refresh_token')).toBeNull();
     expect(mockPush).toHaveBeenCalledWith('/login');
   });
 
-  it('should call backend logout endpoint on logout', async () => {
+  it('should call backend logout endpoint with credentials on logout', async () => {
     window.localStorage.setItem('token', 'my-jwt');
-    window.localStorage.setItem('refresh_token', 'my-refresh');
     window.localStorage.setItem(
       'user',
       JSON.stringify({ userId: '123', username: 'test', role: 'user' }),
@@ -153,15 +150,15 @@ describe('useAuth', () => {
       expect.stringContaining('/auth/logout'),
       expect.objectContaining({
         method: 'POST',
+        credentials: 'include',
         headers: expect.objectContaining({
           Authorization: 'Bearer my-jwt',
         }),
-        body: JSON.stringify({ refresh_token: 'my-refresh' }),
       }),
     );
   });
 
-  it('should store token and refresh_token on successful login', async () => {
+  it('should store the access token (and not a refresh token) on successful login', async () => {
     const mockToken = createMockJwt({
       sub: '123',
       username: 'testuser',
@@ -169,14 +166,10 @@ describe('useAuth', () => {
     });
 
     (global.fetch as ReturnType<typeof vi.fn>)
-      // login call
+      // login call — backend returns only the access token now
       .mockResolvedValueOnce({
         ok: true,
-        json: () =>
-          Promise.resolve({
-            access_token: mockToken,
-            refresh_token: 'login-refresh-token',
-          }),
+        json: () => Promise.resolve({ access_token: mockToken }),
       })
       // fetchAndStoreProfile calls apiFetch('/users/me')
       .mockResolvedValueOnce({
@@ -200,14 +193,18 @@ describe('useAuth', () => {
     });
 
     expect(window.localStorage.getItem('token')).toBe(mockToken);
-    expect(window.localStorage.getItem('refresh_token')).toBe(
-      'login-refresh-token',
-    );
+    expect(window.localStorage.getItem('refresh_token')).toBeNull();
+    expect(document.cookie).toContain('access_token=');
     expect(result.current.isAuthenticated).toBe(true);
     expect(mockPush).toHaveBeenCalledWith('/');
+    // login is sent with credentials so the backend can set the refresh cookie
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/auth/login'),
+      expect.objectContaining({ credentials: 'include' }),
+    );
   });
 
-  it('should store refresh_token on successful register', async () => {
+  it('should store the access token on successful register', async () => {
     const mockToken = createMockJwt({
       sub: '456',
       username: 'newuser',
@@ -218,11 +215,7 @@ describe('useAuth', () => {
       // register call
       .mockResolvedValueOnce({
         ok: true,
-        json: () =>
-          Promise.resolve({
-            access_token: mockToken,
-            refresh_token: 'register-refresh-token',
-          }),
+        json: () => Promise.resolve({ access_token: mockToken }),
       })
       // fetchAndStoreProfile calls apiFetch('/users/me')
       .mockResolvedValueOnce({
@@ -244,14 +237,12 @@ describe('useAuth', () => {
     await act(async () => {
       await result.current.register({
         username: 'newuser',
-        password: 'password123',
+        password: 'Password123',
       });
     });
 
     expect(window.localStorage.getItem('token')).toBe(mockToken);
-    expect(window.localStorage.getItem('refresh_token')).toBe(
-      'register-refresh-token',
-    );
+    expect(window.localStorage.getItem('refresh_token')).toBeNull();
     expect(result.current.isAuthenticated).toBe(true);
   });
 
