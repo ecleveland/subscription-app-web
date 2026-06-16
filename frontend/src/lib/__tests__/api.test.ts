@@ -1,4 +1,4 @@
-import { apiFetch } from '../api';
+import { apiFetch, setAccessToken, clearStoredAuth } from '../api';
 
 describe('apiFetch', () => {
   const mockFetch = vi.fn();
@@ -87,10 +87,12 @@ describe('apiFetch', () => {
 
     expect(result).toEqual({ data: 'ok' });
     expect(window.localStorage.getItem('token')).toBe('new-jwt');
-    // The refresh call sends the httpOnly cookie via credentials: 'include'.
+    // The refresh call sends the httpOnly cookie via credentials: 'include'
+    // and carries NO body (cookie-only — not the old body-based scheme).
     expect(mockFetch.mock.calls[1][1]).toEqual(
       expect.objectContaining({ method: 'POST', credentials: 'include' }),
     );
+    expect(mockFetch.mock.calls[1][1].body).toBeUndefined();
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
@@ -189,6 +191,27 @@ describe('apiFetch', () => {
     const result = await apiFetch('/subscriptions');
 
     expect(result).toEqual(data);
+  });
+
+  describe('setAccessToken / clearStoredAuth', () => {
+    it('setAccessToken stores the token in localStorage and the readable cookie', () => {
+      setAccessToken('my-access-jwt');
+
+      expect(window.localStorage.getItem('token')).toBe('my-access-jwt');
+      expect(document.cookie).toContain('access_token=my-access-jwt');
+    });
+
+    it('clearStoredAuth removes the token, user, and access cookie', () => {
+      window.localStorage.setItem('user', '{}');
+      setAccessToken('my-access-jwt');
+      expect(document.cookie).toContain('access_token=');
+
+      clearStoredAuth();
+
+      expect(window.localStorage.getItem('token')).toBeNull();
+      expect(window.localStorage.getItem('user')).toBeNull();
+      expect(document.cookie).not.toContain('access_token=my-access-jwt');
+    });
   });
 
   it('should merge custom options with defaults', async () => {

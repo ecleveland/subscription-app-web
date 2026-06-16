@@ -224,11 +224,19 @@ describe('Auth (e2e)', () => {
       const { access_token } = loginRes.body;
       const cookie = refreshCookie(loginRes);
 
-      await request(app.getHttpServer())
+      const logoutRes = await request(app.getHttpServer())
         .post('/api/auth/logout')
         .set('Authorization', `Bearer ${access_token}`)
         .set('Cookie', cookie)
         .expect(204);
+
+      // Logout clears the refresh cookie with matching path so the browser
+      // actually drops it (mismatched attributes would leave it behind).
+      const cleared = (
+        logoutRes.headers['set-cookie'] as unknown as string[]
+      ).find((c) => c.startsWith('refresh_token='));
+      expect(cleared).toBeDefined();
+      expect(cleared).toContain('Path=/api/auth');
 
       // The revoked refresh cookie no longer works.
       await request(app.getHttpServer())
