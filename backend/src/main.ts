@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { UsersService } from './users/users.service';
 import { SubscriptionsService } from './subscriptions/subscriptions.service';
+import { HouseholdsMigrationService } from './households/households-migration.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -84,6 +85,11 @@ async function bootstrap() {
         );
       }
     }
+
+    // Backfill a personal household + owner membership for every pre-household
+    // user. Idempotent, so it's a no-op once every user has one. The service
+    // logs its own outcome.
+    await app.get(HouseholdsMigrationService).backfillPersonalHouseholds();
   } catch (error: unknown) {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
