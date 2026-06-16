@@ -80,6 +80,45 @@ describe('HouseholdGuard', () => {
     expect(householdsService.findMembershipByUser).not.toHaveBeenCalled();
   });
 
+  it('propagates a service/DB error as a denial and never attaches a household (fail closed)', async () => {
+    householdsService.findMembershipByUser.mockRejectedValue(
+      new Error('mongo down'),
+    );
+    const request: any = { user: { userId: USER_ID } };
+
+    await expect(guard.canActivate(createMockContext(request))).rejects.toThrow(
+      'mongo down',
+    );
+    expect(request.household).toBeUndefined();
+  });
+
+  it('rejects a non-active (invited) membership even if the service returns one', async () => {
+    householdsService.findMembershipByUser.mockResolvedValue({
+      ...activeMembership(),
+      status: MembershipStatus.INVITED,
+    });
+    const request: any = { user: { userId: USER_ID } };
+
+    await expect(
+      guard.canActivate(createMockContext(request)),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(request.household).toBeUndefined();
+  });
+
+  it('propagates the membership role and memberId (not hardcoded to owner)', async () => {
+    householdsService.findMembershipByUser.mockResolvedValue({
+      ...activeMembership(),
+      role: HouseholdRole.ADULT,
+    });
+    const request: any = { user: { userId: USER_ID } };
+
+    await guard.canActivate(createMockContext(request));
+
+    expect(request.household.role).toBe(HouseholdRole.ADULT);
+    expect(request.household.memberId).toBe(MEMBER_ID);
+    expect(request.household.householdId).toBe(HOUSEHOLD_A);
+  });
+
   it('ignores a client-supplied householdId and resolves strictly from the authenticated user (cross-household isolation)', async () => {
     // User belongs to household A; the request tries to spoof household B via
     // body/params/query. The guard must resolve A from the userId and never

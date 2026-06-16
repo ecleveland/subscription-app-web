@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { HouseholdsService } from '../households.service';
+import { MembershipStatus } from '../schemas/household-member.schema';
 import type { AuthenticatedRequest } from '../../auth/interfaces/jwt-payload.interface';
 import type { HouseholdRequest } from '../interfaces/household-request.interface';
 
@@ -32,7 +33,9 @@ export class HouseholdGuard implements CanActivate {
 
     const membership =
       await this.householdsService.findMembershipByUser(userId);
-    if (!membership) {
+    // Re-assert ACTIVE at the security boundary so the guard's guarantee doesn't
+    // rely solely on the service's query filter staying correct over time.
+    if (!membership || membership.status !== MembershipStatus.ACTIVE) {
       throw new ForbiddenException('No active household membership');
     }
 
