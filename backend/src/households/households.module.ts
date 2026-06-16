@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HouseholdsService } from './households.service';
+import { HouseholdGuard } from './guards/household.guard';
 import { Household, HouseholdSchema } from './schemas/household.schema';
 import {
   HouseholdMember,
@@ -8,11 +9,11 @@ import {
 } from './schemas/household-member.schema';
 import { Invitation, InvitationSchema } from './schemas/invitation.schema';
 
-// HTTP endpoints (household management + invitation flow) and the
-// HouseholdGuard land in follow-up tickets (VEG-387, VEG-390). This module
-// currently provides only the data model and HouseholdsService; the guard,
-// data migration, and registration wiring that consume it arrive in those
-// tickets.
+// HTTP endpoints (household management + invitation flow) land in VEG-390. This
+// module provides the data model, HouseholdsService, and HouseholdGuard; the
+// guard is exported so household-scoped controllers (VEG-389/390) can apply it
+// after JwtAuthGuard. Data-migration and registration wiring arrive in their
+// own tickets.
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -21,7 +22,7 @@ import { Invitation, InvitationSchema } from './schemas/invitation.schema';
       { name: Invitation.name, schema: InvitationSchema },
     ]),
   ],
-  providers: [HouseholdsService],
-  exports: [HouseholdsService],
+  providers: [HouseholdsService, HouseholdGuard],
+  exports: [HouseholdsService, HouseholdGuard],
 })
 export class HouseholdsModule {}
