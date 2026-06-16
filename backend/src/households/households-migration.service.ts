@@ -56,12 +56,19 @@ export class HouseholdsMigrationService {
         });
         created += 1;
       } catch (error) {
-        // Another replica won the race and created the household/membership
-        // first (member unique index → 11000 → ConflictException). Benign: the
-        // user now has a household, so skip and continue.
+        // A conflict here can only come from the partial { userId, status:active }
+        // unique index — the household is freshly created, so {householdId,userId}
+        // can't collide. That means the user already gained an active membership
+        // (a concurrent replica or registration won the race), so they already
+        // have a household. Benign: log for parity with seedAdmin and continue.
         if (error instanceof ConflictException) {
+          this.logger.warn(
+            { userId },
+            'Skipped backfill: user already has an active membership',
+          );
           continue;
         }
+        this.logger.error({ userId }, 'Personal household backfill failed');
         throw error;
       }
     }

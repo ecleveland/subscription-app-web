@@ -5,7 +5,10 @@ import { Types } from 'mongoose';
 import { HouseholdsMigrationService } from './households-migration.service';
 import { HouseholdsService } from './households.service';
 import { User } from '../users/schemas/user.schema';
-import { HouseholdMember } from './schemas/household-member.schema';
+import {
+  HouseholdMember,
+  MembershipStatus,
+} from './schemas/household-member.schema';
 
 const USER_A = '507f1f77bcf86cd799439011';
 const USER_B = '507f1f77bcf86cd799439012';
@@ -20,6 +23,7 @@ describe('HouseholdsMigrationService', () => {
   let mockUserModel: any;
   let mockMemberModel: any;
   let mockHouseholdsService: { createHousehold: jest.Mock };
+  let warnSpy: jest.SpyInstance;
 
   function setUsers(users: unknown[]) {
     mockUserModel.find.mockReturnValue({
@@ -57,6 +61,10 @@ describe('HouseholdsMigrationService', () => {
     module.useLogger(false);
     service = module.get(HouseholdsMigrationService);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -71,12 +79,25 @@ describe('HouseholdsMigrationService', () => {
     const created = await service.backfillPersonalHouseholds();
 
     expect(created).toBe(2);
+    expect(mockMemberModel.distinct).toHaveBeenCalledWith('userId', {
+      status: MembershipStatus.ACTIVE,
+    });
     expect(mockHouseholdsService.createHousehold).toHaveBeenCalledWith(USER_A, {
       name: "Alice's Household",
     });
     expect(mockHouseholdsService.createHousehold).toHaveBeenCalledWith(USER_B, {
       name: "Bob's Household",
     });
+  });
+
+  it('does nothing when there are no users', async () => {
+    setActiveUserIds([]);
+    setUsers([]);
+
+    const created = await service.backfillPersonalHouseholds();
+
+    expect(created).toBe(0);
+    expect(mockHouseholdsService.createHousehold).not.toHaveBeenCalled();
   });
 
   it('skips users who already have an active membership', async () => {
@@ -146,6 +167,11 @@ describe('HouseholdsMigrationService', () => {
     // A and C created; B lost the race and was skipped without aborting.
     expect(created).toBe(2);
     expect(mockHouseholdsService.createHousehold).toHaveBeenCalledTimes(3);
+    // The swallowed conflict is logged (not silent), with the user's id.
+    expect(warnSpy).toHaveBeenCalledWith(
+      { userId: USER_B },
+      expect.any(String),
+    );
   });
 
   it('rethrows non-conflict errors', async () => {

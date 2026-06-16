@@ -87,15 +87,9 @@ async function bootstrap() {
     }
 
     // Backfill a personal household + owner membership for every pre-household
-    // user. Idempotent, so it's a no-op once every user has one.
-    const householdsCreated = await app
-      .get(HouseholdsMigrationService)
-      .backfillPersonalHouseholds();
-    if (householdsCreated > 0) {
-      new Logger('Bootstrap').log(
-        `Backfilled ${householdsCreated} personal household(s)`,
-      );
-    }
+    // user. Idempotent, so it's a no-op once every user has one. The service
+    // logs its own outcome.
+    await app.get(HouseholdsMigrationService).backfillPersonalHouseholds();
   } catch (error: unknown) {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
