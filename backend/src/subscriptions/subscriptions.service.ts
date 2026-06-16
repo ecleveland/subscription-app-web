@@ -134,27 +134,29 @@ export class SubscriptionsService {
   }
 
   async create(
-    userId: string,
+    householdId: string,
+    memberId: string,
     createDto: CreateSubscriptionDto,
   ): Promise<SubscriptionDocument> {
     const subscription = new this.subscriptionModel({
       ...createDto,
-      userId: new Types.ObjectId(userId),
+      householdId: new Types.ObjectId(householdId),
+      memberId: new Types.ObjectId(memberId),
     });
     const saved = await subscription.save();
     this.logger.log(
-      { userId, subscriptionId: saved._id.toString() },
+      { householdId, memberId, subscriptionId: saved._id.toString() },
       'Subscription created',
     );
     return saved;
   }
 
   async findAll(
-    userId: string,
+    householdId: string,
     query: QuerySubscriptionDto,
   ): Promise<PaginatedSubscriptions> {
     const filter: Record<string, unknown> = {
-      userId: new Types.ObjectId(userId),
+      householdId: new Types.ObjectId(householdId),
     };
 
     if (query.category) {
@@ -222,13 +224,16 @@ export class SubscriptionsService {
     };
   }
 
-  async findOne(userId: string, id: string): Promise<SubscriptionDocument> {
+  async findOne(
+    householdId: string,
+    id: string,
+  ): Promise<SubscriptionDocument> {
     const subscription = await this.subscriptionModel.findById(id).exec();
     if (
       !subscription ||
-      !subscription.userId ||
-      !new Types.ObjectId(userId).equals(
-        subscription.userId as unknown as Types.ObjectId,
+      !subscription.householdId ||
+      !new Types.ObjectId(householdId).equals(
+        subscription.householdId as unknown as Types.ObjectId,
       )
     ) {
       throw new NotFoundException(`Subscription with ID "${id}" not found`);
@@ -237,39 +242,45 @@ export class SubscriptionsService {
   }
 
   async update(
-    userId: string,
+    householdId: string,
     id: string,
     updateDto: UpdateSubscriptionDto,
   ): Promise<SubscriptionDocument> {
-    const existing = await this.findOne(userId, id);
+    const existing = await this.findOne(householdId, id);
     Object.assign(existing, updateDto);
     const saved = await existing.save();
-    this.logger.log({ userId, subscriptionId: id }, 'Subscription updated');
+    this.logger.log(
+      { householdId, subscriptionId: id },
+      'Subscription updated',
+    );
     return saved;
   }
 
-  async remove(userId: string, id: string): Promise<void> {
+  async remove(householdId: string, id: string): Promise<void> {
     const deleted = await this.subscriptionModel
       .findOneAndDelete({
         _id: new Types.ObjectId(id),
-        userId: new Types.ObjectId(userId),
+        householdId: new Types.ObjectId(householdId),
       } as Record<string, unknown>)
       .exec();
 
     if (!deleted) {
       throw new NotFoundException(`Subscription with ID "${id}" not found`);
     }
-    this.logger.log({ userId, subscriptionId: id }, 'Subscription deleted');
+    this.logger.log(
+      { householdId, subscriptionId: id },
+      'Subscription deleted',
+    );
   }
 
   async bulkOperation(
-    userId: string,
+    householdId: string,
     dto: BulkOperationDto,
   ): Promise<BulkOperationResult> {
     const ids = dto.ids.map((id) => new Types.ObjectId(id));
     const filter = {
       _id: { $in: ids },
-      userId: new Types.ObjectId(userId),
+      householdId: new Types.ObjectId(householdId),
     } as Record<string, unknown>;
 
     const validDocs = await this.subscriptionModel.find(filter).exec();
@@ -282,7 +293,7 @@ export class SubscriptionsService {
 
     const validFilter = {
       _id: { $in: validIds },
-      userId: new Types.ObjectId(userId),
+      householdId: new Types.ObjectId(householdId),
     } as Record<string, unknown>;
 
     switch (dto.action) {
@@ -312,7 +323,7 @@ export class SubscriptionsService {
     }
 
     this.logger.log(
-      { userId, action: dto.action, count: validIds.length },
+      { householdId, action: dto.action, count: validIds.length },
       'Bulk operation completed',
     );
 
@@ -332,10 +343,10 @@ export class SubscriptionsService {
   }
 
   async exportCsv(
-    userId: string,
+    householdId: string,
     query: QuerySubscriptionDto,
   ): Promise<string> {
-    const { data } = await this.findAll(userId, { ...query, limit: 0 });
+    const { data } = await this.findAll(householdId, { ...query, limit: 0 });
 
     const header =
       'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With';
@@ -363,22 +374,19 @@ export class SubscriptionsService {
     return [header, ...rows].join('\n');
   }
 
-  async removeAllByUserId(userId: string): Promise<number> {
+  /**
+   * Delete every subscription belonging to a household. The household-scoped
+   * deletion cascade primitive (e.g. for household teardown). User deletion no
+   * longer cascades here — household data is shared and outlives a single
+   * member (see UsersService.remove).
+   */
+  async removeAllByHouseholdId(householdId: string): Promise<number> {
     const result = await this.subscriptionModel
-      .deleteMany({ userId: new Types.ObjectId(userId) } as Record<
+      .deleteMany({ householdId: new Types.ObjectId(householdId) } as Record<
         string,
         unknown
       >)
       .exec();
     return result.deletedCount;
-  }
-
-  async migrateUnownedSubscriptions(adminUserId: string): Promise<number> {
-    const result = await this.subscriptionModel
-      .updateMany({ userId: { $exists: false } } as Record<string, unknown>, {
-        $set: { userId: new Types.ObjectId(adminUserId) },
-      })
-      .exec();
-    return result.modifiedCount;
   }
 }

@@ -119,4 +119,19 @@ export class HouseholdsService {
       } as Record<string, unknown>)
       .exec();
   }
+
+  /**
+   * Delete every household membership for a user (across all households).
+   * Used by the user-deletion cascade: the user's memberships go, but the
+   * households and their shared data remain. Returns the number removed.
+   */
+  async removeMembershipsByUser(userId: string): Promise<number> {
+    const result = await this.memberModel
+      .deleteMany({ userId: new Types.ObjectId(userId) } as Record<
+        string,
+        unknown
+      >)
+      .exec();
+    return result.deletedCount;
+  }
 }

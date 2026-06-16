@@ -26,12 +26,14 @@ describe('SubscriptionsService', () => {
   let service: SubscriptionsService;
   let mockSubModel: any;
 
-  const userId = '507f1f77bcf86cd799439011';
+  const householdId = '507f1f77bcf86cd799439011';
+  const memberId = '507f1f77bcf86cd799439044';
   const subId = '507f1f77bcf86cd799439022';
 
   const mockSubscription = {
     _id: subId,
-    userId: new Types.ObjectId(userId),
+    householdId: new Types.ObjectId(householdId),
+    memberId: new Types.ObjectId(memberId),
     name: 'Netflix',
     cost: 15.99,
     billingCycle: BillingCycle.MONTHLY,
@@ -81,7 +83,7 @@ describe('SubscriptionsService', () => {
   });
 
   describe('create', () => {
-    it('should create a subscription with userId as ObjectId and log', async () => {
+    it('should create a subscription stamped with householdId + memberId and log', async () => {
       const dto = {
         name: 'Netflix',
         cost: 15.99,
@@ -92,7 +94,8 @@ describe('SubscriptionsService', () => {
       const saveMock = jest.fn().mockResolvedValue({
         _id: { toString: () => 'new-id' },
         ...dto,
-        userId,
+        householdId,
+        memberId,
       });
       mockSubModel.mockImplementation((data: any) => ({
         ...data,
@@ -100,18 +103,19 @@ describe('SubscriptionsService', () => {
       }));
       const logSpy = jest.spyOn(Logger.prototype, 'log');
 
-      await service.create(userId, dto);
+      await service.create(householdId, memberId, dto);
 
       expect(mockSubModel).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'Netflix',
           cost: 15.99,
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
+          memberId: expect.any(Types.ObjectId),
         }),
       );
       expect(saveMock).toHaveBeenCalled();
       expect(logSpy).toHaveBeenCalledWith(
-        { userId, subscriptionId: 'new-id' },
+        { householdId, memberId, subscriptionId: 'new-id' },
         'Subscription created',
       );
     });
@@ -420,18 +424,16 @@ describe('SubscriptionsService', () => {
   });
 
   describe('findAll', () => {
-    // Each test mocks find twice: first call for advanceOverdueDates (returns []),
-    // second call for the main query. Also mocks countDocuments.
-    it('should filter by userId', async () => {
+    it('should filter by householdId', async () => {
       const chain = createChainable([mockSubscription]);
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
-      await service.findAll(userId, {});
+      await service.findAll(householdId, {});
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
         }),
       );
     });
@@ -441,7 +443,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, { category: 'Streaming' });
+      await service.findAll(householdId, { category: 'Streaming' });
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ category: 'Streaming' }),
@@ -453,7 +455,9 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, { billingCycle: BillingCycle.MONTHLY });
+      await service.findAll(householdId, {
+        billingCycle: BillingCycle.MONTHLY,
+      });
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ billingCycle: BillingCycle.MONTHLY }),
@@ -465,7 +469,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, { tags: 'shared,essential' });
+      await service.findAll(householdId, { tags: 'shared,essential' });
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ tags: { $in: ['shared', 'essential'] } }),
@@ -477,7 +481,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, { shared: 'shared' });
+      await service.findAll(householdId, { shared: 'shared' });
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ sharedWith: { $gte: 2 } }),
@@ -489,7 +493,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, { shared: 'individual' });
+      await service.findAll(householdId, { shared: 'individual' });
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ sharedWith: { $in: [null, undefined] } }),
@@ -501,7 +505,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, { billingCycle: BillingCycle.WEEKLY });
+      await service.findAll(householdId, { billingCycle: BillingCycle.WEEKLY });
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({ billingCycle: BillingCycle.WEEKLY }),
@@ -513,7 +517,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, {});
+      await service.findAll(householdId, {});
 
       expect(chain.sort).toHaveBeenCalledWith({ createdAt: -1 });
     });
@@ -542,7 +546,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(3));
 
-      const result = await service.findAll(userId, {
+      const result = await service.findAll(householdId, {
         sortBy: 'cost',
         sortOrder: 'asc',
       });
@@ -580,7 +584,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(3));
 
-      const result = await service.findAll(userId, {
+      const result = await service.findAll(householdId, {
         sortBy: 'cost',
         sortOrder: 'desc',
       });
@@ -598,7 +602,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, { sortBy: 'name', sortOrder: 'asc' });
+      await service.findAll(householdId, { sortBy: 'name', sortOrder: 'asc' });
 
       expect(chain.sort).toHaveBeenCalledWith({ name: 1 });
     });
@@ -608,9 +612,9 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.findAll(userId, {});
+      await service.findAll(householdId, {});
 
-      // findAll must query exactly once (the user's list) and never write.
+      // findAll must query exactly once (the household's list) and never write.
       expect(mockSubModel.find).toHaveBeenCalledTimes(1);
       expect(mockSubModel.bulkWrite).not.toHaveBeenCalled();
     });
@@ -620,7 +624,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
-      const result = await service.findAll(userId, {});
+      const result = await service.findAll(householdId, {});
 
       expect(result.data).toEqual([mockSubscription]);
       expect(result.meta).toEqual({
@@ -637,7 +641,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(25));
 
-      const result = await service.findAll(userId, { page: 2, limit: 10 });
+      const result = await service.findAll(householdId, { page: 2, limit: 10 });
 
       expect(chain.skip).toHaveBeenCalledWith(10);
       expect(chain.limit).toHaveBeenCalledWith(10);
@@ -655,7 +659,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(25));
 
-      const result = await service.findAll(userId, { page: 3, limit: 10 });
+      const result = await service.findAll(householdId, { page: 3, limit: 10 });
 
       expect(result.meta.hasNextPage).toBe(false);
     });
@@ -666,7 +670,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(2));
 
-      const result = await service.findAll(userId, { limit: 0 });
+      const result = await service.findAll(householdId, { limit: 0 });
 
       expect(chain.skip).not.toHaveBeenCalled();
       expect(chain.limit).not.toHaveBeenCalled();
@@ -692,7 +696,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(5));
 
-      const result = await service.findAll(userId, {
+      const result = await service.findAll(householdId, {
         sortBy: 'cost',
         sortOrder: 'asc',
         page: 2,
@@ -705,10 +709,10 @@ describe('SubscriptionsService', () => {
   });
 
   describe('findOne', () => {
-    it('should return subscription when userId matches', async () => {
+    it('should return subscription when householdId matches', async () => {
       mockSubModel.findById.mockReturnValue(createChainable(mockSubscription));
 
-      const result = await service.findOne(userId, subId);
+      const result = await service.findOne(householdId, subId);
 
       expect(mockSubModel.findById).toHaveBeenCalledWith(subId);
       expect(result).toEqual(mockSubscription);
@@ -717,28 +721,28 @@ describe('SubscriptionsService', () => {
     it('should throw NotFoundException when subscription is not found', async () => {
       mockSubModel.findById.mockReturnValue(createChainable(null));
 
-      await expect(service.findOne(userId, 'nonexistent')).rejects.toThrow(
+      await expect(service.findOne(householdId, 'nonexistent')).rejects.toThrow(
         NotFoundException,
       );
     });
 
-    it('should throw NotFoundException when userId does not match', async () => {
-      const otherUserSub = {
+    it('should throw NotFoundException when householdId does not match', async () => {
+      const otherHouseholdSub = {
         ...mockSubscription,
-        userId: new Types.ObjectId('507f1f77bcf86cd799439099'),
+        householdId: new Types.ObjectId('507f1f77bcf86cd799439099'),
       };
-      mockSubModel.findById.mockReturnValue(createChainable(otherUserSub));
+      mockSubModel.findById.mockReturnValue(createChainable(otherHouseholdSub));
 
-      await expect(service.findOne(userId, subId)).rejects.toThrow(
+      await expect(service.findOne(householdId, subId)).rejects.toThrow(
         NotFoundException,
       );
     });
 
-    it('should throw NotFoundException when subscription has no userId', async () => {
-      const noOwnerSub = { ...mockSubscription, userId: null };
-      mockSubModel.findById.mockReturnValue(createChainable(noOwnerSub));
+    it('should throw NotFoundException when subscription has no householdId', async () => {
+      const noScopeSub = { ...mockSubscription, householdId: null };
+      mockSubModel.findById.mockReturnValue(createChainable(noScopeSub));
 
-      await expect(service.findOne(userId, subId)).rejects.toThrow(
+      await expect(service.findOne(householdId, subId)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -756,7 +760,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.findById.mockReturnValue(createChainable(existingSub));
       const logSpy = jest.spyOn(Logger.prototype, 'log');
 
-      const result = await service.update(userId, subId, {
+      const result = await service.update(householdId, subId, {
         name: 'Netflix Premium',
       });
 
@@ -764,60 +768,60 @@ describe('SubscriptionsService', () => {
       expect(existingSub.save).toHaveBeenCalled();
       expect(result).toBeDefined();
       expect(logSpy).toHaveBeenCalledWith(
-        { userId, subscriptionId: subId },
+        { householdId, subscriptionId: subId },
         'Subscription updated',
       );
     });
   });
 
   describe('remove', () => {
-    it('should atomically delete by id and userId and log', async () => {
+    it('should atomically delete by id and householdId and log', async () => {
       mockSubModel.findOneAndDelete.mockReturnValue(
         createChainable(mockSubscription),
       );
       const logSpy = jest.spyOn(Logger.prototype, 'log');
 
-      await service.remove(userId, subId);
+      await service.remove(householdId, subId);
 
       expect(mockSubModel.findOneAndDelete).toHaveBeenCalledWith({
         _id: expect.any(Types.ObjectId),
-        userId: expect.any(Types.ObjectId),
+        householdId: expect.any(Types.ObjectId),
       });
       expect(logSpy).toHaveBeenCalledWith(
-        { userId, subscriptionId: subId },
+        { householdId, subscriptionId: subId },
         'Subscription deleted',
       );
     });
 
-    it('should throw NotFoundException if subscription not found or not owned', async () => {
+    it('should throw NotFoundException if subscription not found or not in household', async () => {
       mockSubModel.findOneAndDelete.mockReturnValue(createChainable(null));
 
-      await expect(service.remove(userId, subId)).rejects.toThrow(
+      await expect(service.remove(householdId, subId)).rejects.toThrow(
         NotFoundException,
       );
     });
   });
 
-  describe('removeAllByUserId', () => {
-    it('should delete all subscriptions for the given userId', async () => {
+  describe('removeAllByHouseholdId', () => {
+    it('should delete all subscriptions for the given householdId', async () => {
       mockSubModel.deleteMany.mockReturnValue(
         createChainable({ deletedCount: 3 }),
       );
 
-      const result = await service.removeAllByUserId(userId);
+      const result = await service.removeAllByHouseholdId(householdId);
 
       expect(mockSubModel.deleteMany).toHaveBeenCalledWith({
-        userId: expect.any(Types.ObjectId),
+        householdId: expect.any(Types.ObjectId),
       });
       expect(result).toBe(3);
     });
 
-    it('should return 0 when the user has no subscriptions', async () => {
+    it('should return 0 when the household has no subscriptions', async () => {
       mockSubModel.deleteMany.mockReturnValue(
         createChainable({ deletedCount: 0 }),
       );
 
-      const result = await service.removeAllByUserId(userId);
+      const result = await service.removeAllByHouseholdId(householdId);
 
       expect(result).toBe(0);
     });
@@ -833,7 +837,7 @@ describe('SubscriptionsService', () => {
         createChainable({ deletedCount: 1 }),
       );
 
-      const result = await service.bulkOperation(userId, {
+      const result = await service.bulkOperation(householdId, {
         ids: [subId],
         action: BulkAction.DELETE,
       });
@@ -853,7 +857,7 @@ describe('SubscriptionsService', () => {
         createChainable({ modifiedCount: 1 }),
       );
 
-      const result = await service.bulkOperation(userId, {
+      const result = await service.bulkOperation(householdId, {
         ids: [subId],
         action: BulkAction.ACTIVATE,
       });
@@ -874,7 +878,7 @@ describe('SubscriptionsService', () => {
         createChainable({ modifiedCount: 1 }),
       );
 
-      const result = await service.bulkOperation(userId, {
+      const result = await service.bulkOperation(householdId, {
         ids: [subId],
         action: BulkAction.DEACTIVATE,
       });
@@ -895,7 +899,7 @@ describe('SubscriptionsService', () => {
         createChainable({ modifiedCount: 1 }),
       );
 
-      const result = await service.bulkOperation(userId, {
+      const result = await service.bulkOperation(householdId, {
         ids: [subId],
         action: BulkAction.CHANGE_CATEGORY,
         category: 'Gaming',
@@ -915,7 +919,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
 
       await expect(
-        service.bulkOperation(userId, {
+        service.bulkOperation(householdId, {
           ids: [subId],
           action: BulkAction.CHANGE_CATEGORY,
         }),
@@ -929,7 +933,7 @@ describe('SubscriptionsService', () => {
         createChainable({ deletedCount: 1 }),
       );
 
-      const result = await service.bulkOperation(userId, {
+      const result = await service.bulkOperation(householdId, {
         ids: [subId, subId2],
         action: BulkAction.DELETE,
       });
@@ -940,7 +944,7 @@ describe('SubscriptionsService', () => {
     it('should return early when no valid IDs found', async () => {
       mockSubModel.find.mockReturnValueOnce(createChainable([]));
 
-      const result = await service.bulkOperation(userId, {
+      const result = await service.bulkOperation(householdId, {
         ids: [subId],
         action: BulkAction.DELETE,
       });
@@ -949,17 +953,17 @@ describe('SubscriptionsService', () => {
       expect(mockSubModel.deleteMany).not.toHaveBeenCalled();
     });
 
-    it('should filter by userId for user scoping', async () => {
+    it('should filter by householdId for household scoping', async () => {
       mockSubModel.find.mockReturnValueOnce(createChainable([]));
 
-      await service.bulkOperation(userId, {
+      await service.bulkOperation(householdId, {
         ids: [subId],
         action: BulkAction.DELETE,
       });
 
       expect(mockSubModel.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
         }),
       );
     });
@@ -977,7 +981,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
-      const csv = await service.exportCsv(userId, {});
+      const csv = await service.exportCsv(householdId, {});
 
       const lines = csv.split('\n');
       expect(lines[0]).toBe(
@@ -998,7 +1002,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
-      const csv = await service.exportCsv(userId, {});
+      const csv = await service.exportCsv(householdId, {});
 
       const lines = csv.split('\n');
       expect(lines[1]).toContain('"Netflix, Premium"');
@@ -1016,7 +1020,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
-      const csv = await service.exportCsv(userId, {});
+      const csv = await service.exportCsv(householdId, {});
 
       const lines = csv.split('\n');
       expect(lines[1]).toContain('work; team');
@@ -1034,7 +1038,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
-      const csv = await service.exportCsv(userId, {});
+      const csv = await service.exportCsv(householdId, {});
 
       const lines = csv.split('\n');
       expect(lines[1]).toContain(',2025-07-15');
@@ -1052,7 +1056,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
-      const csv = await service.exportCsv(userId, {});
+      const csv = await service.exportCsv(householdId, {});
 
       const lines = csv.split('\n');
       const fields = lines[1].split(',');
@@ -1070,7 +1074,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
 
-      const csv = await service.exportCsv(userId, {});
+      const csv = await service.exportCsv(householdId, {});
 
       const lines = csv.split('\n');
       // Last field should be empty (trailing comma produces empty string)
@@ -1083,7 +1087,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      const csv = await service.exportCsv(userId, {});
+      const csv = await service.exportCsv(householdId, {});
 
       const lines = csv.split('\n');
       expect(lines).toHaveLength(1);
@@ -1097,7 +1101,7 @@ describe('SubscriptionsService', () => {
       mockSubModel.find.mockReturnValueOnce(chain);
       mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
 
-      await service.exportCsv(userId, {
+      await service.exportCsv(householdId, {
         category: 'Streaming',
         sortBy: 'name',
         sortOrder: 'asc',
@@ -1126,32 +1130,6 @@ describe('SubscriptionsService', () => {
       expect(
         SubscriptionsService['getMonthlyCost'](120, BillingCycle.YEARLY),
       ).toBe(10);
-    });
-  });
-
-  describe('migrateUnownedSubscriptions', () => {
-    it('should update subscriptions without userId', async () => {
-      mockSubModel.updateMany.mockReturnValue(
-        createChainable({ modifiedCount: 3 }),
-      );
-
-      const result = await service.migrateUnownedSubscriptions(userId);
-
-      expect(mockSubModel.updateMany).toHaveBeenCalledWith(
-        { userId: { $exists: false } },
-        { $set: { userId: expect.any(Types.ObjectId) } },
-      );
-      expect(result).toBe(3);
-    });
-
-    it('should return 0 when no unowned subscriptions exist', async () => {
-      mockSubModel.updateMany.mockReturnValue(
-        createChainable({ modifiedCount: 0 }),
-      );
-
-      const result = await service.migrateUnownedSubscriptions(userId);
-
-      expect(result).toBe(0);
     });
   });
 });

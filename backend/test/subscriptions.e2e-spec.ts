@@ -1,9 +1,26 @@
 import { INestApplication } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
 import { SubscriptionsCronService } from '../src/subscriptions/subscriptions-cron.service';
+import { HouseholdsService } from '../src/households/households.service';
+import {
+  HouseholdMember,
+  HouseholdMemberDocument,
+  HouseholdRole,
+  MembershipStatus,
+} from '../src/households/schemas/household-member.schema';
+
+/** Decode the `sub` (userId) claim from a JWT access token. */
+function userIdFromToken(token: string): string {
+  const payload = JSON.parse(
+    Buffer.from(token.split('.')[1], 'base64').toString('utf8'),
+  ) as { sub: string };
+  return payload.sub;
+}
 
 describe('Subscriptions (e2e)', () => {
   let app: INestApplication<App>;
@@ -13,7 +30,9 @@ describe('Subscriptions (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
 
-    // Create two users
+    // Each registered user is provisioned their own personal household, so
+    // usera and userb start in separate households (the basis for the
+    // cross-household isolation assertions below).
     const resA = await request(app.getHttpServer())
       .post('/api/auth/register')
       .send({ username: 'usera', password: 'Password123' });
@@ -842,6 +861,137 @@ describe('Subscriptions (e2e)', () => {
     it('should return 404 for nonexistent subscription', async () => {
       await request(app.getHttpServer())
         .get('/api/subscriptions/507f1f77bcf86cd799439099')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(404);
+    });
+  });
+
+  // The keystone of VEG-389: data is scoped to the household, not the user. A
+  // co-member of the household sees and edits shared subscriptions; a member of
+  // a different household is fully isolated.
+  describe('Household scoping (shared + cross-household isolation)', () => {
+    let householdsService: HouseholdsService;
+    let memberModel: Model<HouseholdMemberDocument>;
+    let tokenC: string; // a user we move into usera's household
+    let householdAId: string;
+    let sharedSubId: string;
+
+    beforeAll(async () => {
+      householdsService = app.get(HouseholdsService);
+      memberModel = app.get<Model<HouseholdMemberDocument>>(
+        getModelToken(HouseholdMember.name),
+      );
+
+      // Register a fresh user (gets their own personal household first).
+      const resC = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ username: 'userc', password: 'Password123' });
+      tokenC = resC.body.access_token;
+      const userCId = userIdFromToken(tokenC);
+
+      // Resolve usera's household.
+      const membershipA = await householdsService.findMembershipByUser(
+        userIdFromToken(tokenA),
+      );
+      householdAId = (
+        membershipA!.householdId as unknown as Types.ObjectId
+      ).toString();
+
+      // usera creates a subscription that lives in household A.
+      const subRes = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Shared Family Netflix',
+          cost: 19.99,
+          billingCycle: 'monthly',
+          nextBillingDate: '2026-08-01',
+          category: 'Streaming',
+        })
+        .expect(201);
+      sharedSubId = subRes.body._id;
+
+      // Move userc into household A: deactivate their own active membership
+      // (the partial unique index allows only one active membership per user),
+      // then add them as an active member of household A.
+      await memberModel
+        .updateMany(
+          {
+            userId: new Types.ObjectId(userCId),
+            status: MembershipStatus.ACTIVE,
+          } as Record<string, unknown>,
+          { status: MembershipStatus.INVITED },
+        )
+        .exec();
+      await householdsService.addMember({
+        householdId: householdAId,
+        userId: userCId,
+        role: HouseholdRole.ADULT,
+        status: MembershipStatus.ACTIVE,
+      });
+    });
+
+    it('lets a co-member of the household see the shared subscription', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/subscriptions?limit=0')
+        .set('Authorization', `Bearer ${tokenC}`)
+        .expect(200);
+
+      const ids = res.body.data.map((s: any) => s._id);
+      expect(ids).toContain(sharedSubId);
+    });
+
+    it('lets a co-member read and update a household subscription', async () => {
+      await request(app.getHttpServer())
+        .get(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenC}`)
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenC}`)
+        .send({ cost: 24.99 })
+        .expect(200);
+      expect(res.body.cost).toBe(24.99);
+    });
+
+    it('isolates a member of a different household (cannot read)', async () => {
+      await request(app.getHttpServer())
+        .get(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(404);
+    });
+
+    it('isolates a member of a different household (cannot update)', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({ name: 'Hijacked' })
+        .expect(404);
+    });
+
+    it('isolates a member of a different household (cannot delete)', async () => {
+      await request(app.getHttpServer())
+        .delete(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(404);
+
+      // Still visible to the owning household.
+      await request(app.getHttpServer())
+        .get(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+    });
+
+    it('lets a co-member delete a household subscription', async () => {
+      await request(app.getHttpServer())
+        .delete(`/api/subscriptions/${sharedSubId}`)
+        .set('Authorization', `Bearer ${tokenC}`)
+        .expect(204);
+
+      // Gone for the original creator too — it was shared household data.
+      await request(app.getHttpServer())
+        .get(`/api/subscriptions/${sharedSubId}`)
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(404);
     });

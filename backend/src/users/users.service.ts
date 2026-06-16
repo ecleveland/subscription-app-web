@@ -16,7 +16,7 @@ import {
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
-import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { HouseholdsService } from '../households/households.service';
 
 @Injectable()
 export class UsersService {
@@ -26,7 +26,7 @@ export class UsersService {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(RefreshToken.name)
     private refreshTokenModel: Model<RefreshTokenDocument>,
-    private readonly subscriptionsService: SubscriptionsService,
+    private readonly householdsService: HouseholdsService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<UserDocument> {
@@ -40,13 +40,9 @@ export class UsersService {
       role: createUserDto.role ?? UserRole.USER,
     });
 
+    let saved: UserDocument;
     try {
-      const saved = await user.save();
-      this.logger.log(
-        { userId: saved._id.toString(), username: createUserDto.username },
-        'User created',
-      );
-      return saved;
+      saved = await user.save();
     } catch (error: unknown) {
       if (
         error instanceof Error &&
@@ -57,6 +53,34 @@ export class UsersService {
       }
       throw error;
     }
+    this.logger.log(
+      { userId: saved._id.toString(), username: createUserDto.username },
+      'User created',
+    );
+
+    // Provision a personal household + owner membership so household-scoped
+    // features (subscriptions, notifications) work immediately for the new
+    // user — mirrors the startup backfill for pre-household users. If it fails,
+    // roll the user back rather than leaving an account that can't resolve an
+    // active household (HouseholdGuard would reject every request).
+    try {
+      const label = saved.displayName?.trim() || saved.username;
+      await this.householdsService.createHousehold(saved._id.toString(), {
+        name: `${label}'s Household`,
+      });
+    } catch (error: unknown) {
+      await this.userModel
+        .findByIdAndDelete(saved._id)
+        .exec()
+        .catch(() => undefined);
+      this.logger.error(
+        { userId: saved._id.toString() },
+        'Failed to create personal household; rolled back user',
+      );
+      throw error;
+    }
+
+    return saved;
   }
 
   async findAll(): Promise<UserDocument[]> {
@@ -147,7 +171,11 @@ export class UsersService {
     if (!result) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
-    await this.subscriptionsService.removeAllByUserId(id);
+    // Remove the user's household memberships. Subscriptions and notifications
+    // belong to the household (shared data) and intentionally survive a single
+    // member's deletion — a dedicated household-teardown path is responsible
+    // for cascading that data.
+    await this.householdsService.removeMembershipsByUser(id);
     this.logger.log({ userId: id }, 'User deleted');
   }
 

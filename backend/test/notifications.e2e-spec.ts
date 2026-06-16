@@ -1,8 +1,26 @@
 import { INestApplication } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 import { NotificationsCronService } from '../src/notifications/notifications-cron.service';
+import { NotificationsService } from '../src/notifications/notifications.service';
+import { HouseholdsService } from '../src/households/households.service';
+import {
+  HouseholdMember,
+  HouseholdMemberDocument,
+  HouseholdRole,
+  MembershipStatus,
+} from '../src/households/schemas/household-member.schema';
+
+/** Decode the `sub` (userId) claim from a JWT access token. */
+function userIdFromToken(token: string): string {
+  const payload = JSON.parse(
+    Buffer.from(token.split('.')[1], 'base64').toString('utf8'),
+  ) as { sub: string };
+  return payload.sub;
+}
 
 describe('Notifications (e2e)', () => {
   let app: INestApplication<App>;
@@ -142,8 +160,8 @@ describe('Notifications (e2e)', () => {
     });
   });
 
-  describe('User isolation', () => {
-    it('should not allow userB to see userA notifications', async () => {
+  describe('Household isolation', () => {
+    it('should not allow a different household to see userA notifications', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/notifications')
         .set('Authorization', `Bearer ${tokenB}`)
@@ -195,6 +213,77 @@ describe('Notifications (e2e)', () => {
         .expect(200);
 
       expect(after.body.data.length).toBe(before.body.data.length);
+    });
+  });
+
+  describe('Household scoping (shared visibility)', () => {
+    // Reminders are created by NotificationsService (the cron is just one
+    // caller, and it holds a once-per-day lock). We drive the service directly
+    // here to assert the *scoping*: a household notification is visible to every
+    // member of that household and to no one outside it.
+    it('shows a household notification to a co-member but not to other households', async () => {
+      const householdsService = app.get(HouseholdsService);
+      const notificationsService = app.get(NotificationsService);
+      const memberModel = app.get<Model<HouseholdMemberDocument>>(
+        getModelToken(HouseholdMember.name),
+      );
+
+      // Register a fresh user, then move them into userA's household.
+      const resC = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ username: 'notif_userc', password: 'Password123' });
+      const tokenC = resC.body.access_token;
+      const userCId = userIdFromToken(tokenC);
+
+      const membershipA = await householdsService.findMembershipByUser(
+        userIdFromToken(tokenA),
+      );
+      const householdAId = (
+        membershipA!.householdId as unknown as Types.ObjectId
+      ).toString();
+
+      await memberModel
+        .updateMany(
+          {
+            userId: new Types.ObjectId(userCId),
+            status: MembershipStatus.ACTIVE,
+          } as Record<string, unknown>,
+          { status: MembershipStatus.INVITED },
+        )
+        .exec();
+      await householdsService.addMember({
+        householdId: householdAId,
+        userId: userCId,
+        role: HouseholdRole.ADULT,
+        status: MembershipStatus.ACTIVE,
+      });
+
+      // Materialize a renewal reminder for household A.
+      await notificationsService.createRenewalReminder(
+        householdAId,
+        new Types.ObjectId().toString(),
+        'Household Reminder Sub',
+        new Date('2026-09-01'),
+        3,
+      );
+
+      // The co-member sees the household's notification...
+      const coMember = await request(app.getHttpServer())
+        .get('/api/notifications')
+        .set('Authorization', `Bearer ${tokenC}`)
+        .expect(200);
+      expect(coMember.body.data.map((n: any) => n.title)).toContain(
+        'Household Reminder Sub renewing soon',
+      );
+
+      // ...while a member of a different household does not.
+      const outsider = await request(app.getHttpServer())
+        .get('/api/notifications')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+      expect(outsider.body.data.map((n: any) => n.title)).not.toContain(
+        'Household Reminder Sub renewing soon',
+      );
     });
   });
 });

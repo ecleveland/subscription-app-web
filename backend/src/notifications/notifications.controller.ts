@@ -11,45 +11,43 @@ import {
   HttpCode,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { HouseholdGuard } from '../households/guards/household.guard';
 import { NotificationsService } from './notifications.service';
 import { QueryNotificationDto } from './dto/query-notification.dto';
-import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
+import type { HouseholdRequest } from '../households/interfaces/household-request.interface';
 
 @Controller('notifications')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  findAll(
-    @Req() req: AuthenticatedRequest,
-    @Query() query: QueryNotificationDto,
-  ) {
-    return this.notificationsService.findAll(req.user.userId, query);
+  findAll(@Req() req: HouseholdRequest, @Query() query: QueryNotificationDto) {
+    return this.notificationsService.findAll(req.household.householdId, query);
   }
 
   @Get('unread-count')
-  async getUnreadCount(@Req() req: AuthenticatedRequest) {
+  async getUnreadCount(@Req() req: HouseholdRequest) {
     const count = await this.notificationsService.getUnreadCount(
-      req.user.userId,
+      req.household.householdId,
     );
     return { count };
   }
 
   @Patch(':id/read')
-  markAsRead(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.notificationsService.markAsRead(req.user.userId, id);
+  markAsRead(@Req() req: HouseholdRequest, @Param('id') id: string) {
+    return this.notificationsService.markAsRead(req.household.householdId, id);
   }
 
   @Post('mark-all-read')
   @HttpCode(204)
-  markAllAsRead(@Req() req: AuthenticatedRequest) {
-    return this.notificationsService.markAllAsRead(req.user.userId);
+  markAllAsRead(@Req() req: HouseholdRequest) {
+    return this.notificationsService.markAllAsRead(req.household.householdId);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  remove(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.notificationsService.remove(req.user.userId, id);
+  remove(@Req() req: HouseholdRequest, @Param('id') id: string) {
+    return this.notificationsService.remove(req.household.householdId, id);
   }
 }

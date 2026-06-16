@@ -3,7 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { User, UserSchema } from './schemas/user.schema';
-import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { HouseholdsModule } from '../households/households.module';
 import {
   RefreshToken,
   RefreshTokenSchema,
@@ -15,7 +15,9 @@ import {
       { name: User.name, schema: UserSchema },
       { name: RefreshToken.name, schema: RefreshTokenSchema },
     ]),
-    SubscriptionsModule,
+    // Provides HouseholdsService for personal-household provisioning on user
+    // creation and membership cleanup on user deletion.
+    HouseholdsModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

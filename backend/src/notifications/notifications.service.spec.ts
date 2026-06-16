@@ -16,13 +16,13 @@ describe('NotificationsService', () => {
   let service: NotificationsService;
   let mockModel: any;
 
-  const userId = '507f1f77bcf86cd799439011';
+  const householdId = '507f1f77bcf86cd799439011';
   const notifId = '507f1f77bcf86cd799439033';
   const subId = '507f1f77bcf86cd799439022';
 
   const mockNotification = {
     _id: notifId,
-    userId: new Types.ObjectId(userId),
+    householdId: new Types.ObjectId(householdId),
     subscriptionId: new Types.ObjectId(subId),
     type: NotificationType.RENEWAL_REMINDER,
     title: 'Netflix renewing soon',
@@ -47,6 +47,9 @@ describe('NotificationsService', () => {
     mockModel.updateMany = jest
       .fn()
       .mockReturnValue(createChainable({ modifiedCount: 0 }));
+    mockModel.deleteMany = jest
+      .fn()
+      .mockReturnValue(createChainable({ deletedCount: 0 }));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -71,13 +74,13 @@ describe('NotificationsService', () => {
       mockModel.find.mockReturnValue(findChain);
       mockModel.countDocuments.mockReturnValue(createChainable(1));
 
-      const result = await service.findAll(userId, {});
+      const result = await service.findAll(householdId, {});
 
       expect(result.data).toEqual([mockNotification]);
       expect(result.unreadCount).toBe(1);
       expect(mockModel.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
         }),
       );
     });
@@ -87,11 +90,11 @@ describe('NotificationsService', () => {
       mockModel.find.mockReturnValue(findChain);
       mockModel.countDocuments.mockReturnValue(createChainable(0));
 
-      await service.findAll(userId, { read: false });
+      await service.findAll(householdId, { read: false });
 
       expect(mockModel.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
           read: false,
         }),
       );
@@ -102,12 +105,12 @@ describe('NotificationsService', () => {
     it('should return the count of unread notifications', async () => {
       mockModel.countDocuments.mockReturnValue(createChainable(5));
 
-      const result = await service.getUnreadCount(userId);
+      const result = await service.getUnreadCount(householdId);
 
       expect(result).toBe(5);
       expect(mockModel.countDocuments).toHaveBeenCalledWith(
         expect.objectContaining({
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
           read: false,
         }),
       );
@@ -119,13 +122,13 @@ describe('NotificationsService', () => {
       const updated = { ...mockNotification, read: true };
       mockModel.findOneAndUpdate.mockReturnValue(createChainable(updated));
 
-      const result = await service.markAsRead(userId, notifId);
+      const result = await service.markAsRead(householdId, notifId);
 
       expect(result).toEqual(updated);
       expect(mockModel.findOneAndUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
           _id: expect.any(Types.ObjectId),
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
         }),
         { read: true },
         { new: true },
@@ -135,7 +138,7 @@ describe('NotificationsService', () => {
     it('should throw NotFoundException when notification not found', async () => {
       mockModel.findOneAndUpdate.mockReturnValue(createChainable(null));
 
-      await expect(service.markAsRead(userId, notifId)).rejects.toThrow(
+      await expect(service.markAsRead(householdId, notifId)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -147,11 +150,11 @@ describe('NotificationsService', () => {
         createChainable({ modifiedCount: 3 }),
       );
 
-      await service.markAllAsRead(userId);
+      await service.markAllAsRead(householdId);
 
       expect(mockModel.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
           read: false,
         }),
         { read: true },
@@ -165,12 +168,12 @@ describe('NotificationsService', () => {
         createChainable(mockNotification),
       );
 
-      await service.remove(userId, notifId);
+      await service.remove(householdId, notifId);
 
       expect(mockModel.findOneAndDelete).toHaveBeenCalledWith(
         expect.objectContaining({
           _id: expect.any(Types.ObjectId),
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
         }),
       );
     });
@@ -178,9 +181,34 @@ describe('NotificationsService', () => {
     it('should throw NotFoundException when notification not found', async () => {
       mockModel.findOneAndDelete.mockReturnValue(createChainable(null));
 
-      await expect(service.remove(userId, notifId)).rejects.toThrow(
+      await expect(service.remove(householdId, notifId)).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('removeAllByHouseholdId', () => {
+    it('should delete all notifications for the given householdId', async () => {
+      mockModel.deleteMany.mockReturnValue(
+        createChainable({ deletedCount: 4 }),
+      );
+
+      const result = await service.removeAllByHouseholdId(householdId);
+
+      expect(mockModel.deleteMany).toHaveBeenCalledWith({
+        householdId: expect.any(Types.ObjectId),
+      });
+      expect(result).toBe(4);
+    });
+
+    it('should return 0 when the household has no notifications', async () => {
+      mockModel.deleteMany.mockReturnValue(
+        createChainable({ deletedCount: 0 }),
+      );
+
+      const result = await service.removeAllByHouseholdId(householdId);
+
+      expect(result).toBe(0);
     });
   });
 
@@ -191,9 +219,9 @@ describe('NotificationsService', () => {
         .mockReturnValue(createChainable({ upsertedCount: 1 }));
     });
 
-    it('upserts a reminder on the unique { userId, subscriptionId, billingDate } key', async () => {
+    it('upserts a reminder on the unique { householdId, subscriptionId, billingDate } key', async () => {
       await service.createRenewalReminder(
-        userId,
+        householdId,
         subId,
         'Netflix',
         new Date('2026-03-20'),
@@ -202,7 +230,7 @@ describe('NotificationsService', () => {
 
       expect(mockModel.updateOne).toHaveBeenCalledWith(
         expect.objectContaining({
-          userId: expect.any(Types.ObjectId),
+          householdId: expect.any(Types.ObjectId),
           subscriptionId: expect.any(Types.ObjectId),
           billingDate: new Date('2026-03-20'),
         }),
@@ -220,7 +248,7 @@ describe('NotificationsService', () => {
 
     it('should handle singular day text', async () => {
       await service.createRenewalReminder(
-        userId,
+        householdId,
         subId,
         'Netflix',
         new Date('2026-03-20'),
@@ -245,7 +273,7 @@ describe('NotificationsService', () => {
 
       await expect(
         service.createRenewalReminder(
-          userId,
+          householdId,
           subId,
           'Netflix',
           new Date('2026-03-20'),
@@ -263,7 +291,7 @@ describe('NotificationsService', () => {
 
       await expect(
         service.createRenewalReminder(
-          userId,
+          householdId,
           subId,
           'Netflix',
           new Date('2026-03-20'),

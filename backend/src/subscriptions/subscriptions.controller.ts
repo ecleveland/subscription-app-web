@@ -25,13 +25,14 @@ import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
 import { BulkOperationDto } from './dto/bulk-operation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
+import { HouseholdGuard } from '../households/guards/household.guard';
+import type { HouseholdRequest } from '../households/interfaces/household-request.interface';
 import type { Response } from 'express';
 
 @ApiTags('Subscriptions')
 @ApiBearerAuth()
 @Controller('subscriptions')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, HouseholdGuard)
 export class SubscriptionsController {
   constructor(private readonly subscriptionsService: SubscriptionsService) {}
 
@@ -41,21 +42,22 @@ export class SubscriptionsController {
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   create(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: HouseholdRequest,
     @Body() createDto: CreateSubscriptionDto,
   ) {
-    return this.subscriptionsService.create(req.user.userId, createDto);
+    return this.subscriptionsService.create(
+      req.household.householdId,
+      req.household.memberId,
+      createDto,
+    );
   }
 
   @Get()
   @ApiOperation({ summary: 'List subscriptions for the current user' })
   @ApiResponse({ status: 200, description: 'Paginated list of subscriptions' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  findAll(
-    @Req() req: AuthenticatedRequest,
-    @Query() query: QuerySubscriptionDto,
-  ) {
-    return this.subscriptionsService.findAll(req.user.userId, query);
+  findAll(@Req() req: HouseholdRequest, @Query() query: QuerySubscriptionDto) {
+    return this.subscriptionsService.findAll(req.household.householdId, query);
   }
 
   @Get('export')
@@ -63,12 +65,12 @@ export class SubscriptionsController {
   @ApiResponse({ status: 200, description: 'CSV file download' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async exportCsv(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: HouseholdRequest,
     @Query() query: QuerySubscriptionDto,
     @Res() res: Response,
   ) {
     const csv = await this.subscriptionsService.exportCsv(
-      req.user.userId,
+      req.household.householdId,
       query,
     );
     res.setHeader('Content-Type', 'text/csv');
@@ -84,8 +86,11 @@ export class SubscriptionsController {
   @ApiResponse({ status: 200, description: 'Bulk operation result' })
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  bulk(@Req() req: AuthenticatedRequest, @Body() bulkDto: BulkOperationDto) {
-    return this.subscriptionsService.bulkOperation(req.user.userId, bulkDto);
+  bulk(@Req() req: HouseholdRequest, @Body() bulkDto: BulkOperationDto) {
+    return this.subscriptionsService.bulkOperation(
+      req.household.householdId,
+      bulkDto,
+    );
   }
 
   @Get(':id')
@@ -93,8 +98,8 @@ export class SubscriptionsController {
   @ApiResponse({ status: 200, description: 'Subscription found' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Subscription not found' })
-  findOne(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.subscriptionsService.findOne(req.user.userId, id);
+  findOne(@Req() req: HouseholdRequest, @Param('id') id: string) {
+    return this.subscriptionsService.findOne(req.household.householdId, id);
   }
 
   @Patch(':id')
@@ -104,11 +109,15 @@ export class SubscriptionsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Subscription not found' })
   update(
-    @Req() req: AuthenticatedRequest,
+    @Req() req: HouseholdRequest,
     @Param('id') id: string,
     @Body() updateDto: UpdateSubscriptionDto,
   ) {
-    return this.subscriptionsService.update(req.user.userId, id, updateDto);
+    return this.subscriptionsService.update(
+      req.household.householdId,
+      id,
+      updateDto,
+    );
   }
 
   @Delete(':id')
@@ -117,7 +126,7 @@ export class SubscriptionsController {
   @ApiResponse({ status: 204, description: 'Subscription deleted' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Subscription not found' })
-  remove(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.subscriptionsService.remove(req.user.userId, id);
+  remove(@Req() req: HouseholdRequest, @Param('id') id: string) {
+    return this.subscriptionsService.remove(req.household.householdId, id);
   }
 }

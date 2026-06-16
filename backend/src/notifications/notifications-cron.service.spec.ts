@@ -23,13 +23,13 @@ describe('NotificationsCronService', () => {
   let mockNotificationsService: any;
   let mockCronLock: any;
 
-  const userId = '507f1f77bcf86cd799439011';
+  const householdId = '507f1f77bcf86cd799439011';
   const subId = '507f1f77bcf86cd799439022';
 
   function makeSub(overrides: Record<string, any> = {}) {
     return {
       _id: new Types.ObjectId(subId),
-      userId: new Types.ObjectId(userId),
+      householdId: new Types.ObjectId(householdId),
       name: 'Netflix',
       nextBillingDate: new Date('2026-03-19'),
       reminderDaysBefore: 3,
@@ -110,7 +110,7 @@ describe('NotificationsCronService', () => {
     await cronService.handleRenewalReminders();
 
     expect(mockNotificationsService.createRenewalReminder).toHaveBeenCalledWith(
-      userId,
+      householdId,
       subId,
       'Netflix',
       new Date('2026-03-19'),

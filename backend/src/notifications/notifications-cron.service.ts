@@ -66,14 +66,14 @@ export class NotificationsCronService {
         const docId = (
           sub._id as unknown as { toHexString(): string }
         ).toHexString();
-        const ownerId = (
-          sub.userId as unknown as { toHexString(): string }
+        const householdId = (
+          sub.householdId as unknown as { toHexString(): string }
         ).toHexString();
         // Isolate per-subscription failures so one bad write doesn't drop
         // reminders for everyone after it (the daily lock prevents a retry).
         try {
           await this.notificationsService.createRenewalReminder(
-            ownerId,
+            householdId,
             docId,
             sub.name,
             billingDate,
@@ -85,7 +85,7 @@ export class NotificationsCronService {
           const message =
             error instanceof Error ? error.message : String(error);
           this.logger.error(
-            { subscriptionId: docId, userId: ownerId },
+            { subscriptionId: docId, householdId },
             `Failed to create renewal reminder: ${message}`,
           );
         }

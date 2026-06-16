@@ -9,8 +9,15 @@ export enum NotificationType {
 
 @Schema({ timestamps: true })
 export class Notification {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', index: true })
-  userId: MongooseSchema.Types.ObjectId;
+  // Household-scoped: renewal reminders are visible to the whole household, not
+  // a single user. Resolved server-side by HouseholdGuard.
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Household',
+    required: true,
+    index: true,
+  })
+  householdId: MongooseSchema.Types.ObjectId;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Subscription' })
   subscriptionId: MongooseSchema.Types.ObjectId;
@@ -33,7 +40,9 @@ export class Notification {
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
 
+// Idempotency key for the renewal-reminder cron: one reminder per subscription
+// per billing date, scoped to the owning household.
 NotificationSchema.index(
-  { userId: 1, subscriptionId: 1, billingDate: 1 },
+  { householdId: 1, subscriptionId: 1, billingDate: 1 },
   { unique: true },
 );
