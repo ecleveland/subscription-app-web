@@ -56,6 +56,7 @@ export class NotificationsCronService {
     let checked = 0;
     let created = 0;
     let failed = 0;
+    let skipped = 0;
     for await (const sub of cursor) {
       checked++;
       const billingDate = new Date(sub.nextBillingDate);
@@ -66,6 +67,18 @@ export class NotificationsCronService {
         const docId = (
           sub._id as unknown as { toHexString(): string }
         ).toHexString();
+        // A subscription should always carry a householdId, but a legacy doc
+        // left un-stamped by the migration (e.g. an owner with no active
+        // membership) could slip through this unscoped query. Skip it rather
+        // than dereferencing undefined, which would abort the whole run.
+        if (!sub.householdId) {
+          skipped++;
+          this.logger.warn(
+            { subscriptionId: docId },
+            'Skipping renewal reminder: subscription has no householdId',
+          );
+          continue;
+        }
         const householdId = (
           sub.householdId as unknown as { toHexString(): string }
         ).toHexString();
@@ -93,7 +106,7 @@ export class NotificationsCronService {
     }
 
     this.logger.log(
-      { checked, created, failed },
+      { checked, created, failed, skipped },
       'Renewal reminder cron job complete',
     );
   }

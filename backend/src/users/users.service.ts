@@ -69,10 +69,18 @@ export class UsersService {
         name: `${label}'s Household`,
       });
     } catch (error: unknown) {
+      // Best-effort rollback. If the delete itself fails the user is left
+      // without a household (HouseholdGuard will reject them until the startup
+      // backfill repairs it), so log that case rather than swallowing it.
       await this.userModel
         .findByIdAndDelete(saved._id)
         .exec()
-        .catch(() => undefined);
+        .catch((rollbackError: unknown) => {
+          this.logger.error(
+            { userId: saved._id.toString(), rollbackError },
+            'User rollback delete failed; account orphaned without a household',
+          );
+        });
       this.logger.error(
         { userId: saved._id.toString() },
         'Failed to create personal household; rolled back user',
@@ -167,15 +175,19 @@ export class UsersService {
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.userModel.findByIdAndDelete(id).exec();
-    if (!result) {
+    // Verify the user exists before touching dependents, then remove the
+    // memberships *before* the user row so a mid-cascade failure can't leave an
+    // orphaned active membership pointing at a deleted user (which would also
+    // occupy the partial-unique active-membership slot). Subscriptions and
+    // notifications belong to the household (shared data) and intentionally
+    // survive a single member's deletion — a dedicated household-teardown path
+    // is responsible for cascading that data.
+    const user = await this.userModel.findById(id).exec();
+    if (!user) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
-    // Remove the user's household memberships. Subscriptions and notifications
-    // belong to the household (shared data) and intentionally survive a single
-    // member's deletion — a dedicated household-teardown path is responsible
-    // for cascading that data.
     await this.householdsService.removeMembershipsByUser(id);
+    await this.userModel.findByIdAndDelete(id).exec();
     this.logger.log({ userId: id }, 'User deleted');
   }
 

@@ -7,6 +7,7 @@ import { createTestApp, closeTestApp } from './helpers/test-app';
 import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
 import { SubscriptionsCronService } from '../src/subscriptions/subscriptions-cron.service';
 import { HouseholdsService } from '../src/households/households.service';
+import { UsersService } from '../src/users/users.service';
 import {
   HouseholdMember,
   HouseholdMemberDocument,
@@ -873,6 +874,7 @@ describe('Subscriptions (e2e)', () => {
     let householdsService: HouseholdsService;
     let memberModel: Model<HouseholdMemberDocument>;
     let tokenC: string; // a user we move into usera's household
+    let userCId: string;
     let householdAId: string;
     let sharedSubId: string;
 
@@ -887,7 +889,7 @@ describe('Subscriptions (e2e)', () => {
         .post('/api/auth/register')
         .send({ username: 'userc', password: 'Password123' });
       tokenC = resC.body.access_token;
-      const userCId = userIdFromToken(tokenC);
+      userCId = userIdFromToken(tokenC);
 
       // Resolve usera's household.
       const membershipA = await householdsService.findMembershipByUser(
@@ -994,6 +996,39 @@ describe('Subscriptions (e2e)', () => {
         .get(`/api/subscriptions/${sharedSubId}`)
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(404);
+    });
+
+    it('preserves household subscriptions when a member is deleted', async () => {
+      // A household subscription created by usera.
+      const subRes = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Survives Member Deletion',
+          cost: 8.99,
+          billingCycle: 'monthly',
+          nextBillingDate: '2026-08-01',
+          category: 'Streaming',
+        })
+        .expect(201);
+      const survivorSubId = subRes.body._id;
+
+      // Delete the co-member userc (admin user-deletion path).
+      await app.get(UsersService).remove(userCId);
+
+      // The shared subscription still belongs to the household and is visible
+      // to the remaining member.
+      await request(app.getHttpServer())
+        .get(`/api/subscriptions/${survivorSubId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      // The deleted member is fully locked out — their JWT no longer maps to a
+      // user, so JwtAuthGuard rejects it (401) before HouseholdGuard runs.
+      await request(app.getHttpServer())
+        .get('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenC}`)
+        .expect(401);
     });
   });
 });

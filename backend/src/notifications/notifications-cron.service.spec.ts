@@ -188,4 +188,36 @@ describe('NotificationsCronService', () => {
       mockNotificationsService.createRenewalReminder,
     ).toHaveBeenCalledTimes(2);
   });
+
+  it('skips a subscription with no householdId instead of aborting the run', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
+    // First sub is an un-stamped legacy orphan (no householdId); the second is
+    // healthy. The orphan must be skipped without throwing so the run completes.
+    const orphan = makeSub({ name: 'Orphan' });
+    delete (orphan as { householdId?: unknown }).householdId;
+    mockSubModel.find.mockReturnValue(
+      cursorOf([
+        orphan,
+        makeSub({
+          _id: new Types.ObjectId('507f1f77bcf86cd799439044'),
+          name: 'Healthy',
+        }),
+      ]),
+    );
+
+    await expect(cronService.handleRenewalReminders()).resolves.toBeUndefined();
+
+    // Only the healthy subscription produces a reminder.
+    expect(
+      mockNotificationsService.createRenewalReminder,
+    ).toHaveBeenCalledTimes(1);
+    expect(mockNotificationsService.createRenewalReminder).toHaveBeenCalledWith(
+      householdId,
+      '507f1f77bcf86cd799439044',
+      'Healthy',
+      new Date('2026-03-19'),
+      3,
+    );
+  });
 });

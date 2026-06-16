@@ -105,14 +105,17 @@ describe('SubscriptionsService', () => {
 
       await service.create(householdId, memberId, dto);
 
-      expect(mockSubModel).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: 'Netflix',
-          cost: 15.99,
-          householdId: expect.any(Types.ObjectId),
-          memberId: expect.any(Types.ObjectId),
-        }),
+      // Assert the actual id values (not just `expect.any`) so a householdId/
+      // memberId transposition — the most error-prone mapping in the PR — is
+      // caught at the unit level.
+      const built = mockSubModel.mock.calls[0][0];
+      expect(built.householdId).toBeInstanceOf(Types.ObjectId);
+      expect(built.householdId.equals(new Types.ObjectId(householdId))).toBe(
+        true,
       );
+      expect(built.memberId).toBeInstanceOf(Types.ObjectId);
+      expect(built.memberId.equals(new Types.ObjectId(memberId))).toBe(true);
+      expect(built.name).toBe('Netflix');
       expect(saveMock).toHaveBeenCalled();
       expect(logSpy).toHaveBeenCalledWith(
         { householdId, memberId, subscriptionId: 'new-id' },
@@ -810,9 +813,10 @@ describe('SubscriptionsService', () => {
 
       const result = await service.removeAllByHouseholdId(householdId);
 
-      expect(mockSubModel.deleteMany).toHaveBeenCalledWith({
-        householdId: expect.any(Types.ObjectId),
-      });
+      const filter = mockSubModel.deleteMany.mock.calls[0][0];
+      expect(filter.householdId.equals(new Types.ObjectId(householdId))).toBe(
+        true,
+      );
       expect(result).toBe(3);
     });
 

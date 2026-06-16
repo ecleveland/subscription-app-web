@@ -81,8 +81,13 @@ async function bootstrap() {
   } catch (error: unknown) {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
-    new Logger('Bootstrap').warn(
-      `Startup admin seed/migration step failed; continuing: ${message}`,
+    // By this point seedAdmin and backfillPersonalHouseholds have swallowed
+    // their own benign races, so anything reaching here is unexpected — and a
+    // failed data migration can leave users live with un-scoped data. Log at
+    // error level (not warn) so it's alarming and traceable, while still
+    // letting the app serve traffic.
+    new Logger('Bootstrap').error(
+      `Startup admin seed/migration step failed; continuing without it: ${message}`,
     );
   }
 

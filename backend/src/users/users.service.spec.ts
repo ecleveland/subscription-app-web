@@ -423,21 +423,32 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
-    it('should delete the user, remove their household memberships, and log', async () => {
+    it('should remove the memberships before deleting the user, and log', async () => {
+      mockUserModel.findById.mockReturnValue(createChainable(mockUser));
       mockUserModel.findByIdAndDelete.mockReturnValue(
         createChainable(mockUser),
       );
-      mockHouseholdsService.removeMembershipsByUser.mockResolvedValue(1);
+      const callOrder: string[] = [];
+      mockHouseholdsService.removeMembershipsByUser.mockImplementation(() => {
+        callOrder.push('memberships');
+        return Promise.resolve(1);
+      });
+      mockUserModel.findByIdAndDelete.mockImplementation(() => {
+        callOrder.push('user');
+        return createChainable(mockUser);
+      });
       const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await service.remove('507f1f77bcf86cd799439011');
 
-      expect(mockUserModel.findByIdAndDelete).toHaveBeenCalledWith(
-        '507f1f77bcf86cd799439011',
-      );
       expect(
         mockHouseholdsService.removeMembershipsByUser,
       ).toHaveBeenCalledWith('507f1f77bcf86cd799439011');
+      expect(mockUserModel.findByIdAndDelete).toHaveBeenCalledWith(
+        '507f1f77bcf86cd799439011',
+      );
+      // Dependents (memberships) must be removed before the user row.
+      expect(callOrder).toEqual(['memberships', 'user']);
       expect(logSpy).toHaveBeenCalledWith(
         { userId: '507f1f77bcf86cd799439011' },
         'User deleted',
@@ -445,7 +456,7 @@ describe('UsersService', () => {
     });
 
     it('should throw NotFoundException and not touch memberships when user is not found', async () => {
-      mockUserModel.findByIdAndDelete.mockReturnValue(createChainable(null));
+      mockUserModel.findById.mockReturnValue(createChainable(null));
 
       await expect(service.remove('nonexistent')).rejects.toThrow(
         NotFoundException,
@@ -453,9 +464,11 @@ describe('UsersService', () => {
       expect(
         mockHouseholdsService.removeMembershipsByUser,
       ).not.toHaveBeenCalled();
+      expect(mockUserModel.findByIdAndDelete).not.toHaveBeenCalled();
     });
 
     it('should succeed even when the user has no memberships', async () => {
+      mockUserModel.findById.mockReturnValue(createChainable(mockUser));
       mockUserModel.findByIdAndDelete.mockReturnValue(
         createChainable(mockUser),
       );

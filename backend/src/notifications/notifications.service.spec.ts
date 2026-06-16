@@ -195,9 +195,10 @@ describe('NotificationsService', () => {
 
       const result = await service.removeAllByHouseholdId(householdId);
 
-      expect(mockModel.deleteMany).toHaveBeenCalledWith({
-        householdId: expect.any(Types.ObjectId),
-      });
+      const filter = mockModel.deleteMany.mock.calls[0][0];
+      expect(filter.householdId.equals(new Types.ObjectId(householdId))).toBe(
+        true,
+      );
       expect(result).toBe(4);
     });
 
