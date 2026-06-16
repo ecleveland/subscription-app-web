@@ -6,6 +6,17 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 
+// The refresh token now lives in an httpOnly cookie. Extract the
+// `refresh_token=...` pair from a response's Set-Cookie header so it can be
+// replayed as a Cookie request header on /refresh and /logout.
+function refreshCookie(res: request.Response): string {
+  const setCookie = res.headers['set-cookie'] as unknown as
+    | string[]
+    | undefined;
+  const cookie = (setCookie ?? []).find((c) => c.startsWith('refresh_token='));
+  return cookie ? cookie.split(';')[0] : '';
+}
+
 describe('Auth rate limiting (e2e)', () => {
   let app: INestApplication<App>;
 
@@ -56,7 +67,7 @@ describe('Auth (e2e)', () => {
   });
 
   describe('POST /api/auth/register', () => {
-    it('should register a new user and return access_token and refresh_token', () => {
+    it('should register a user, return an access token, and set an httpOnly refresh cookie', () => {
       return request(app.getHttpServer())
         .post('/api/auth/register')
         .send({
@@ -67,8 +78,14 @@ describe('Auth (e2e)', () => {
         .expect((res) => {
           expect(res.body.access_token).toBeDefined();
           expect(typeof res.body.access_token).toBe('string');
-          expect(res.body.refresh_token).toBeDefined();
-          expect(typeof res.body.refresh_token).toBe('string');
+          // Refresh token must NOT be exposed in the body anymore.
+          expect(res.body.refresh_token).toBeUndefined();
+          const setCookie = res.headers['set-cookie'] as unknown as string[];
+          expect(
+            setCookie.some(
+              (c) => c.startsWith('refresh_token=') && /HttpOnly/i.test(c),
+            ),
+          ).toBe(true);
         });
     });
 
@@ -113,7 +130,7 @@ describe('Auth (e2e)', () => {
   });
 
   describe('POST /api/auth/login', () => {
-    it('should return access_token and refresh_token for valid credentials', () => {
+    it('should return an access token and set the refresh cookie for valid credentials', () => {
       return request(app.getHttpServer())
         .post('/api/auth/login')
         .send({
@@ -123,7 +140,8 @@ describe('Auth (e2e)', () => {
         .expect(200)
         .expect((res) => {
           expect(res.body.access_token).toBeDefined();
-          expect(res.body.refresh_token).toBeDefined();
+          expect(res.body.refresh_token).toBeUndefined();
+          expect(refreshCookie(res)).toMatch(/^refresh_token=.+/);
         });
     });
 
@@ -149,72 +167,81 @@ describe('Auth (e2e)', () => {
   });
 
   describe('POST /api/auth/refresh', () => {
-    it('should return new token pair for valid refresh token', async () => {
+    it('should rotate the refresh cookie and return a new access token', async () => {
       const loginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
         .send({ username: 'testuser', password: 'Password123' });
-
-      const refreshToken = loginRes.body.refresh_token;
+      const cookie = refreshCookie(loginRes);
 
       await request(app.getHttpServer())
         .post('/api/auth/refresh')
-        .send({ refresh_token: refreshToken })
+        .set('Cookie', cookie)
         .expect(200)
         .expect((res) => {
           expect(res.body.access_token).toBeDefined();
-          expect(res.body.refresh_token).toBeDefined();
-          // New refresh token should be different from old one (rotation)
-          expect(res.body.refresh_token).not.toBe(refreshToken);
+          expect(res.body.refresh_token).toBeUndefined();
+          // A rotated refresh cookie is set, different from the old one.
+          const rotated = refreshCookie(res);
+          expect(rotated).toMatch(/^refresh_token=.+/);
+          expect(rotated).not.toBe(cookie);
         });
     });
 
-    it('should reject old refresh token after rotation', async () => {
+    it('should reject the old refresh cookie after rotation', async () => {
       const loginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
         .send({ username: 'testuser', password: 'Password123' });
+      const oldCookie = refreshCookie(loginRes);
 
-      const oldRefreshToken = loginRes.body.refresh_token;
-
-      // Use the refresh token once
       await request(app.getHttpServer())
         .post('/api/auth/refresh')
-        .send({ refresh_token: oldRefreshToken })
+        .set('Cookie', oldCookie)
         .expect(200);
 
-      // Try to use the same refresh token again
       await request(app.getHttpServer())
         .post('/api/auth/refresh')
-        .send({ refresh_token: oldRefreshToken })
+        .set('Cookie', oldCookie)
         .expect(401);
     });
 
-    it('should return 401 for invalid refresh token', () => {
+    it('should return 401 for an invalid refresh cookie', () => {
       return request(app.getHttpServer())
         .post('/api/auth/refresh')
-        .send({ refresh_token: 'invalid-token' })
+        .set('Cookie', 'refresh_token=invalid-token')
         .expect(401);
+    });
+
+    it('should return 401 when no refresh cookie is present', () => {
+      return request(app.getHttpServer()).post('/api/auth/refresh').expect(401);
     });
   });
 
   describe('POST /api/auth/logout', () => {
-    it('should revoke refresh token so it cannot be used afterwards', async () => {
+    it('should revoke the refresh cookie so it cannot be used afterwards', async () => {
       const loginRes = await request(app.getHttpServer())
         .post('/api/auth/login')
         .send({ username: 'testuser', password: 'Password123' });
+      const { access_token } = loginRes.body;
+      const cookie = refreshCookie(loginRes);
 
-      const { access_token, refresh_token } = loginRes.body;
-
-      // Logout
-      await request(app.getHttpServer())
+      const logoutRes = await request(app.getHttpServer())
         .post('/api/auth/logout')
         .set('Authorization', `Bearer ${access_token}`)
-        .send({ refresh_token })
+        .set('Cookie', cookie)
         .expect(204);
 
-      // Try to use the revoked refresh token
+      // Logout clears the refresh cookie with matching path so the browser
+      // actually drops it (mismatched attributes would leave it behind).
+      const cleared = (
+        logoutRes.headers['set-cookie'] as unknown as string[]
+      ).find((c) => c.startsWith('refresh_token='));
+      expect(cleared).toBeDefined();
+      expect(cleared).toContain('Path=/api/auth');
+
+      // The revoked refresh cookie no longer works.
       await request(app.getHttpServer())
         .post('/api/auth/refresh')
-        .send({ refresh_token })
+        .set('Cookie', cookie)
         .expect(401);
 
       // The access token used for logout is also rejected (tokenVersion bumped).
@@ -225,33 +252,27 @@ describe('Auth (e2e)', () => {
     });
 
     it('should return 401 without a JWT', () => {
-      return request(app.getHttpServer())
-        .post('/api/auth/logout')
-        .send({ refresh_token: 'some-token' })
-        .expect(401);
+      return request(app.getHttpServer()).post('/api/auth/logout').expect(401);
     });
   });
 
   describe('Password change revokes refresh tokens', () => {
-    it('should invalidate refresh tokens after password change', async () => {
-      // Register a fresh user
+    it('should invalidate the refresh cookie after password change', async () => {
       const regRes = await request(app.getHttpServer())
         .post('/api/auth/register')
         .send({ username: 'pwchangeuser', password: 'Password123' });
+      const { access_token } = regRes.body;
+      const cookie = refreshCookie(regRes);
 
-      const { access_token, refresh_token } = regRes.body;
-
-      // Change password
       await request(app.getHttpServer())
         .post('/api/users/me/change-password')
         .set('Authorization', `Bearer ${access_token}`)
         .send({ currentPassword: 'Password123', newPassword: 'Newpass123' })
         .expect(204);
 
-      // Old refresh token should be rejected
       await request(app.getHttpServer())
         .post('/api/auth/refresh')
-        .send({ refresh_token })
+        .set('Cookie', cookie)
         .expect(401);
     });
 
@@ -403,7 +424,7 @@ describe('Auth (e2e)', () => {
         .expect(200)
         .expect((res) => {
           expect(res.body.access_token).toBeDefined();
-          expect(res.body.refresh_token).toBeDefined();
+          expect(refreshCookie(res)).toMatch(/^refresh_token=.+/);
         });
 
       // Login with old password should fail

@@ -1,4 +1,4 @@
-import { apiFetch } from '../api';
+import { apiFetch, setAccessToken, clearStoredAuth } from '../api';
 
 describe('apiFetch', () => {
   const mockFetch = vi.fn();
@@ -65,21 +65,16 @@ describe('apiFetch', () => {
     );
   });
 
-  it('should attempt refresh on 401 when refresh_token exists, then retry original request', async () => {
+  it('should refresh on 401 via the cookie, then retry the original request', async () => {
     window.localStorage.setItem('token', 'expired-jwt');
-    window.localStorage.setItem('refresh_token', 'valid-refresh');
 
     mockFetch
       // Original request → 401
       .mockResolvedValueOnce({ ok: false, status: 401 })
-      // Refresh call → success
+      // Refresh call (cookie-based) → success, returns only an access token
       .mockResolvedValueOnce({
         ok: true,
-        json: () =>
-          Promise.resolve({
-            access_token: 'new-jwt',
-            refresh_token: 'new-refresh',
-          }),
+        json: () => Promise.resolve({ access_token: 'new-jwt' }),
       })
       // Retry original request → success
       .mockResolvedValueOnce({
@@ -92,18 +87,20 @@ describe('apiFetch', () => {
 
     expect(result).toEqual({ data: 'ok' });
     expect(window.localStorage.getItem('token')).toBe('new-jwt');
-    expect(window.localStorage.getItem('refresh_token')).toBe('new-refresh');
-    // 3 calls: original, refresh, retry
+    // The refresh call sends the httpOnly cookie via credentials: 'include'
+    // and carries NO body (cookie-only — not the old body-based scheme).
+    expect(mockFetch.mock.calls[1][1]).toEqual(
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+    expect(mockFetch.mock.calls[1][1].body).toBeUndefined();
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
-  it('should clear state and throw on 401 when no refresh_token exists', async () => {
+  it('should clear state and throw when the refresh attempt fails', async () => {
     window.localStorage.setItem('token', 'expired-jwt');
     window.localStorage.setItem('user', '{}');
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 401,
-    });
+    // Original request 401, and the cookie-based refresh also fails.
+    mockFetch.mockResolvedValue({ ok: false, status: 401 });
 
     await expect(apiFetch('/subscriptions')).rejects.toThrow('Unauthorized');
 
@@ -111,26 +108,8 @@ describe('apiFetch', () => {
     expect(window.localStorage.getItem('user')).toBeNull();
   });
 
-  it('should clear state when refresh fails', async () => {
-    window.localStorage.setItem('token', 'expired-jwt');
-    window.localStorage.setItem('refresh_token', 'bad-refresh');
-    window.localStorage.setItem('user', '{}');
-
-    mockFetch
-      // Original request → 401
-      .mockResolvedValueOnce({ ok: false, status: 401 })
-      // Refresh call → failure
-      .mockResolvedValueOnce({ ok: false, status: 401 });
-
-    await expect(apiFetch('/subscriptions')).rejects.toThrow('Unauthorized');
-
-    expect(window.localStorage.getItem('token')).toBeNull();
-    expect(window.localStorage.getItem('refresh_token')).toBeNull();
-  });
-
   it('should only call refresh once for concurrent 401s', async () => {
     window.localStorage.setItem('token', 'expired-jwt');
-    window.localStorage.setItem('refresh_token', 'valid-refresh');
 
     let refreshCallCount = 0;
 
@@ -139,11 +118,7 @@ describe('apiFetch', () => {
         refreshCallCount++;
         return Promise.resolve({
           ok: true,
-          json: () =>
-            Promise.resolve({
-              access_token: 'new-jwt',
-              refresh_token: 'new-refresh',
-            }),
+          json: () => Promise.resolve({ access_token: 'new-jwt' }),
         });
       }
       // First calls return 401, retry calls return success
@@ -216,6 +191,27 @@ describe('apiFetch', () => {
     const result = await apiFetch('/subscriptions');
 
     expect(result).toEqual(data);
+  });
+
+  describe('setAccessToken / clearStoredAuth', () => {
+    it('setAccessToken stores the token in localStorage and the readable cookie', () => {
+      setAccessToken('my-access-jwt');
+
+      expect(window.localStorage.getItem('token')).toBe('my-access-jwt');
+      expect(document.cookie).toContain('access_token=my-access-jwt');
+    });
+
+    it('clearStoredAuth removes the token, user, and access cookie', () => {
+      window.localStorage.setItem('user', '{}');
+      setAccessToken('my-access-jwt');
+      expect(document.cookie).toContain('access_token=');
+
+      clearStoredAuth();
+
+      expect(window.localStorage.getItem('token')).toBeNull();
+      expect(window.localStorage.getItem('user')).toBeNull();
+      expect(document.cookie).not.toContain('access_token=my-access-jwt');
+    });
   });
 
   it('should merge custom options with defaults', async () => {

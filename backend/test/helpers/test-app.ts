@@ -4,6 +4,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { AppModule } from '../../src/app.module';
 
 // Track mongod instances per app for proper cleanup
@@ -57,6 +58,8 @@ export async function createTestApp(
       },
     }),
   );
+
+  app.use(cookieParser());
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Subscription App API')

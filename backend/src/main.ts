@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { UsersService } from './users/users.service';
 import { SubscriptionsService } from './subscriptions/subscriptions.service';
@@ -29,6 +30,9 @@ async function bootstrap() {
 
   app.use(
     helmet({
+      // CSP is enforced at the frontend (Next.js), which serves the rendered
+      // HTML/JS a browser executes. This JSON API only emits data + the dev
+      // Swagger UI, so a CSP header here protects nothing — left off by design.
       contentSecurityPolicy: false,
       strictTransportSecurity: {
         maxAge: 15552000,
@@ -36,6 +40,8 @@ async function bootstrap() {
       },
     }),
   );
+
+  app.use(cookieParser());
 
   app.enableCors({
     origin: configService.get<string>('cors.origin'),
