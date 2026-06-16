@@ -30,8 +30,8 @@ export class HouseholdsService {
 
   /**
    * Create a household owned by `ownerId` and add that user as the active
-   * `owner` member. This is the canonical entry point used by registration and
-   * the data migration.
+   * `owner` member. Intended as the canonical entry point for registration and
+   * the data migration (wired up in follow-up tickets).
    */
   async createHousehold(
     ownerId: string,
@@ -44,12 +44,27 @@ export class HouseholdsService {
     });
     const saved = await household.save();
 
-    await this.addMember({
-      householdId: saved._id.toString(),
-      userId: ownerId,
-      role: HouseholdRole.OWNER,
-      status: MembershipStatus.ACTIVE,
-    });
+    // The household and its owner membership are two separate writes (no
+    // transaction, matching the rest of the service layer). If the membership
+    // fails the household would be left ownerless and unreachable, so delete it
+    // best-effort and surface the original error.
+    try {
+      await this.addMember({
+        householdId: saved._id.toString(),
+        userId: ownerId,
+        role: HouseholdRole.OWNER,
+        status: MembershipStatus.ACTIVE,
+      });
+    } catch (error) {
+      this.logger.error(
+        { householdId: saved._id.toString(), ownerId },
+        'Owner membership failed; deleting orphaned household',
+      );
+      await this.householdModel
+        .deleteOne({ _id: saved._id } as Record<string, unknown>)
+        .catch(() => undefined);
+      throw error;
+    }
 
     this.logger.log(
       { householdId: saved._id.toString(), ownerId },
@@ -91,7 +106,8 @@ export class HouseholdsService {
 
   /**
    * Find a user's active household membership. Returns null if the user has no
-   * active membership. Used to resolve the caller's active household.
+   * active membership. Will be used by the HouseholdGuard to resolve the
+   * caller's active household.
    */
   async findMembershipByUser(
     userId: string,

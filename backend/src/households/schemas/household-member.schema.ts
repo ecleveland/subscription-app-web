@@ -50,5 +50,18 @@ export class HouseholdMember {
 export const HouseholdMemberSchema =
   SchemaFactory.createForClass(HouseholdMember);
 
-// A user can belong to a given household at most once.
+// A user has at most one row per household. Invitation acceptance must mutate
+// this row in place (INVITED -> ACTIVE), not insert a second one, or it trips
+// this index (the acceptance flow lands in VEG-390).
 HouseholdMemberSchema.index({ householdId: 1, userId: 1 }, { unique: true });
+
+// Enforce the "one active household per user" invariant that
+// findMembershipByUser relies on to resolve the caller's active household.
+// Partial so that invited/inactive rows don't count toward the constraint.
+HouseholdMemberSchema.index(
+  { userId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: MembershipStatus.ACTIVE },
+  },
+);

@@ -46,6 +46,9 @@ describe('HouseholdsService', () => {
     mockHouseholdModel = jest
       .fn()
       .mockImplementation((dto) => ({ ...dto, save: householdSave }));
+    mockHouseholdModel.deleteOne = jest
+      .fn()
+      .mockResolvedValue({ deletedCount: 1 });
 
     mockMemberModel = jest
       .fn()
@@ -69,6 +72,7 @@ describe('HouseholdsService', () => {
     module.useLogger(false);
     service = module.get<HouseholdsService>(HouseholdsService);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -106,6 +110,19 @@ describe('HouseholdsService', () => {
       });
 
       expect(mockHouseholdModel.mock.calls[0][0].currency).toBe('EUR');
+    });
+
+    it('deletes the orphaned household and rethrows when owner membership fails', async () => {
+      memberSave.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        service.createHousehold(OWNER_ID, { name: 'Test Household' }),
+      ).rejects.toThrow('db down');
+
+      expect(mockHouseholdModel.deleteOne).toHaveBeenCalledTimes(1);
+      expect(mockHouseholdModel.deleteOne.mock.calls[0][0]._id.toString()).toBe(
+        HOUSEHOLD_ID,
+      );
     });
   });
 
@@ -160,6 +177,21 @@ describe('HouseholdsService', () => {
           role: HouseholdRole.ADULT,
         }),
       ).rejects.toThrow('db down');
+    });
+
+    it('rethrows DB errors carrying a non-duplicate code (not ConflictException)', async () => {
+      memberSave.mockRejectedValueOnce(
+        Object.assign(new Error('write concern failed'), { code: 64 }),
+      );
+
+      const promise = service.addMember({
+        householdId: HOUSEHOLD_ID,
+        userId: OTHER_USER_ID,
+        role: HouseholdRole.ADULT,
+      });
+
+      await expect(promise).rejects.toThrow('write concern failed');
+      await expect(promise).rejects.not.toBeInstanceOf(ConflictException);
     });
   });
 

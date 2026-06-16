@@ -10,8 +10,9 @@ import { Invitation, InvitationSchema } from './schemas/invitation.schema';
 
 // HTTP endpoints (household management + invitation flow) and the
 // HouseholdGuard land in follow-up tickets (VEG-387, VEG-390). This module
-// currently provides the data model and service used by registration, the
-// data migration, and the guard.
+// currently provides only the data model and HouseholdsService; the guard,
+// data migration, and registration wiring that consume it arrive in those
+// tickets.
 @Module({
   imports: [
     MongooseModule.forFeature([
