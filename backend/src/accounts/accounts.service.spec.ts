@@ -114,6 +114,13 @@ describe('AccountsService', () => {
       expect(result).toBe(doc);
     });
 
+    it('throws NotFound for a malformed id without querying', async () => {
+      await expect(service.findOne(HOUSEHOLD_ID, 'not-an-id')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockAccountModel.findById).not.toHaveBeenCalled();
+    });
+
     it('throws NotFound when the account does not exist', async () => {
       mockAccountModel.findById.mockReturnValue(createChainable(null));
 
@@ -150,6 +157,32 @@ describe('AccountsService', () => {
 
       await service.update(HOUSEHOLD_ID, ACCOUNT_ID, { name: 'Renamed' });
       expect(save).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not overwrite fields whose patch value is undefined', async () => {
+      const doc: any = {
+        _id: new Types.ObjectId(ACCOUNT_ID),
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        name: 'Old',
+        isArchived: false,
+        balanceCents: 5000,
+        save: jest.fn().mockImplementation(function (this: any) {
+          return Promise.resolve(this);
+        }),
+      };
+      mockAccountModel.findById.mockReturnValue(createChainable(doc));
+
+      // Mirrors a PartialType DTO instance with unset optional fields present
+      // as undefined own-properties.
+      await service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
+        name: 'New',
+        isArchived: undefined,
+        balanceCents: undefined,
+      } as any);
+
+      expect(doc.name).toBe('New');
+      expect(doc.isArchived).toBe(false);
+      expect(doc.balanceCents).toBe(5000);
     });
 
     it('throws NotFound (via findOne) for an account in another household', async () => {

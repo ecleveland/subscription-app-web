@@ -61,6 +61,12 @@ export class AccountsService {
    * scoping so cross-household reads surface as 404, never a leak.
    */
   async findOne(householdId: string, id: string): Promise<AccountDocument> {
+    // A malformed id would make findById throw a Mongoose CastError (→ 500);
+    // treat it as a clean 404 so a bad path param can't leak a different status
+    // than a real not-found, keeping the "never a leak" promise total.
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException(`Account with ID "${id}" not found`);
+    }
     const account = await this.accountModel.findById(id).exec();
     if (
       !account ||
@@ -81,7 +87,15 @@ export class AccountsService {
     dto: UpdateAccountDto,
   ): Promise<AccountDocument> {
     const existing = await this.findOne(householdId, id);
-    Object.assign(existing, dto);
+    // Assign only the fields actually provided. A PartialType DTO instance can
+    // carry unset optional fields as `undefined` own-properties (TS class
+    // fields); assigning those would clobber required schema fields like
+    // `isArchived`/`balanceCents` and fail validation on save.
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        (existing as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
     const saved = await existing.save();
     this.logger.log({ householdId, accountId: id }, 'Account updated');
     return saved;
