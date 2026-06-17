@@ -1,7 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-let accountsState: { accounts: unknown[]; refresh: () => Promise<void> };
+let accountsState: {
+  accounts: unknown[];
+  error: string | null;
+  refresh: () => Promise<void>;
+};
 vi.mock('@/lib/accounts-context', () => ({ useAccounts: () => accountsState }));
 vi.mock('@/lib/transactions', () => ({
   listTransactions: vi.fn(),
@@ -18,7 +22,7 @@ vi.mock('@/components/TransactionForm', () => ({
 
 import { listTransactions, deleteTransaction } from '@/lib/transactions';
 import { listCategories } from '@/lib/categories';
-import { showSuccessToast } from '@/lib/toast';
+import { showSuccessToast, showErrorToast } from '@/lib/toast';
 import TransactionsPage from '@/app/transactions/page';
 import type { Account, BudgetCategory, Transaction } from '@/lib/types';
 
@@ -55,7 +59,11 @@ describe('TransactionsPage', () => {
     HTMLDialogElement.prototype.close = vi.fn();
   });
   beforeEach(() => {
-    accountsState = { accounts, refresh: vi.fn().mockResolvedValue(undefined) };
+    accountsState = {
+      accounts,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    };
     vi.mocked(listCategories).mockResolvedValue(categories);
   });
   afterEach(() => vi.clearAllMocks());
@@ -72,6 +80,37 @@ describe('TransactionsPage', () => {
     mockList([]);
     render(<TransactionsPage />);
     expect(await screen.findByText('No transactions found.')).toBeInTheDocument();
+  });
+
+  it('surfaces an accounts-load error instead of "create an account"', async () => {
+    accountsState = { accounts: [], error: 'boom', refresh: vi.fn() };
+    mockList([]);
+    render(<TransactionsPage />);
+
+    expect(await screen.findByText(/Couldn.t load accounts: boom/)).toBeInTheDocument();
+    expect(
+      screen.queryByText('Create an account before recording transactions.'),
+    ).toBeNull();
+  });
+
+  it('shows an error (not empty state) when the list fetch fails', async () => {
+    vi.mocked(listTransactions).mockRejectedValue(new Error('list fail'));
+    render(<TransactionsPage />);
+
+    expect(
+      await screen.findByText(/Couldn.t load transactions: list fail/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('No transactions found.')).toBeNull();
+  });
+
+  it('toasts when categories fail to load', async () => {
+    mockList([]);
+    vi.mocked(listCategories).mockRejectedValue(new Error('no cats'));
+    render(<TransactionsPage />);
+
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith('no cats'),
+    );
   });
 
   it('re-fetches when the type filter changes', async () => {

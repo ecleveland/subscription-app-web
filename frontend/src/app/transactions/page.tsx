@@ -22,11 +22,16 @@ import type {
 const PAGE_SIZE = 20;
 
 export default function TransactionsPage() {
-  const { accounts, refresh: refreshAccounts } = useAccounts();
+  const {
+    accounts,
+    error: accountsError,
+    refresh: refreshAccounts,
+  } = useAccounts();
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
@@ -69,12 +74,15 @@ export default function TransactionsPage() {
         if (cancelled) return;
         setTransactions(res.data);
         setMeta(res.meta);
+        setListError(null);
       })
-      .catch((err) =>
-        showErrorToast(
-          err instanceof Error ? err.message : 'Failed to load transactions',
-        ),
-      )
+      .catch((err) => {
+        if (cancelled) return;
+        const message =
+          err instanceof Error ? err.message : 'Failed to load transactions';
+        setListError(message);
+        showErrorToast(message);
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -87,7 +95,13 @@ export default function TransactionsPage() {
     setShowCreate(false);
     setEditing(null);
     setReloadKey((k) => k + 1);
-    await refreshAccounts();
+    // The write succeeded; if the follow-up balance refresh fails, say so
+    // rather than silently showing stale balances.
+    try {
+      await refreshAccounts();
+    } catch {
+      showErrorToast('Saved, but balances may be out of date — refresh to update.');
+    }
   }
 
   async function handleDelete() {
@@ -126,7 +140,13 @@ export default function TransactionsPage() {
         )}
       </div>
 
-      {!canAdd && (
+      {accountsError && (
+        <p className="text-red-500 text-sm mb-4">
+          Couldn’t load accounts: {accountsError}. Transactions may be incomplete.
+        </p>
+      )}
+
+      {!canAdd && !accountsError && (
         <p className="text-sm text-gray-500 mb-4">
           Create an account before recording transactions.
         </p>
@@ -199,6 +219,10 @@ export default function TransactionsPage() {
 
       {loading ? (
         <p className="text-gray-500">Loading transactions…</p>
+      ) : listError ? (
+        <p className="text-red-500 text-center py-8">
+          Couldn’t load transactions: {listError}
+        </p>
       ) : transactions.length === 0 ? (
         <p className="text-gray-500 text-center py-8">No transactions found.</p>
       ) : (

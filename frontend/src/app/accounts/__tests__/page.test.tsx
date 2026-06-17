@@ -61,6 +61,17 @@ describe('AccountsPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('surfaces a load error from the context', () => {
+    accountsState = {
+      accounts: [],
+      loading: false,
+      error: 'Failed to load accounts',
+      refresh: vi.fn(),
+    };
+    render(<AccountsPage />);
+    expect(screen.getByText('Failed to load accounts')).toBeInTheDocument();
+  });
+
   it('archives an account through the confirm dialog', async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     accountsState = { accounts: [account], loading: false, error: null, refresh };

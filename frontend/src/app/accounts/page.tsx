@@ -30,7 +30,11 @@ export default function AccountsPage() {
   async function handleSaved() {
     setShowCreate(false);
     setEditing(null);
-    await refresh();
+    try {
+      await refresh();
+    } catch {
+      showErrorToast('Saved, but the account list may be out of date.');
+    }
   }
 
   if (loading) {

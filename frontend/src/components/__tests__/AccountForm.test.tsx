@@ -88,6 +88,19 @@ describe('AccountForm', () => {
     );
   });
 
+  it('rejects an invalid opening balance without calling the API', async () => {
+    const user = userEvent.setup();
+    render(<AccountForm onSaved={vi.fn()} onCancel={vi.fn()} />);
+    await user.type(screen.getByLabelText('Name'), 'Bad');
+    await user.type(screen.getByLabelText('Opening balance ($)'), 'abc');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(
+      await screen.findByText('Opening balance must be a valid amount'),
+    ).toBeInTheDocument();
+    expect(createAccount).not.toHaveBeenCalled();
+  });
+
   it('shows the toast when the API rejects', async () => {
     const user = userEvent.setup();
     vi.mocked(createAccount).mockRejectedValue(new Error('Server error'));

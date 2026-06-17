@@ -84,12 +84,12 @@ export default function TransactionForm({
       type,
       amountCents,
       date,
-      payee: payee.trim() || undefined,
-      notes: notes.trim() || undefined,
+      // On edit, send the empty string so a blanked field is cleared; on create
+      // omit it when blank.
+      payee: isEditing ? payee.trim() : payee.trim() || undefined,
+      notes: isEditing ? notes.trim() : notes.trim() || undefined,
       cleared,
-      ...(isTransfer
-        ? { transferAccountId }
-        : { categoryId }),
+      ...(isTransfer ? { transferAccountId } : { categoryId }),
     };
 
     setLoading(true);

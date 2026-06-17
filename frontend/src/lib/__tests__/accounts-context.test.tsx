@@ -21,11 +21,12 @@ const account: Account = {
 };
 
 function Consumer() {
-  const { accounts, loading, refresh } = useAccounts();
+  const { accounts, loading, error, refresh } = useAccounts();
   return (
     <div>
       <span>loading:{String(loading)}</span>
       <span>count:{accounts.length}</span>
+      <span>error:{error ?? 'none'}</span>
       <button onClick={() => refresh()}>refresh</button>
     </div>
   );
@@ -74,5 +75,26 @@ describe('AccountsContext', () => {
 
     await userEvent.click(screen.getByText('refresh'));
     await waitFor(() => expect(listAccounts).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps last-known accounts and records the error on a failed refresh', async () => {
+    authState = { isAuthenticated: true };
+    vi.mocked(listAccounts).mockResolvedValueOnce([account]);
+
+    render(
+      <AccountsProvider>
+        <Consumer />
+      </AccountsProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('count:1')).toBeInTheDocument());
+
+    vi.mocked(listAccounts).mockRejectedValueOnce(new Error('network down'));
+    await userEvent.click(screen.getByText('refresh'));
+
+    await waitFor(() =>
+      expect(screen.getByText('error:network down')).toBeInTheDocument(),
+    );
+    // Last-known accounts retained.
+    expect(screen.getByText('count:1')).toBeInTheDocument();
   });
 });

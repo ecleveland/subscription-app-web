@@ -10,10 +10,10 @@ vi.mock('@/lib/toast', () => ({
   showSuccessToast: vi.fn(),
 }));
 
-import { createTransaction } from '@/lib/transactions';
+import { createTransaction, updateTransaction } from '@/lib/transactions';
 import { showErrorToast } from '@/lib/toast';
 import TransactionForm from '@/components/TransactionForm';
-import type { Account, BudgetCategory } from '@/lib/types';
+import type { Account, BudgetCategory, Transaction } from '@/lib/types';
 
 const accounts: Account[] = [
   { _id: 'a1', householdId: 'h', name: 'Checking', type: 'checking', balanceCents: 0, isArchived: false, createdAt: '', updatedAt: '' },
@@ -101,6 +101,44 @@ describe('TransactionForm', () => {
     await user.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(await screen.findByText('Please choose a category')).toBeInTheDocument();
+    expect(createTransaction).not.toHaveBeenCalled();
+  });
+
+  it('prefills from a transaction and updates (amount from cents)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateTransaction).mockResolvedValue({} as never);
+    const txn: Transaction = {
+      _id: 't1',
+      householdId: 'h',
+      accountId: 'a1',
+      categoryId: 'c1',
+      type: 'expense',
+      amountCents: 4200,
+      date: '2026-06-01T00:00:00.000Z',
+      payee: 'Old Payee',
+      cleared: false,
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    renderForm({ transaction: txn });
+    expect(screen.getByText('Edit transaction')).toBeInTheDocument();
+    expect(screen.getByLabelText('Amount ($)')).toHaveValue('42.00');
+    expect(screen.getByLabelText('Date')).toHaveValue('2026-06-01');
+
+    // Clear the payee and change the amount.
+    await user.clear(screen.getByLabelText('Payee'));
+    await user.clear(screen.getByLabelText('Amount ($)'));
+    await user.type(screen.getByLabelText('Amount ($)'), '50.00');
+    await user.click(screen.getByRole('button', { name: 'Update' }));
+
+    await waitFor(() =>
+      expect(updateTransaction).toHaveBeenCalledWith(
+        't1',
+        // empty string clears the payee; amount converted to cents
+        expect.objectContaining({ amountCents: 5000, payee: '' }),
+      ),
+    );
     expect(createTransaction).not.toHaveBeenCalled();
   });
 
