@@ -377,7 +377,7 @@ export class HouseholdsService {
       .exec();
     if (existingActive) {
       await this.markAccepted(invitation);
-      return existingActive;
+      return this.populateMember(existingActive);
     }
 
     // Switch the user's active household in place (or create one if somehow
@@ -420,7 +420,20 @@ export class HouseholdsService {
       { householdId: householdId.toString(), userId },
       'Household invitation accepted',
     );
-    return membership;
+    return this.populateMember(membership);
+  }
+
+  // Return the membership with its user populated (username/displayName/email),
+  // matching the shape of the members list so the accept response is a faithful
+  // HouseholdMember. Falls back to the bare doc if the row can't be re-read.
+  private async populateMember(
+    member: HouseholdMemberDocument,
+  ): Promise<HouseholdMemberDocument> {
+    const populated = await this.memberModel
+      .findById(member._id)
+      .populate('userId', 'username displayName email')
+      .exec();
+    return populated ?? member;
   }
 
   /**

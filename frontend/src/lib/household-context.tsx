@@ -48,9 +48,10 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
       setHousehold(data.household);
       setMembers(data.members);
     } catch (err) {
+      // Surface the error but keep any last-known household so a transient
+      // failure on a background refresh doesn't blank the UI to "no household".
+      // The unauthenticated branch above is the only path that clears state.
       setError(err instanceof Error ? err.message : 'Failed to load household');
-      setHousehold(null);
-      setMembers([]);
     } finally {
       setLoading(false);
     }

@@ -18,6 +18,9 @@ export default function InviteMemberForm() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
+    // Drop any link from a prior invite so a failed re-invite can't leave a
+    // stale link on screen that looks like it belongs to the new invitee.
+    setInviteUrl('');
 
     if (!email.trim()) {
       setError('Email is required.');
@@ -120,7 +123,8 @@ export default function InviteMemberForm() {
             </button>
           </div>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-            We emailed this link to the invitee. You can also share it directly.
+            We&apos;ve emailed this link to the invitee — you can also share it
+            directly.
           </p>
         </div>
       )}

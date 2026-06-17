@@ -72,6 +72,49 @@ describe('InviteMemberForm', () => {
     });
   });
 
+  it('copies the invite link to the clipboard', async () => {
+    vi.mocked(inviteMember).mockResolvedValueOnce(inviteResult as never);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    // navigator.clipboard is a getter-only prop in jsdom; define an own prop to
+    // shadow it (and win over userEvent's stub).
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(<InviteMemberForm />);
+    await user.type(screen.getByLabelText('Email'), 'guest@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send Invitation' }));
+
+    await screen.findByLabelText('Invite link');
+    await user.click(screen.getByRole('button', { name: 'Copy' }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(inviteResult.inviteUrl);
+    });
+    expect(showSuccessToast).toHaveBeenCalledWith('Invite link copied.');
+  });
+
+  it('clears a prior invite link when a re-invite fails', async () => {
+    vi.mocked(inviteMember)
+      .mockResolvedValueOnce(inviteResult as never)
+      .mockRejectedValueOnce(new Error('nope'));
+    const user = userEvent.setup();
+
+    render(<InviteMemberForm />);
+    await user.type(screen.getByLabelText('Email'), 'guest@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send Invitation' }));
+    expect(await screen.findByLabelText('Invite link')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Email'), 'second@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send Invitation' }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Invite link')).not.toBeInTheDocument();
+    });
+  });
+
   it('validates that an email is provided', async () => {
     const user = userEvent.setup();
 

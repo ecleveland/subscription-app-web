@@ -29,6 +29,7 @@ export interface Subscription {
 
 export type HouseholdRole = 'owner' | 'adult' | 'teen' | 'viewer';
 export type MembershipStatus = 'active' | 'invited';
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
 
 /** Roles that can be granted via invitation (the owner role cannot). */
 export const INVITE_ROLES = ['adult', 'teen', 'viewer'] as const;
@@ -73,7 +74,7 @@ export interface InviteResult {
   householdId: string;
   email: string;
   role: HouseholdRole;
-  status: string;
+  status: InvitationStatus;
   expiresAt: string;
   inviteUrl: string;
 }

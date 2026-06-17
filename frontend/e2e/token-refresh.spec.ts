@@ -23,9 +23,13 @@ test.describe('Access-token refresh', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
 
-    // A fresh access token replaced the corrupted one.
+    // A fresh access token replaced the corrupted one. Poll, since the refresh
+    // happens asynchronously after the page's authenticated requests 401 —
+    // reading localStorage once can race the refresh under load.
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem('token')))
+      .not.toBe('invalid.jwt.token');
     const token = await page.evaluate(() => localStorage.getItem('token'));
-    expect(token).not.toBe('invalid.jwt.token');
     expect(token).toBeTruthy();
   });
 });
