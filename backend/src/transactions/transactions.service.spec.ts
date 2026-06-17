@@ -21,6 +21,8 @@ function createChainable(resolvedValue: any = null) {
   chain.sort = jest.fn().mockReturnValue(chain);
   chain.skip = jest.fn().mockReturnValue(chain);
   chain.limit = jest.fn().mockReturnValue(chain);
+  chain.select = jest.fn().mockReturnValue(chain);
+  chain.lean = jest.fn().mockReturnValue(chain);
   chain.exec = jest.fn().mockResolvedValue(resolvedValue);
   return chain;
 }
@@ -70,7 +72,11 @@ describe('TransactionsService', () => {
     mockModel.deleteOne = jest
       .fn()
       .mockReturnValue(createChainable({ deletedCount: 1 }));
-    mockModel.insertMany = jest.fn().mockResolvedValue([]);
+    // Echo the inserted docs back so importTransactions derives its imported
+    // count and balance delta from what "persisted".
+    mockModel.insertMany = jest
+      .fn()
+      .mockImplementation((docs) => Promise.resolve(docs));
 
     accountsService = {
       findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId(ACC_A) }),
@@ -520,6 +526,13 @@ describe('TransactionsService', () => {
     });
 
     it('maps a category by name and falls back to the default otherwise', async () => {
+      const groceriesId = new Types.ObjectId();
+      const fallbackId = new Types.ObjectId();
+      categoriesService.resolveImportCategories.mockResolvedValueOnce({
+        byName: new Map([['groceries', groceriesId]]),
+        fallbackId,
+      });
+
       await service.importTransactions(
         HOUSEHOLD_ID,
         MEMBER_ID,
@@ -533,34 +546,45 @@ describe('TransactionsService', () => {
           { Date: '2026-06-02', Amount: '-20', Payee: 'B', Category: 'Nope' },
         ]),
       );
+
       const inserted = mockModel.insertMany.mock.calls[0][0];
-      // both resolve to CAT_ID here (the by-name match and the fallback are the
-      // same id in this fixture), so assert both are set, not undefined
-      expect(inserted[0].categoryId).toBeDefined();
-      expect(inserted[1].categoryId).toBeDefined();
+      // matched row uses the by-name id; unmatched row uses the fallback id
+      expect(inserted[0].categoryId).toBe(groceriesId);
+      expect(inserted[1].categoryId).toBe(fallbackId);
     });
 
-    it('reports row-level errors for bad amount/date without aborting', async () => {
+    it('reports distinct errors for unparseable/zero amount and bad date', async () => {
       const result = await service.importTransactions(
         HOUSEHOLD_ID,
         MEMBER_ID,
         importDto([
           { Date: '2026-06-01', Amount: 'abc', Payee: 'A', Category: '' },
-          { Date: 'not-a-date', Amount: '-10', Payee: 'B', Category: '' },
-          { Date: '2026-06-03', Amount: '-30', Payee: 'C', Category: '' },
+          { Date: '2026-06-02', Amount: '0.00', Payee: 'B', Category: '' },
+          { Date: 'not-a-date', Amount: '-10', Payee: 'C', Category: '' },
+          { Date: '2026-06-03', Amount: '-30', Payee: 'D', Category: '' },
         ]),
       );
 
       expect(result.imported).toBe(1);
       expect(result.errors).toEqual([
-        { row: 0, message: 'Unparseable or zero amount' },
-        { row: 1, message: 'Unparseable date' },
+        { row: 0, message: 'Unparseable amount' },
+        { row: 1, message: 'Zero amount' },
+        { row: 2, message: 'Unparseable date' },
       ]);
     });
 
     it('skips rows that duplicate an existing transaction', async () => {
-      mockModel.findOne.mockReturnValue(
-        createChainable({ _id: new Types.ObjectId(TXN_ID) }),
+      // The pre-fetch returns an existing transaction whose dedupe key matches
+      // the imported row.
+      mockModel.find.mockReturnValue(
+        createChainable([
+          {
+            date: new Date('2026-06-01'),
+            amountCents: 4200,
+            type: TransactionType.EXPENSE,
+            payee: 'Store',
+          },
+        ]),
       );
 
       const result = await service.importTransactions(
@@ -574,6 +598,23 @@ describe('TransactionsService', () => {
       expect(result.imported).toBe(0);
       expect(result.skipped).toBe(1);
       expect(mockModel.insertMany).not.toHaveBeenCalled();
+    });
+
+    it('is a clean no-op when every row errors', async () => {
+      const result = await service.importTransactions(
+        HOUSEHOLD_ID,
+        MEMBER_ID,
+        importDto([{ Date: 'bad', Amount: 'bad', Payee: 'A', Category: '' }]),
+      );
+
+      expect(result.imported).toBe(0);
+      expect(mockModel.insertMany).not.toHaveBeenCalled();
+      // balance still "applied" once with a zero delta (no-op inside the service)
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        ACC_A,
+        0,
+      );
     });
 
     it('skips a duplicate within the same batch', async () => {

@@ -569,7 +569,7 @@ describe('Transactions (e2e)', () => {
 
       expect(res.body.imported).toBe(0);
       expect(res.body.errors).toEqual([
-        { row: 0, message: 'Unparseable or zero amount' },
+        { row: 0, message: 'Unparseable amount' },
       ]);
     });
 
@@ -578,6 +578,23 @@ describe('Transactions (e2e)', () => {
         .post('/api/transactions/import')
         .set('Authorization', `Bearer ${tokenB}`)
         .send({ accountId: importAcct, mapping, rows })
+        .expect(400);
+    });
+
+    it('rejects importing into an archived account (400)', async () => {
+      const archived = await createAccount(app, tokenA, {
+        name: 'Closed',
+        type: 'checking',
+      });
+      await request(app.getHttpServer())
+        .delete(`/api/accounts/${archived}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .post('/api/transactions/import')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ accountId: archived, mapping, rows })
         .expect(400);
     });
   });

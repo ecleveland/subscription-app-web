@@ -267,17 +267,25 @@ export class TransactionsService {
       );
     }
 
+    const accountId = account._id;
     const errors: ImportRowError[] = [];
-    const seen = new Set<string>();
-    const docs: Record<string, unknown>[] = [];
-    let skipped = 0;
-    let netDelta = 0;
 
+    // Phase 1: parse each row to a candidate (or a row-level error).
+    const candidates: {
+      doc: Record<string, unknown>;
+      type: TransactionType;
+      amountCents: number;
+      key: string;
+    }[] = [];
     for (let i = 0; i < dto.rows.length; i++) {
       const row = dto.rows[i];
       const cents = parseAmountToCents(row[dto.mapping.amount]);
-      if (cents === null || cents === 0) {
-        errors.push({ row: i, message: 'Unparseable or zero amount' });
+      if (cents === null) {
+        errors.push({ row: i, message: 'Unparseable amount' });
+        continue;
+      }
+      if (cents === 0) {
+        errors.push({ row: i, message: 'Zero amount' });
         continue;
       }
       const date = new Date(row[dto.mapping.date]);
@@ -291,7 +299,6 @@ export class TransactionsService {
       const payee = dto.mapping.payee
         ? row[dto.mapping.payee]?.trim() || undefined
         : undefined;
-
       let categoryId = fallbackId;
       if (dto.mapping.category) {
         const name = row[dto.mapping.category]?.trim().toLowerCase();
@@ -300,58 +307,142 @@ export class TransactionsService {
         }
       }
 
-      // Dedupe on account + date + amount + type + payee. A null payee matches
-      // missing-payee docs in Mongo, so re-imports of payee-less rows still skip.
-      const key = `${date.getTime()}|${amountCents}|${type}|${payee ?? ''}`;
-      if (seen.has(key)) {
-        skipped += 1;
-        continue;
-      }
-      seen.add(key);
-      const duplicate = await this.transactionModel
-        .findOne({
+      candidates.push({
+        doc: {
           householdId: new Types.ObjectId(householdId),
-          accountId: account._id,
-          date,
-          amountCents,
+          accountId,
+          categoryId,
+          memberId: memberId ? new Types.ObjectId(memberId) : undefined,
           type,
-          payee: payee ?? null,
-        } as Record<string, unknown>)
-        .exec();
-      if (duplicate) {
-        skipped += 1;
-        continue;
-      }
-
-      docs.push({
-        householdId: new Types.ObjectId(householdId),
-        accountId: account._id,
-        categoryId,
-        memberId: memberId ? new Types.ObjectId(memberId) : undefined,
+          amountCents,
+          date,
+          payee,
+          tags: [],
+          cleared: false,
+        },
         type,
         amountCents,
-        date,
-        payee,
-        tags: [],
-        cleared: false,
+        // Dedupe on account + date + amount + type + payee. A null/empty payee
+        // is normalized so re-imports of payee-less rows still match.
+        key: `${date.getTime()}|${amountCents}|${type}|${payee ?? ''}`,
       });
-      netDelta += type === TransactionType.EXPENSE ? -amountCents : amountCents;
     }
 
-    if (docs.length > 0) {
-      await this.transactionModel.insertMany(docs);
-    }
-    await this.accountsService.applyBalanceDelta(
+    // Phase 2: dedupe against existing transactions (one scoped query for the
+    // batch's date window, instead of a query per row) and within the batch.
+    const seen = await this.existingImportKeys(
       householdId,
-      account._id.toString(),
-      netDelta,
+      accountId,
+      candidates,
     );
+    const docs: Record<string, unknown>[] = [];
+    let skipped = 0;
+    for (const candidate of candidates) {
+      if (seen.has(candidate.key)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(candidate.key);
+      docs.push(candidate.doc);
+    }
+
+    // Phase 3: insert (unordered so one bad row can't strand the rest) and apply
+    // the balance delta derived from what ACTUALLY persisted — never from the
+    // intended set, so a partial insert can't over-apply the balance.
+    let inserted: { type: TransactionType; amountCents: number }[] = [];
+    if (docs.length > 0) {
+      try {
+        inserted = (await this.transactionModel.insertMany(docs, {
+          ordered: false,
+        })) as unknown as { type: TransactionType; amountCents: number }[];
+      } catch (error: unknown) {
+        // ordered:false → valid docs still insert; Mongoose attaches the ones
+        // that landed. Apply the balance for exactly those and surface a
+        // row-less error for the shortfall so it isn't silently lost.
+        const partial = (error as { insertedDocs?: typeof inserted })
+          .insertedDocs;
+        inserted = Array.isArray(partial) ? partial : [];
+        const failed = docs.length - inserted.length;
+        this.logger.error(
+          { householdId, accountId: dto.accountId, failed },
+          `CSV import: ${failed} row(s) failed to persist`,
+        );
+        for (let n = 0; n < failed; n++) {
+          errors.push({ row: -1, message: 'Failed to persist row' });
+        }
+      }
+    }
+
+    const appliedDelta = inserted.reduce(
+      (sum, d) =>
+        sum +
+        (d.type === TransactionType.EXPENSE ? -d.amountCents : d.amountCents),
+      0,
+    );
+    try {
+      await this.accountsService.applyBalanceDelta(
+        householdId,
+        accountId.toString(),
+        appliedDelta,
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { householdId, accountId: dto.accountId, imported: inserted.length },
+        `Import balance apply failed after rows were persisted; cached balance ` +
+          `may be drifted: ${message}`,
+      );
+      throw error;
+    }
 
     this.logger.log(
-      { householdId, accountId: dto.accountId, imported: docs.length, skipped },
+      {
+        householdId,
+        accountId: dto.accountId,
+        imported: inserted.length,
+        skipped,
+      },
       'Transactions imported',
     );
-    return { imported: docs.length, skipped, errors };
+    return { imported: inserted.length, skipped, errors };
+  }
+
+  // Build the set of dedupe keys for transactions already stored on the account
+  // within the batch's date window — one query, vs a findOne per row.
+  private async existingImportKeys(
+    householdId: string,
+    accountId: Types.ObjectId,
+    candidates: { doc: Record<string, unknown> }[],
+  ): Promise<Set<string>> {
+    const keys = new Set<string>();
+    if (candidates.length === 0) {
+      return keys;
+    }
+    const dates = candidates.map((c) => c.doc.date as Date);
+    const min = new Date(Math.min(...dates.map((d) => d.getTime())));
+    const max = new Date(Math.max(...dates.map((d) => d.getTime())));
+
+    const existing = await this.transactionModel
+      .find({
+        householdId: new Types.ObjectId(householdId),
+        accountId,
+        date: { $gte: min, $lte: max },
+      } as Record<string, unknown>)
+      .select('date amountCents type payee')
+      .lean()
+      .exec();
+
+    for (const t of existing as unknown as {
+      date: Date;
+      amountCents: number;
+      type: TransactionType;
+      payee?: string;
+    }[]) {
+      keys.add(
+        `${new Date(t.date).getTime()}|${t.amountCents}|${t.type}|${t.payee ?? ''}`,
+      );
+    }
+    return keys;
   }
 
   // --- helpers -------------------------------------------------------------
