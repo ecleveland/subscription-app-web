@@ -25,3 +25,8 @@ export class CategoryGroup {
 }
 
 export const CategoryGroupSchema = SchemaFactory.createForClass(CategoryGroup);
+
+// A household has at most one group per name. Lets the idempotent seed upsert by
+// (householdId, name) so concurrent boots/replicas converge instead of silently
+// creating duplicate groups (the loser hits this index and is ignored).
+CategoryGroupSchema.index({ householdId: 1, name: 1 }, { unique: true });

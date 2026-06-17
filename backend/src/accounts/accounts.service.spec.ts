@@ -151,6 +151,20 @@ describe('AccountsService', () => {
       await service.update(HOUSEHOLD_ID, ACCOUNT_ID, { name: 'Renamed' });
       expect(save).toHaveBeenCalledTimes(1);
     });
+
+    it('throws NotFound (via findOne) for an account in another household', async () => {
+      mockAccountModel.findById.mockReturnValue(
+        createChainable({
+          _id: new Types.ObjectId(ACCOUNT_ID),
+          householdId: new Types.ObjectId(OTHER_HOUSEHOLD_ID),
+          save: jest.fn(),
+        }),
+      );
+
+      await expect(
+        service.update(HOUSEHOLD_ID, ACCOUNT_ID, { name: 'Renamed' }),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 
   describe('archive', () => {
@@ -169,6 +183,20 @@ describe('AccountsService', () => {
       expect(doc.isArchived).toBe(true);
       expect(doc.save).toHaveBeenCalledTimes(1);
       expect(result.isArchived).toBe(true);
+    });
+
+    it('throws NotFound (via findOne) for an account in another household', async () => {
+      mockAccountModel.findById.mockReturnValue(
+        createChainable({
+          _id: new Types.ObjectId(ACCOUNT_ID),
+          householdId: new Types.ObjectId(OTHER_HOUSEHOLD_ID),
+          save: jest.fn(),
+        }),
+      );
+
+      await expect(service.archive(HOUSEHOLD_ID, ACCOUNT_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

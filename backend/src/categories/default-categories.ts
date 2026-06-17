@@ -14,10 +14,12 @@ export interface DefaultCategory {
 
 export interface DefaultCategoryGroup {
   name: string;
-  categories: DefaultCategory[];
+  categories: readonly DefaultCategory[];
 }
 
-export const DEFAULT_CATEGORY_GROUPS: DefaultCategoryGroup[] = [
+// Immutable: this is a shared seed template read by every household creation and
+// the startup backfill; nothing should mutate it at runtime.
+export const DEFAULT_CATEGORY_GROUPS: readonly DefaultCategoryGroup[] = [
   {
     name: 'Income',
     categories: [
