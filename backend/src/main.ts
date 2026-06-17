@@ -7,7 +7,6 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { UsersService } from './users/users.service';
-import { SubscriptionsService } from './subscriptions/subscriptions.service';
 import { HouseholdsMigrationService } from './households/households-migration.service';
 
 async function bootstrap() {
@@ -58,13 +57,11 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);
 
-  // Legacy startup tasks: seed the env-configured admin and migrate any
-  // pre-multi-user subscriptions to it. Both are idempotent and run on every
-  // boot of every replica. seedAdmin already swallows its own benign
-  // concurrent-boot duplicate; this outer guard keeps any *other* failure in
-  // these non-critical legacy tasks from crashing startup — the app can serve
-  // traffic without them — so it logs a warning and continues rather than
-  // aborting the process.
+  // Idempotent startup tasks, run on every boot of every replica. seedAdmin
+  // already swallows its own benign concurrent-boot duplicate; this outer guard
+  // keeps any *other* failure in these non-critical tasks from crashing startup
+  // — the app can serve traffic without them — so it logs a warning and
+  // continues rather than aborting the process.
   try {
     const usersService = app.get(UsersService);
     const seedPasswordHash =
@@ -73,28 +70,24 @@ async function bootstrap() {
       await usersService.seedAdmin('admin', seedPasswordHash);
     }
 
-    const admin = await usersService.findByUsername('admin');
-    if (admin) {
-      const subscriptionsService = app.get(SubscriptionsService);
-      const migrated = await subscriptionsService.migrateUnownedSubscriptions(
-        admin._id.toString(),
-      );
-      if (migrated > 0) {
-        new Logger('Bootstrap').log(
-          `Migrated ${migrated} existing subscriptions to admin user`,
-        );
-      }
-    }
-
-    // Backfill a personal household + owner membership for every pre-household
-    // user. Idempotent, so it's a no-op once every user has one. The service
-    // logs its own outcome.
-    await app.get(HouseholdsMigrationService).backfillPersonalHouseholds();
+    // Phase 1 household migration, in order:
+    // 1. Backfill a personal household + owner membership for every
+    //    pre-household user (idempotent; no-op once every user has one).
+    // 2. Stamp existing subscriptions/notifications with the householdId of
+    //    their owner's now-guaranteed active household. Both log their outcome.
+    const householdsMigration = app.get(HouseholdsMigrationService);
+    await householdsMigration.backfillPersonalHouseholds();
+    await householdsMigration.stampExistingData();
   } catch (error: unknown) {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
-    new Logger('Bootstrap').warn(
-      `Startup admin seed/migration step failed; continuing: ${message}`,
+    // By this point seedAdmin and backfillPersonalHouseholds have swallowed
+    // their own benign races, so anything reaching here is unexpected — and a
+    // failed data migration can leave users live with un-scoped data. Log at
+    // error level (not warn) so it's alarming and traceable, while still
+    // letting the app serve traffic.
+    new Logger('Bootstrap').error(
+      `Startup admin seed/migration step failed; continuing without it: ${message}`,
     );
   }
 

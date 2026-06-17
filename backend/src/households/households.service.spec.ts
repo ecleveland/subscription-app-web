@@ -54,6 +54,9 @@ describe('HouseholdsService', () => {
       .fn()
       .mockImplementation((dto) => ({ ...dto, save: memberSave }));
     mockMemberModel.findOne = jest.fn().mockReturnValue(createChainable(null));
+    mockMemberModel.deleteMany = jest
+      .fn()
+      .mockReturnValue(createChainable({ deletedCount: 0 }));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -212,6 +215,28 @@ describe('HouseholdsService', () => {
       mockMemberModel.findOne.mockReturnValue(createChainable(null));
 
       expect(await service.findMembershipByUser(OTHER_USER_ID)).toBeNull();
+    });
+  });
+
+  describe('removeMembershipsByUser', () => {
+    it('deletes every membership for the user and returns the count', async () => {
+      mockMemberModel.deleteMany.mockReturnValue(
+        createChainable({ deletedCount: 2 }),
+      );
+
+      const result = await service.removeMembershipsByUser(OTHER_USER_ID);
+
+      const filter = mockMemberModel.deleteMany.mock.calls[0][0];
+      expect(filter.userId.toString()).toBe(OTHER_USER_ID);
+      expect(result).toBe(2);
+    });
+
+    it('returns 0 when the user has no memberships', async () => {
+      mockMemberModel.deleteMany.mockReturnValue(
+        createChainable({ deletedCount: 0 }),
+      );
+
+      expect(await service.removeMembershipsByUser(OTHER_USER_ID)).toBe(0);
     });
   });
 });

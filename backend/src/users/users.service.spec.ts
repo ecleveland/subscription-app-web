@@ -9,7 +9,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from './users.service';
 import { User, UserRole } from './schemas/user.schema';
-import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { HouseholdsService } from '../households/households.service';
 import { RefreshToken } from '../auth/schemas/refresh-token.schema';
 
 jest.mock('bcryptjs');
@@ -25,7 +25,10 @@ describe('UsersService', () => {
   let service: UsersService;
   let mockUserModel: any;
   let mockRefreshTokenModel: any;
-  let mockSubscriptionsService: { removeAllByUserId: jest.Mock };
+  let mockHouseholdsService: {
+    createHousehold: jest.Mock;
+    removeMembershipsByUser: jest.Mock;
+  };
 
   const mockUser = {
     _id: '507f1f77bcf86cd799439011',
@@ -39,8 +42,9 @@ describe('UsersService', () => {
   };
 
   beforeEach(async () => {
-    mockSubscriptionsService = {
-      removeAllByUserId: jest.fn().mockResolvedValue(0),
+    mockHouseholdsService = {
+      createHousehold: jest.fn().mockResolvedValue({ _id: 'household-id' }),
+      removeMembershipsByUser: jest.fn().mockResolvedValue(0),
     };
 
     mockUserModel = jest.fn().mockImplementation((dto) => ({
@@ -77,7 +81,7 @@ describe('UsersService', () => {
           provide: getModelToken(RefreshToken.name),
           useValue: mockRefreshTokenModel,
         },
-        { provide: SubscriptionsService, useValue: mockSubscriptionsService },
+        { provide: HouseholdsService, useValue: mockHouseholdsService },
       ],
     }).compile();
 
@@ -122,6 +126,66 @@ describe('UsersService', () => {
         { userId: 'new-id', username: 'newuser' },
         'User created',
       );
+    });
+
+    it('should provision a personal household for the new user', async () => {
+      (bcrypt.hash as jest.Mock).mockResolvedValue('bcrypt-hash');
+      mockUserModel.mockImplementation((dto: any) => ({
+        ...dto,
+        save: jest.fn().mockResolvedValue({
+          _id: { toString: () => 'new-id' },
+          username: 'newuser',
+          displayName: 'New User',
+          role: UserRole.USER,
+        }),
+      }));
+
+      await service.create({ username: 'newuser', password: 'mypassword' });
+
+      expect(mockHouseholdsService.createHousehold).toHaveBeenCalledWith(
+        'new-id',
+        { name: "New User's Household" },
+      );
+    });
+
+    it('should fall back to username for the household name when no displayName', async () => {
+      (bcrypt.hash as jest.Mock).mockResolvedValue('bcrypt-hash');
+      mockUserModel.mockImplementation((dto: any) => ({
+        ...dto,
+        save: jest.fn().mockResolvedValue({
+          _id: { toString: () => 'new-id' },
+          username: 'newuser',
+          role: UserRole.USER,
+        }),
+      }));
+
+      await service.create({ username: 'newuser', password: 'mypassword' });
+
+      expect(mockHouseholdsService.createHousehold).toHaveBeenCalledWith(
+        'new-id',
+        { name: "newuser's Household" },
+      );
+    });
+
+    it('should roll back the user when household provisioning fails', async () => {
+      (bcrypt.hash as jest.Mock).mockResolvedValue('bcrypt-hash');
+      mockUserModel.mockImplementation((dto: any) => ({
+        ...dto,
+        save: jest.fn().mockResolvedValue({
+          _id: { toString: () => 'new-id' },
+          username: 'newuser',
+          role: UserRole.USER,
+        }),
+      }));
+      mockHouseholdsService.createHousehold.mockRejectedValue(
+        new Error('household boom'),
+      );
+
+      await expect(
+        service.create({ username: 'newuser', password: 'mypassword' }),
+      ).rejects.toThrow('household boom');
+
+      expect(mockUserModel.findByIdAndDelete).toHaveBeenCalled();
     });
 
     it('should assign the provided role when specified', async () => {
@@ -359,47 +423,62 @@ describe('UsersService', () => {
   });
 
   describe('remove', () => {
-    it('should delete user, cascade-delete their subscriptions, and log', async () => {
+    it('should remove the memberships before deleting the user, and log', async () => {
+      mockUserModel.findById.mockReturnValue(createChainable(mockUser));
       mockUserModel.findByIdAndDelete.mockReturnValue(
         createChainable(mockUser),
       );
-      mockSubscriptionsService.removeAllByUserId.mockResolvedValue(5);
+      const callOrder: string[] = [];
+      mockHouseholdsService.removeMembershipsByUser.mockImplementation(() => {
+        callOrder.push('memberships');
+        return Promise.resolve(1);
+      });
+      mockUserModel.findByIdAndDelete.mockImplementation(() => {
+        callOrder.push('user');
+        return createChainable(mockUser);
+      });
       const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await service.remove('507f1f77bcf86cd799439011');
 
+      expect(
+        mockHouseholdsService.removeMembershipsByUser,
+      ).toHaveBeenCalledWith('507f1f77bcf86cd799439011');
       expect(mockUserModel.findByIdAndDelete).toHaveBeenCalledWith(
         '507f1f77bcf86cd799439011',
       );
-      expect(mockSubscriptionsService.removeAllByUserId).toHaveBeenCalledWith(
-        '507f1f77bcf86cd799439011',
-      );
+      // Dependents (memberships) must be removed before the user row.
+      expect(callOrder).toEqual(['memberships', 'user']);
       expect(logSpy).toHaveBeenCalledWith(
         { userId: '507f1f77bcf86cd799439011' },
         'User deleted',
       );
     });
 
-    it('should throw NotFoundException and not delete subscriptions when user is not found', async () => {
-      mockUserModel.findByIdAndDelete.mockReturnValue(createChainable(null));
+    it('should throw NotFoundException and not touch memberships when user is not found', async () => {
+      mockUserModel.findById.mockReturnValue(createChainable(null));
 
       await expect(service.remove('nonexistent')).rejects.toThrow(
         NotFoundException,
       );
-      expect(mockSubscriptionsService.removeAllByUserId).not.toHaveBeenCalled();
+      expect(
+        mockHouseholdsService.removeMembershipsByUser,
+      ).not.toHaveBeenCalled();
+      expect(mockUserModel.findByIdAndDelete).not.toHaveBeenCalled();
     });
 
-    it('should succeed even when user has no subscriptions', async () => {
+    it('should succeed even when the user has no memberships', async () => {
+      mockUserModel.findById.mockReturnValue(createChainable(mockUser));
       mockUserModel.findByIdAndDelete.mockReturnValue(
         createChainable(mockUser),
       );
-      mockSubscriptionsService.removeAllByUserId.mockResolvedValue(0);
+      mockHouseholdsService.removeMembershipsByUser.mockResolvedValue(0);
 
       await service.remove('507f1f77bcf86cd799439011');
 
-      expect(mockSubscriptionsService.removeAllByUserId).toHaveBeenCalledWith(
-        '507f1f77bcf86cd799439011',
-      );
+      expect(
+        mockHouseholdsService.removeMembershipsByUser,
+      ).toHaveBeenCalledWith('507f1f77bcf86cd799439011');
     });
   });
 

@@ -11,8 +11,20 @@ export enum BillingCycle {
 
 @Schema({ timestamps: true })
 export class Subscription {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', index: true })
-  userId: MongooseSchema.Types.ObjectId;
+  // Ownership/visibility scope: the household this subscription belongs to.
+  // Resolved server-side by HouseholdGuard — never trusted from the client.
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Household',
+    required: true,
+    index: true,
+  })
+  householdId: MongooseSchema.Types.ObjectId;
+
+  // Attribution: the HouseholdMember who created the subscription ("who did
+  // it"). Visibility is the household's, but we keep the acting member.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'HouseholdMember' })
+  memberId: MongooseSchema.Types.ObjectId;
 
   @Prop({ required: true, trim: true })
   name: string;
