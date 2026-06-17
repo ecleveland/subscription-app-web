@@ -1,4 +1,4 @@
-import { downloadSubscriptionsCsv } from '../csv';
+import { downloadSubscriptionsCsv, parseCsv } from '../csv';
 
 const OriginalURL = globalThis.URL;
 
@@ -91,5 +91,49 @@ describe('downloadSubscriptionsCsv', () => {
     await expect(downloadSubscriptionsCsv('')).rejects.toThrow(
       'Export failed: 401',
     );
+  });
+});
+
+describe('parseCsv', () => {
+  it('parses headers and rows keyed by header', () => {
+    const { headers, rows } = parseCsv(
+      'Date,Amount,Payee\n2026-06-01,-42.00,Store',
+    );
+    expect(headers).toEqual(['Date', 'Amount', 'Payee']);
+    expect(rows).toEqual([
+      { Date: '2026-06-01', Amount: '-42.00', Payee: 'Store' },
+    ]);
+  });
+
+  it('handles quoted fields with commas and escaped quotes', () => {
+    const { rows } = parseCsv(
+      'Payee,Amount\n"Acme, Inc.",10.00\n"She said ""hi""",20.00',
+    );
+    expect(rows[0].Payee).toBe('Acme, Inc.');
+    expect(rows[1].Payee).toBe('She said "hi"');
+  });
+
+  it('handles newlines inside quoted fields', () => {
+    const { rows } = parseCsv('Note,Amount\n"line1\nline2",5.00');
+    expect(rows[0].Note).toBe('line1\nline2');
+    expect(rows).toHaveLength(1);
+  });
+
+  it('tolerates CRLF line endings and a trailing newline', () => {
+    const { headers, rows } = parseCsv('A,B\r\n1,2\r\n');
+    expect(headers).toEqual(['A', 'B']);
+    expect(rows).toEqual([{ A: '1', B: '2' }]);
+  });
+
+  it('drops blank lines and fills missing cells', () => {
+    const { rows } = parseCsv('A,B,C\n1,2\n\n3,4,5');
+    expect(rows).toEqual([
+      { A: '1', B: '2', C: '' },
+      { A: '3', B: '4', C: '5' },
+    ]);
+  });
+
+  it('returns an empty result for empty input', () => {
+    expect(parseCsv('')).toEqual({ headers: [], rows: [] });
   });
 });

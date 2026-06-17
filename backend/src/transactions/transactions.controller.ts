@@ -22,6 +22,7 @@ import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { QueryTransactionDto } from './dto/query-transaction.dto';
+import { ImportTransactionsDto } from './dto/import-transactions.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../households/guards/household.guard';
 import type { HouseholdRequest } from '../households/interfaces/household-request.interface';
@@ -48,6 +49,29 @@ export class TransactionsController {
       req.household.householdId,
       req.household.memberId,
       createDto,
+    );
+  }
+
+  @Post('import')
+  @ApiOperation({
+    summary: 'Bulk-import parsed CSV rows into an account',
+    description:
+      'Accepts parsed rows + a column mapping + target account. Parses amounts ' +
+      'to integer cents, maps categories by name, skips duplicate rows, and ' +
+      'adjusts the account balance once. Returns imported/skipped counts and ' +
+      'per-row errors.',
+  })
+  @ApiResponse({ status: 201, description: 'Import result' })
+  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  import(
+    @Req() req: HouseholdRequest,
+    @Body() importDto: ImportTransactionsDto,
+  ) {
+    return this.transactionsService.importTransactions(
+      req.household.householdId,
+      req.household.memberId,
+      importDto,
     );
   }
 

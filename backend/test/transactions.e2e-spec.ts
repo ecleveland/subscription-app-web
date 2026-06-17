@@ -505,6 +505,100 @@ describe('Transactions (e2e)', () => {
     });
   });
 
+  describe('CSV import', () => {
+    let importAcct: string;
+    const mapping = {
+      date: 'Date',
+      amount: 'Amount',
+      payee: 'Payee',
+      category: 'Category',
+    };
+    const rows = [
+      {
+        Date: '2026-05-01',
+        Amount: '-42.00',
+        Payee: 'Store',
+        Category: 'Groceries',
+      },
+      { Date: '2026-05-02', Amount: '$1,000.00', Payee: 'Job', Category: '' },
+    ];
+
+    beforeAll(async () => {
+      importAcct = await createAccount(app, tokenA, {
+        name: 'Import Target',
+        type: 'checking',
+      });
+    });
+
+    it('imports parsed rows and adjusts the balance once', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/transactions/import')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ accountId: importAcct, mapping, rows })
+        .expect(201);
+
+      expect(res.body).toMatchObject({ imported: 2, skipped: 0 });
+      expect(res.body.errors).toEqual([]);
+      // -4200 (expense) + 100000 (income) = 95800
+      expect(await getBalance(app, tokenA, importAcct)).toBe(95800);
+    });
+
+    it('is idempotent: re-importing the same rows skips them', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/transactions/import')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ accountId: importAcct, mapping, rows })
+        .expect(201);
+
+      expect(res.body).toMatchObject({ imported: 0, skipped: 2 });
+      expect(await getBalance(app, tokenA, importAcct)).toBe(95800);
+    });
+
+    it('reports a row-level error for an unparseable amount', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/transactions/import')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: importAcct,
+          mapping,
+          rows: [
+            { Date: '2026-05-03', Amount: 'NaN', Payee: 'X', Category: '' },
+          ],
+        })
+        .expect(201);
+
+      expect(res.body.imported).toBe(0);
+      expect(res.body.errors).toEqual([
+        { row: 0, message: 'Unparseable amount' },
+      ]);
+    });
+
+    it("rejects importing into another household's account (400)", async () => {
+      await request(app.getHttpServer())
+        .post('/api/transactions/import')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({ accountId: importAcct, mapping, rows })
+        .expect(400);
+    });
+
+    it('rejects importing into an archived account (400)', async () => {
+      const archived = await createAccount(app, tokenA, {
+        name: 'Closed',
+        type: 'checking',
+      });
+      await request(app.getHttpServer())
+        .delete(`/api/accounts/${archived}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .post('/api/transactions/import')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ accountId: archived, mapping, rows })
+        .expect(400);
+    });
+  });
+
   describe('auth', () => {
     it('returns 401 without a token', async () => {
       await request(app.getHttpServer()).get('/api/transactions').expect(401);

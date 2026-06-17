@@ -14,6 +14,12 @@ import {
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { QueryTransactionDto } from './dto/query-transaction.dto';
+import { ImportTransactionsDto } from './dto/import-transactions.dto';
+import type {
+  ImportResult,
+  ImportRowError,
+} from './interfaces/import-result.interface';
+import { parseAmountToCents } from './csv-import.util';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
@@ -229,6 +235,214 @@ export class TransactionsService {
     // Reverse the deleted transaction's effect on its account balance(s).
     await this.syncBalances(householdId, this.balanceDeltas(before), [], id);
     this.logger.log({ householdId, transactionId: id }, 'Transaction deleted');
+  }
+
+  /**
+   * Bulk-import already-parsed CSV rows into one account. Each row's amount is
+   * parsed to signed cents (sign → expense/income); category column maps by name
+   * to a seeded category, falling back to the household's default. Rows with an
+   * unparseable amount/date are reported as row-level errors without aborting
+   * the batch; rows duplicating an existing (or already-in-batch) transaction
+   * are skipped so re-importing the same file is idempotent. The account balance
+   * is adjusted once with the net delta of everything imported.
+   */
+  async importTransactions(
+    householdId: string,
+    memberId: string,
+    dto: ImportTransactionsDto,
+  ): Promise<ImportResult> {
+    const account = await this.assertAccountInHousehold(
+      householdId,
+      dto.accountId,
+    );
+    if (account.isArchived) {
+      throw new BadRequestException('Cannot import into an archived account');
+    }
+
+    const { byName, fallbackId } =
+      await this.categoriesService.resolveImportCategories(householdId);
+    if (!fallbackId) {
+      throw new BadRequestException(
+        'The household has no categories to import against',
+      );
+    }
+
+    const accountId = account._id;
+    const errors: ImportRowError[] = [];
+
+    // Phase 1: parse each row to a candidate (or a row-level error).
+    const candidates: {
+      doc: Record<string, unknown>;
+      type: TransactionType;
+      amountCents: number;
+      key: string;
+    }[] = [];
+    for (let i = 0; i < dto.rows.length; i++) {
+      const row = dto.rows[i];
+      const cents = parseAmountToCents(row[dto.mapping.amount]);
+      if (cents === null) {
+        errors.push({ row: i, message: 'Unparseable amount' });
+        continue;
+      }
+      if (cents === 0) {
+        errors.push({ row: i, message: 'Zero amount' });
+        continue;
+      }
+      const date = new Date(row[dto.mapping.date]);
+      if (Number.isNaN(date.getTime())) {
+        errors.push({ row: i, message: 'Unparseable date' });
+        continue;
+      }
+
+      const type = cents < 0 ? TransactionType.EXPENSE : TransactionType.INCOME;
+      const amountCents = Math.abs(cents);
+      const payee = dto.mapping.payee
+        ? row[dto.mapping.payee]?.trim() || undefined
+        : undefined;
+      let categoryId = fallbackId;
+      if (dto.mapping.category) {
+        const name = row[dto.mapping.category]?.trim().toLowerCase();
+        if (name && byName.has(name)) {
+          categoryId = byName.get(name) as Types.ObjectId;
+        }
+      }
+
+      candidates.push({
+        doc: {
+          householdId: new Types.ObjectId(householdId),
+          accountId,
+          categoryId,
+          memberId: memberId ? new Types.ObjectId(memberId) : undefined,
+          type,
+          amountCents,
+          date,
+          payee,
+          tags: [],
+          cleared: false,
+        },
+        type,
+        amountCents,
+        // Dedupe on account + date + amount + type + payee. A null/empty payee
+        // is normalized so re-imports of payee-less rows still match.
+        key: `${date.getTime()}|${amountCents}|${type}|${payee ?? ''}`,
+      });
+    }
+
+    // Phase 2: dedupe against existing transactions (one scoped query for the
+    // batch's date window, instead of a query per row) and within the batch.
+    const seen = await this.existingImportKeys(
+      householdId,
+      accountId,
+      candidates,
+    );
+    const docs: Record<string, unknown>[] = [];
+    let skipped = 0;
+    for (const candidate of candidates) {
+      if (seen.has(candidate.key)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(candidate.key);
+      docs.push(candidate.doc);
+    }
+
+    // Phase 3: insert (unordered so one bad row can't strand the rest) and apply
+    // the balance delta derived from what ACTUALLY persisted — never from the
+    // intended set, so a partial insert can't over-apply the balance.
+    let inserted: { type: TransactionType; amountCents: number }[] = [];
+    if (docs.length > 0) {
+      try {
+        inserted = (await this.transactionModel.insertMany(docs, {
+          ordered: false,
+        })) as unknown as { type: TransactionType; amountCents: number }[];
+      } catch (error: unknown) {
+        // ordered:false → valid docs still insert; Mongoose attaches the ones
+        // that landed. Apply the balance for exactly those and surface a
+        // row-less error for the shortfall so it isn't silently lost.
+        const partial = (error as { insertedDocs?: typeof inserted })
+          .insertedDocs;
+        inserted = Array.isArray(partial) ? partial : [];
+        const failed = docs.length - inserted.length;
+        this.logger.error(
+          { householdId, accountId: dto.accountId, failed },
+          `CSV import: ${failed} row(s) failed to persist`,
+        );
+        for (let n = 0; n < failed; n++) {
+          errors.push({ row: -1, message: 'Failed to persist row' });
+        }
+      }
+    }
+
+    const appliedDelta = inserted.reduce(
+      (sum, d) =>
+        sum +
+        (d.type === TransactionType.EXPENSE ? -d.amountCents : d.amountCents),
+      0,
+    );
+    try {
+      await this.accountsService.applyBalanceDelta(
+        householdId,
+        accountId.toString(),
+        appliedDelta,
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { householdId, accountId: dto.accountId, imported: inserted.length },
+        `Import balance apply failed after rows were persisted; cached balance ` +
+          `may be drifted: ${message}`,
+      );
+      throw error;
+    }
+
+    this.logger.log(
+      {
+        householdId,
+        accountId: dto.accountId,
+        imported: inserted.length,
+        skipped,
+      },
+      'Transactions imported',
+    );
+    return { imported: inserted.length, skipped, errors };
+  }
+
+  // Build the set of dedupe keys for transactions already stored on the account
+  // within the batch's date window — one query, vs a findOne per row.
+  private async existingImportKeys(
+    householdId: string,
+    accountId: Types.ObjectId,
+    candidates: { doc: Record<string, unknown> }[],
+  ): Promise<Set<string>> {
+    const keys = new Set<string>();
+    if (candidates.length === 0) {
+      return keys;
+    }
+    const dates = candidates.map((c) => c.doc.date as Date);
+    const min = new Date(Math.min(...dates.map((d) => d.getTime())));
+    const max = new Date(Math.max(...dates.map((d) => d.getTime())));
+
+    const existing = await this.transactionModel
+      .find({
+        householdId: new Types.ObjectId(householdId),
+        accountId,
+        date: { $gte: min, $lte: max },
+      } as Record<string, unknown>)
+      .select('date amountCents type payee')
+      .lean()
+      .exec();
+
+    for (const t of existing as unknown as {
+      date: Date;
+      amountCents: number;
+      type: TransactionType;
+      payee?: string;
+    }[]) {
+      keys.add(
+        `${new Date(t.date).getTime()}|${t.amountCents}|${t.type}|${t.payee ?? ''}`,
+      );
+    }
+    return keys;
   }
 
   // --- helpers -------------------------------------------------------------

@@ -195,6 +195,32 @@ export class CategoriesService {
   }
 
   /**
+   * Build the lookups the CSV importer needs for a household: a
+   * lowercased-name → id map for matching a row's category column, plus a
+   * fallback id (the seeded "Miscellaneous", else any expense category, else the
+   * first category) used when a row has no match. `fallbackId` is null only when
+   * the household has no categories at all (shouldn't happen post-seeding).
+   */
+  async resolveImportCategories(householdId: string): Promise<{
+    byName: Map<string, Types.ObjectId>;
+    fallbackId: Types.ObjectId | null;
+  }> {
+    const categories = await this.listCategories(householdId);
+    const byName = new Map<string, Types.ObjectId>();
+    for (const category of categories) {
+      byName.set(category.name.trim().toLowerCase(), category._id);
+    }
+    const fallback =
+      categories.find((c) => c.name.trim().toLowerCase() === 'miscellaneous') ??
+      categories.find((c) => !c.isIncome) ??
+      categories[0];
+    return {
+      byName,
+      fallbackId: fallback ? fallback._id : null,
+    };
+  }
+
+  /**
    * Seed defaults into every household, completing any that are missing or only
    * partially seeded (seedDefaultsForHousehold is itself idempotent/self-
    * repairing). Idempotent repair that runs at startup after the Phase 1
