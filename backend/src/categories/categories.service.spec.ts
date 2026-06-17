@@ -187,6 +187,17 @@ describe('CategoriesService', () => {
       );
     });
 
+    it('throws a clear error when a dup-race group re-read finds nothing', async () => {
+      mockGroupModel.findOneAndUpdate.mockReturnValueOnce(
+        rejectingChainable(duplicateKeyError()),
+      );
+      mockGroupModel.findOne.mockReturnValueOnce(createChainable(null));
+
+      await expect(
+        service.seedDefaultsForHousehold(HOUSEHOLD_ID),
+      ).rejects.toThrow(/could not be re-read/);
+    });
+
     it('rethrows a non-duplicate error from a group upsert', async () => {
       mockGroupModel.findOneAndUpdate.mockReturnValueOnce(
         rejectingChainable(new Error('db down')),

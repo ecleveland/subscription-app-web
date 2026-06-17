@@ -102,6 +102,14 @@ export class CategoriesService {
         if (existing) {
           return existing;
         }
+        // Lost the upsert race but the winner's insert isn't readable yet (read
+        // concern / interleaved delete). Surface the real cause instead of the
+        // misleading duplicate-key error; the caller's per-household catch logs
+        // it with context and the next backfill retries.
+        throw new Error(
+          `Group upsert for "${name}" lost a duplicate-key race but the ` +
+            'existing group could not be re-read',
+        );
       }
       throw error;
     }
