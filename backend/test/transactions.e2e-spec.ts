@@ -207,6 +207,119 @@ describe('Transactions (e2e)', () => {
     });
   });
 
+  describe('credit account negatives', () => {
+    it('drives a credit account negative and tracks cumulative cents', async () => {
+      const creditId = await createAccount(app, tokenA, {
+        name: 'Visa',
+        type: 'credit',
+      });
+
+      await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: creditId,
+          type: 'expense',
+          amountCents: 5000,
+          date: '2026-06-15',
+          categoryId: expenseCatA,
+        })
+        .expect(201);
+      expect(await getBalance(app, tokenA, creditId)).toBe(-5000);
+
+      await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: creditId,
+          type: 'expense',
+          amountCents: 7000,
+          date: '2026-06-16',
+          categoryId: expenseCatA,
+        })
+        .expect(201);
+      expect(await getBalance(app, tokenA, creditId)).toBe(-12000);
+    });
+  });
+
+  describe('transfer mutation re-points both balances', () => {
+    let srcId: string;
+    let dstId: string;
+    let altDstId: string;
+    let transferId: string;
+
+    it('PATCHing a transfer amount moves the new amount across both accounts', async () => {
+      srcId = await createAccount(app, tokenA, {
+        name: 'Src',
+        type: 'checking',
+        balanceCents: 50000,
+      });
+      dstId = await createAccount(app, tokenA, {
+        name: 'Dst',
+        type: 'savings',
+      });
+      altDstId = await createAccount(app, tokenA, {
+        name: 'Alt',
+        type: 'savings',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: srcId,
+          type: 'transfer',
+          amountCents: 10000,
+          date: '2026-06-17',
+          transferAccountId: dstId,
+        })
+        .expect(201);
+      transferId = res.body._id;
+      expect(await getBalance(app, tokenA, srcId)).toBe(40000);
+      expect(await getBalance(app, tokenA, dstId)).toBe(10000);
+
+      await request(app.getHttpServer())
+        .patch(`/api/transactions/${transferId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ amountCents: 15000 })
+        .expect(200);
+      expect(await getBalance(app, tokenA, srcId)).toBe(35000);
+      expect(await getBalance(app, tokenA, dstId)).toBe(15000);
+    });
+
+    it('PATCHing the destination leg restores the old account and credits the new one', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/transactions/${transferId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ transferAccountId: altDstId })
+        .expect(200);
+
+      // src unchanged (still −15000), old dst fully restored, new dst credited
+      expect(await getBalance(app, tokenA, srcId)).toBe(35000);
+      expect(await getBalance(app, tokenA, dstId)).toBe(0);
+      expect(await getBalance(app, tokenA, altDstId)).toBe(15000);
+    });
+
+    it('PATCHing accountId moves the source effect to a different account', async () => {
+      const otherSrc = await createAccount(app, tokenA, {
+        name: 'OtherSrc',
+        type: 'checking',
+        balanceCents: 20000,
+      });
+
+      await request(app.getHttpServer())
+        .patch(`/api/transactions/${transferId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ accountId: otherSrc })
+        .expect(200);
+
+      // original src restored to 50000; new src debited 15000
+      expect(await getBalance(app, tokenA, srcId)).toBe(50000);
+      expect(await getBalance(app, tokenA, otherSrc)).toBe(5000);
+      expect(await getBalance(app, tokenA, altDstId)).toBe(15000);
+    });
+  });
+
   describe('list & filters', () => {
     it('lists the household transactions (paginated) and filters by type', async () => {
       const all = await request(app.getHttpServer())
@@ -224,6 +337,30 @@ describe('Transactions (e2e)', () => {
         transfers.body.data.every(
           (t: { type: string }) => t.type === 'transfer',
         ),
+      ).toBe(true);
+    });
+
+    it('filters by a date range', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/transactions?dateFrom=2026-06-11&dateTo=2026-06-12')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      expect(res.body.data.length).toBeGreaterThan(0);
+      for (const t of res.body.data as { date: string }[]) {
+        const d = t.date.slice(0, 10);
+        expect(d >= '2026-06-11' && d <= '2026-06-12').toBe(true);
+      }
+    });
+
+    it('filters by cleared=false without treating the string as truthy', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/transactions?cleared=false')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      expect(
+        res.body.data.every((t: { cleared: boolean }) => t.cleared === false),
       ).toBe(true);
     });
   });

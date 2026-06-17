@@ -238,6 +238,24 @@ describe('TransactionsService', () => {
         }),
       ).rejects.toThrow(/category in this household/);
     });
+
+    it('rejects creating a transaction on an archived account', async () => {
+      accountsService.findOne.mockResolvedValueOnce({
+        _id: new Types.ObjectId(ACC_A),
+        isArchived: true,
+      });
+
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          accountId: ACC_A,
+          date: '2026-06-17',
+          amountCents: 4200,
+          type: TransactionType.EXPENSE,
+          categoryId: CAT_ID,
+        }),
+      ).rejects.toThrow(/archived account/);
+      expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
+    });
   });
 
   describe('update — re-points balances', () => {
@@ -406,6 +424,48 @@ describe('TransactionsService', () => {
       expect(filter.date.$gte).toBeInstanceOf(Date);
       expect(filter.date.$lte).toBeInstanceOf(Date);
       expect(res.meta.total).toBe(1);
+    });
+
+    it('computes pagination metadata for a multi-page result', async () => {
+      mockModel.countDocuments.mockReturnValue(createChainable(5));
+      const chain = createChainable([]);
+      mockModel.find.mockReturnValue(chain);
+
+      const res = await service.findAll(HOUSEHOLD_ID, { page: 1, limit: 2 });
+
+      expect(res.meta).toMatchObject({
+        total: 5,
+        totalPages: 3,
+        hasNextPage: true,
+      });
+      expect(chain.skip).toHaveBeenCalledWith(0);
+      expect(chain.limit).toHaveBeenCalledWith(2);
+    });
+
+    it('returns everything without skip/limit when limit is 0', async () => {
+      mockModel.countDocuments.mockReturnValue(createChainable(5));
+      const chain = createChainable([]);
+      mockModel.find.mockReturnValue(chain);
+
+      const res = await service.findAll(HOUSEHOLD_ID, { limit: 0 });
+
+      expect(res.meta.hasNextPage).toBe(false);
+      expect(chain.skip).not.toHaveBeenCalled();
+      expect(chain.limit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('update — allows archived accounts (corrections)', () => {
+    it('does not block an update when the account is archived', async () => {
+      mockModel.findById.mockReturnValue(createChainable(txnDoc()));
+      accountsService.findOne.mockResolvedValue({
+        _id: new Types.ObjectId(ACC_A),
+        isArchived: true,
+      });
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, { amountCents: 5000 }),
+      ).resolves.toBeDefined();
     });
   });
 });

@@ -115,7 +115,7 @@ export class AccountsService {
     if (deltaCents === 0) {
       return;
     }
-    await this.accountModel
+    const result = await this.accountModel
       .updateOne(
         {
           _id: new Types.ObjectId(accountId),
@@ -124,6 +124,16 @@ export class AccountsService {
         { $inc: { balanceCents: deltaCents } },
       )
       .exec();
+    // The caller has already validated the account belongs to the household, so
+    // a zero match means the account vanished underneath us (concurrent hard
+    // delete). The $inc silently no-ops, leaving the cached balance drifted —
+    // surface it loudly rather than letting it pass unnoticed.
+    if (result.matchedCount === 0) {
+      this.logger.error(
+        { householdId, accountId, deltaCents },
+        'applyBalanceDelta matched no account; cached balance is now drifted',
+      );
+    }
   }
 
   /**

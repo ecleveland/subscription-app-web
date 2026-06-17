@@ -33,9 +33,11 @@ export class Account {
   type: AccountType;
 
   // Cached balance in integer minor units (cents) — never a float (see
-  // budgeting.md § Money handling). Derived from transactions and recomputed on
-  // transaction write (VEG-399); seeded here from the opening balance. Credit
-  // and loan accounts carry negative balances. The integer invariant is enforced
+  // budgeting.md § Money handling). Seeded here from the opening balance and
+  // kept in sync incrementally on every transaction write via
+  // TransactionsService → applyBalanceDelta ($inc), rather than re-summed
+  // (VEG-399). Credit and loan accounts carry negative balances. The integer
+  // invariant is enforced
   // at the schema layer (not just the create DTO) so the VEG-399 recompute path,
   // which bypasses the DTO, cannot persist a float.
   @Prop({

@@ -220,6 +220,19 @@ describe('AccountsService', () => {
       await service.applyBalanceDelta(HOUSEHOLD_ID, ACCOUNT_ID, 0);
       expect(mockAccountModel.updateOne).not.toHaveBeenCalled();
     });
+
+    it('logs an error when no account matched (drift)', async () => {
+      const errorSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      mockAccountModel.updateOne.mockReturnValue(
+        createChainable({ matchedCount: 0 }),
+      );
+
+      await service.applyBalanceDelta(HOUSEHOLD_ID, ACCOUNT_ID, -4200);
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('archive', () => {

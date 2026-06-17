@@ -40,15 +40,26 @@ export class Transaction {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Category' })
   categoryId?: MongooseSchema.Types.ObjectId;
 
-  // Attribution: the HouseholdMember who recorded the transaction.
+  // Attribution: the HouseholdMember who recorded the transaction. Optional —
+  // not every write path supplies it (mirrors Subscription.memberId).
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'HouseholdMember' })
-  memberId: MongooseSchema.Types.ObjectId;
+  memberId?: MongooseSchema.Types.ObjectId;
 
   @Prop({ required: true, enum: TransactionType })
   type: TransactionType;
 
   // Positive integer magnitude in minor units (cents); sign comes from `type`.
-  @Prop({ required: true })
+  // Enforced at the schema layer (not just the create DTO) so the Phase 4
+  // recurring-materialization path, which bypasses the DTO, can't persist a
+  // float or non-positive amount that would corrupt balance arithmetic.
+  @Prop({
+    required: true,
+    min: 1,
+    validate: {
+      validator: Number.isInteger,
+      message: 'amountCents must be a positive integer (minor units)',
+    },
+  })
   amountCents: number;
 
   @Prop({ required: true })

@@ -15,6 +15,7 @@ import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { QueryTransactionDto } from './dto/query-transaction.dto';
 import { AccountsService } from '../accounts/accounts.service';
+import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
 
 // The normalized, validated reference/effect shape of a transaction, derived
@@ -67,7 +68,7 @@ export class TransactionsService {
       categoryId: dto.categoryId,
       transferAccountId: dto.transferAccountId,
     });
-    await this.validateReferences(householdId, resolved);
+    await this.validateReferences(householdId, resolved, true);
 
     const created = await new this.transactionModel({
       householdId: new Types.ObjectId(householdId),
@@ -88,7 +89,12 @@ export class TransactionsService {
       cleared: dto.cleared ?? false,
     }).save();
 
-    await this.applyDeltas(householdId, this.balanceDeltas(resolved), 1);
+    await this.syncBalances(
+      householdId,
+      [],
+      this.balanceDeltas(resolved),
+      created._id.toString(),
+    );
     this.logger.log(
       { householdId, transactionId: created._id.toString() },
       'Transaction created',
@@ -201,8 +207,12 @@ export class TransactionsService {
     const saved = await existing.save();
 
     // Reverse the old effect on the old account(s), then apply the new effect.
-    await this.applyDeltas(householdId, this.balanceDeltas(before), -1);
-    await this.applyDeltas(householdId, this.balanceDeltas(merged), 1);
+    await this.syncBalances(
+      householdId,
+      this.balanceDeltas(before),
+      this.balanceDeltas(merged),
+      id,
+    );
 
     this.logger.log({ householdId, transactionId: id }, 'Transaction updated');
     return saved;
@@ -217,7 +227,7 @@ export class TransactionsService {
       .exec();
 
     // Reverse the deleted transaction's effect on its account balance(s).
-    await this.applyDeltas(householdId, this.balanceDeltas(before), -1);
+    await this.syncBalances(householdId, this.balanceDeltas(before), [], id);
     this.logger.log({ householdId, transactionId: id }, 'Transaction deleted');
   }
 
@@ -239,8 +249,19 @@ export class TransactionsService {
   private async validateReferences(
     householdId: string,
     t: ResolvedTransaction,
+    forCreate = false,
   ): Promise<void> {
-    await this.assertAccountInHousehold(householdId, t.accountId);
+    const account = await this.assertAccountInHousehold(
+      householdId,
+      t.accountId,
+    );
+    // New activity can't be recorded against an archived account, but updates
+    // and deletes still must work so existing entries can be corrected/reversed.
+    if (forCreate && account.isArchived) {
+      throw new BadRequestException(
+        'Cannot record a transaction on an archived account',
+      );
+    }
 
     if (t.type === TransactionType.TRANSFER) {
       if (!t.transferAccountId) {
@@ -253,7 +274,13 @@ export class TransactionsService {
           'A transfer must use two different accounts',
         );
       }
-      await this.assertAccountInHousehold(householdId, t.transferAccountId);
+      const destination = await this.assertAccountInHousehold(
+        householdId,
+        t.transferAccountId,
+      );
+      if (forCreate && destination.isArchived) {
+        throw new BadRequestException('Cannot transfer to an archived account');
+      }
     } else {
       if (!t.categoryId) {
         throw new BadRequestException(
@@ -275,9 +302,9 @@ export class TransactionsService {
   private async assertAccountInHousehold(
     householdId: string,
     accountId: string,
-  ): Promise<void> {
+  ): Promise<AccountDocument> {
     try {
-      await this.accountsService.findOne(householdId, accountId);
+      return await this.accountsService.findOne(householdId, accountId);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw new BadRequestException(
@@ -303,6 +330,38 @@ export class TransactionsService {
             deltaCents: t.amountCents,
           },
         ];
+    }
+  }
+
+  /**
+   * Reverse a set of old balance effects and apply a set of new ones, keeping
+   * cached account balances in sync after a transaction write.
+   *
+   * Accepted trade-off: this app has no multi-document transactions (consistent
+   * with the rest of the codebase), so the transaction document is persisted
+   * before these `$inc`s run. If one throws — including the second leg of a
+   * transfer after the first succeeded — the cached balance can drift from the
+   * ledger. We can't roll back here, so we log the failure with full context
+   * (turning a silent drift into a greppable event) and rethrow; the balance can
+   * be re-derived from the ledger if reconciliation is ever needed.
+   */
+  private async syncBalances(
+    householdId: string,
+    reverse: BalanceDelta[],
+    apply: BalanceDelta[],
+    transactionId: string,
+  ): Promise<void> {
+    try {
+      await this.applyDeltas(householdId, reverse, -1);
+      await this.applyDeltas(householdId, apply, 1);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { householdId, transactionId },
+        `Balance sync failed after the transaction was persisted; cached ` +
+          `balance may be drifted from the ledger: ${message}`,
+      );
+      throw error;
     }
   }
 
