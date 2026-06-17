@@ -40,6 +40,10 @@ function duplicateKeyError(): Error {
   return Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
 }
 
+function ctx(role: HouseholdRole, householdId: string = HOUSEHOLD_ID) {
+  return { householdId, memberId: MEMBER_DOC_ID, role };
+}
+
 describe('HouseholdsService', () => {
   let service: HouseholdsService;
   let mockHouseholdModel: any;
@@ -91,6 +95,9 @@ describe('HouseholdsService', () => {
     mockMemberModel.findOne = jest.fn().mockReturnValue(createChainable(null));
     mockMemberModel.findById = jest.fn().mockReturnValue(createChainable(null));
     mockMemberModel.find = jest.fn().mockReturnValue(createChainable([]));
+    mockMemberModel.countDocuments = jest
+      .fn()
+      .mockReturnValue(createChainable(0));
     mockMemberModel.deleteOne = jest
       .fn()
       .mockReturnValue(createChainable({ deletedCount: 1 }));
@@ -358,11 +365,9 @@ describe('HouseholdsService', () => {
 
   describe('updateHousehold', () => {
     it('updates the household when the caller is the owner', async () => {
-      const result = await service.updateHousehold(
-        HOUSEHOLD_ID,
-        HouseholdRole.OWNER,
-        { name: 'New Name' },
-      );
+      const result = await service.updateHousehold(ctx(HouseholdRole.OWNER), {
+        name: 'New Name',
+      });
 
       expect(mockHouseholdModel.findByIdAndUpdate).toHaveBeenCalledWith(
         HOUSEHOLD_ID,
@@ -374,9 +379,7 @@ describe('HouseholdsService', () => {
 
     it('forbids a non-owner from updating', async () => {
       await expect(
-        service.updateHousehold(HOUSEHOLD_ID, HouseholdRole.ADULT, {
-          name: 'New Name',
-        }),
+        service.updateHousehold(ctx(HouseholdRole.ADULT), { name: 'New Name' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(mockHouseholdModel.findByIdAndUpdate).not.toHaveBeenCalled();
     });
@@ -387,9 +390,7 @@ describe('HouseholdsService', () => {
       );
 
       await expect(
-        service.updateHousehold(HOUSEHOLD_ID, HouseholdRole.OWNER, {
-          name: 'New Name',
-        }),
+        service.updateHousehold(ctx(HouseholdRole.OWNER), { name: 'New Name' }),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
@@ -397,7 +398,7 @@ describe('HouseholdsService', () => {
   describe('inviteMember', () => {
     it('forbids a non-owner from inviting', async () => {
       await expect(
-        service.inviteMember(HOUSEHOLD_ID, HouseholdRole.ADULT, {
+        service.inviteMember(ctx(HouseholdRole.ADULT), {
           email: 'new@example.com',
         }),
       ).rejects.toBeInstanceOf(ForbiddenException);
@@ -412,18 +413,43 @@ describe('HouseholdsService', () => {
       );
 
       await expect(
-        service.inviteMember(HOUSEHOLD_ID, HouseholdRole.OWNER, {
+        service.inviteMember(ctx(HouseholdRole.OWNER), {
           email: 'new@example.com',
         }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it('creates a hashed, pending invitation and emails the raw token', async () => {
-      const invitation = await service.inviteMember(
-        HOUSEHOLD_ID,
-        HouseholdRole.OWNER,
-        { email: 'New@Example.com' },
+    it('invites a registered user who is not yet a member of this household', async () => {
+      mockUserModel.findOne.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId(OTHER_USER_ID) }),
       );
+      mockMemberModel.findOne.mockReturnValue(createChainable(null)); // not a member
+
+      const invitation = await service.inviteMember(ctx(HouseholdRole.OWNER), {
+        email: 'registered@example.com',
+      });
+
+      expect(mockInvitationModel.mock.calls).toHaveLength(1);
+      expect(invitation._id.toString()).toBe(INVITATION_ID);
+    });
+
+    it('still persists the invitation when the email send fails', async () => {
+      mockMailService.sendInvitationEmail.mockRejectedValue(
+        new Error('smtp down'),
+      );
+
+      const invitation = await service.inviteMember(ctx(HouseholdRole.OWNER), {
+        email: 'unreachable@example.com',
+      });
+
+      expect(invitation._id.toString()).toBe(INVITATION_ID);
+      expect(mockInvitationModel.mock.calls).toHaveLength(1);
+    });
+
+    it('creates a hashed, pending invitation and emails the raw token', async () => {
+      const invitation = await service.inviteMember(ctx(HouseholdRole.OWNER), {
+        email: 'New@Example.com',
+      });
 
       // Supersedes prior pending invites for the same household+email.
       const revokeFilter = mockInvitationModel.updateMany.mock.calls[0][0];
@@ -450,7 +476,7 @@ describe('HouseholdsService', () => {
     });
 
     it('respects an explicit role', async () => {
-      await service.inviteMember(HOUSEHOLD_ID, HouseholdRole.OWNER, {
+      await service.inviteMember(ctx(HouseholdRole.OWNER), {
         email: 'teen@example.com',
         role: HouseholdRole.TEEN,
       });
@@ -482,6 +508,18 @@ describe('HouseholdsService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
+    it('only matches pending, unexpired invitations', async () => {
+      mockInvitationModel.findOne.mockReturnValue(createChainable(null));
+
+      await service
+        .acceptInvitation(OTHER_USER_ID, 'tok')
+        .catch(() => undefined);
+
+      const filter = mockInvitationModel.findOne.mock.calls[0][0];
+      expect(filter.status).toBe(InvitationStatus.PENDING);
+      expect(filter.expiresAt.$gt).toBeInstanceOf(Date);
+    });
+
     it('forbids accepting when the user email does not match the invite', async () => {
       mockInvitationModel.findOne.mockReturnValue(
         createChainable(pendingInvitation()),
@@ -511,7 +549,18 @@ describe('HouseholdsService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('switches the active membership in place and marks the invite accepted', async () => {
+    function activeMembershipDoc(role: HouseholdRole) {
+      return {
+        _id: new Types.ObjectId(MEMBER_DOC_ID),
+        householdId: new Types.ObjectId(OTHER_HOUSEHOLD_ID),
+        role,
+        save: jest.fn().mockImplementation(function (this: any) {
+          return Promise.resolve(this);
+        }),
+      };
+    }
+
+    it('switches a solo owner’s active membership in place and marks accepted', async () => {
       const invitation = pendingInvitation();
       mockInvitationModel.findOne.mockReturnValue(createChainable(invitation));
       mockUserModel.findById.mockReturnValue(
@@ -520,18 +569,13 @@ describe('HouseholdsService', () => {
           email: 'invitee@example.com',
         }),
       );
-      // No existing link to the invited household; user has a personal active row.
-      const activeMembership = {
-        _id: new Types.ObjectId(MEMBER_DOC_ID),
-        householdId: new Types.ObjectId(OTHER_HOUSEHOLD_ID),
-        role: HouseholdRole.OWNER,
-        save: jest.fn().mockImplementation(function (this: any) {
-          return Promise.resolve(this);
-        }),
-      };
+      // No existing link to the invited household; user owns a solo personal
+      // household (no other members), so the switch is allowed.
+      const activeMembership = activeMembershipDoc(HouseholdRole.OWNER);
       mockMemberModel.findOne
-        .mockReturnValueOnce(createChainable(null)) // existing link lookup
+        .mockReturnValueOnce(createChainable(null)) // existing-active lookup
         .mockReturnValueOnce(createChainable(activeMembership)); // active membership
+      mockMemberModel.countDocuments.mockReturnValue(createChainable(0));
 
       const result = await service.acceptInvitation(OTHER_USER_ID, 'tok');
 
@@ -541,6 +585,70 @@ describe('HouseholdsService', () => {
       expect(invitation.status).toBe(InvitationStatus.ACCEPTED);
       expect(invitation.save).toHaveBeenCalledTimes(1);
       expect(result).toBe(activeMembership);
+    });
+
+    it('blocks an owner of a multi-member household from accepting', async () => {
+      const invitation = pendingInvitation();
+      mockInvitationModel.findOne.mockReturnValue(createChainable(invitation));
+      mockUserModel.findById.mockReturnValue(
+        createChainable({
+          _id: new Types.ObjectId(OTHER_USER_ID),
+          email: 'invitee@example.com',
+        }),
+      );
+      const activeMembership = activeMembershipDoc(HouseholdRole.OWNER);
+      mockMemberModel.findOne
+        .mockReturnValueOnce(createChainable(null))
+        .mockReturnValueOnce(createChainable(activeMembership));
+      mockMemberModel.countDocuments.mockReturnValue(createChainable(1)); // other members
+
+      await expect(
+        service.acceptInvitation(OTHER_USER_ID, 'tok'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(activeMembership.save).not.toHaveBeenCalled();
+      expect(invitation.status).toBe(InvitationStatus.PENDING);
+    });
+
+    it('translates a duplicate-key error on switch into a ConflictException', async () => {
+      const invitation = pendingInvitation();
+      mockInvitationModel.findOne.mockReturnValue(createChainable(invitation));
+      mockUserModel.findById.mockReturnValue(
+        createChainable({
+          _id: new Types.ObjectId(OTHER_USER_ID),
+          email: 'invitee@example.com',
+        }),
+      );
+      const activeMembership = activeMembershipDoc(HouseholdRole.ADULT);
+      activeMembership.save.mockRejectedValueOnce(duplicateKeyError());
+      mockMemberModel.findOne
+        .mockReturnValueOnce(createChainable(null))
+        .mockReturnValueOnce(createChainable(activeMembership));
+
+      await expect(
+        service.acceptInvitation(OTHER_USER_ID, 'tok'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('creates a new active membership when the user has none', async () => {
+      const invitation = pendingInvitation();
+      mockInvitationModel.findOne.mockReturnValue(createChainable(invitation));
+      mockUserModel.findById.mockReturnValue(
+        createChainable({
+          _id: new Types.ObjectId(OTHER_USER_ID),
+          email: 'invitee@example.com',
+        }),
+      );
+      // No existing-active row and no active membership at all.
+      mockMemberModel.findOne
+        .mockReturnValueOnce(createChainable(null))
+        .mockReturnValueOnce(createChainable(null));
+
+      await service.acceptInvitation(OTHER_USER_ID, 'tok');
+
+      const memberArgs = mockMemberModel.mock.calls[0][0];
+      expect(memberArgs.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(memberArgs.status).toBe(MembershipStatus.ACTIVE);
+      expect(invitation.status).toBe(InvitationStatus.ACCEPTED);
     });
 
     it('is idempotent when the user is already linked to the invited household', async () => {
@@ -571,6 +679,7 @@ describe('HouseholdsService', () => {
       return {
         _id: new Types.ObjectId(MEMBER_DOC_ID),
         householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        userId: new Types.ObjectId(OTHER_USER_ID),
         role: HouseholdRole.ADULT,
         ...overrides,
       };
@@ -578,7 +687,7 @@ describe('HouseholdsService', () => {
 
     it('forbids a non-owner from removing members', async () => {
       await expect(
-        service.removeMember(HOUSEHOLD_ID, HouseholdRole.ADULT, MEMBER_DOC_ID),
+        service.removeMember(ctx(HouseholdRole.ADULT), MEMBER_DOC_ID),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
@@ -586,7 +695,7 @@ describe('HouseholdsService', () => {
       mockMemberModel.findById.mockReturnValue(createChainable(null));
 
       await expect(
-        service.removeMember(HOUSEHOLD_ID, HouseholdRole.OWNER, MEMBER_DOC_ID),
+        service.removeMember(ctx(HouseholdRole.OWNER), MEMBER_DOC_ID),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -598,7 +707,7 @@ describe('HouseholdsService', () => {
       );
 
       await expect(
-        service.removeMember(HOUSEHOLD_ID, HouseholdRole.OWNER, MEMBER_DOC_ID),
+        service.removeMember(ctx(HouseholdRole.OWNER), MEMBER_DOC_ID),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(mockMemberModel.deleteOne).not.toHaveBeenCalled();
     });
@@ -609,23 +718,44 @@ describe('HouseholdsService', () => {
       );
 
       await expect(
-        service.removeMember(HOUSEHOLD_ID, HouseholdRole.OWNER, MEMBER_DOC_ID),
+        service.removeMember(ctx(HouseholdRole.OWNER), MEMBER_DOC_ID),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(mockMemberModel.deleteOne).not.toHaveBeenCalled();
     });
 
-    it('deletes the member when the owner removes a non-owner', async () => {
+    it('deletes the member and re-provisions them a personal household', async () => {
       mockMemberModel.findById.mockReturnValue(createChainable(member()));
-
-      await service.removeMember(
-        HOUSEHOLD_ID,
-        HouseholdRole.OWNER,
-        MEMBER_DOC_ID,
+      mockUserModel.findById.mockReturnValue(
+        createChainable({
+          _id: new Types.ObjectId(OTHER_USER_ID),
+          username: 'removed',
+          displayName: 'Removed User',
+        }),
       );
+
+      await service.removeMember(ctx(HouseholdRole.OWNER), MEMBER_DOC_ID);
 
       expect(mockMemberModel.deleteOne.mock.calls[0][0]._id.toString()).toBe(
         MEMBER_DOC_ID,
       );
+      // Re-provisions a personal household for the removed user (createHousehold
+      // → new household named after them).
+      expect(mockHouseholdModel.mock.calls[0][0].name).toBe(
+        "Removed User's Household",
+      );
+      expect(mockHouseholdModel.mock.calls[0][0].ownerId.toString()).toBe(
+        OTHER_USER_ID,
+      );
+    });
+
+    it('does not fail the removal if re-provisioning throws', async () => {
+      mockMemberModel.findById.mockReturnValue(createChainable(member()));
+      householdSave.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        service.removeMember(ctx(HouseholdRole.OWNER), MEMBER_DOC_ID),
+      ).resolves.toBeUndefined();
+      expect(mockMemberModel.deleteOne).toHaveBeenCalledTimes(1);
     });
   });
 });

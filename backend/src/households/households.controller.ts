@@ -53,11 +53,7 @@ export class HouseholdsController {
     @Req() req: HouseholdRequest,
     @Body() dto: UpdateHouseholdDto,
   ) {
-    return this.householdsService.updateHousehold(
-      req.household.householdId,
-      req.household.role,
-      dto,
-    );
+    return this.householdsService.updateHousehold(req.household, dto);
   }
 
   @Get('me/members')
@@ -75,11 +71,7 @@ export class HouseholdsController {
   @ApiResponse({ status: 403, description: 'Caller is not the owner' })
   @ApiResponse({ status: 409, description: 'User is already a member' })
   inviteMember(@Req() req: HouseholdRequest, @Body() dto: InviteMemberDto) {
-    return this.householdsService.inviteMember(
-      req.household.householdId,
-      req.household.role,
-      dto,
-    );
+    return this.householdsService.inviteMember(req.household, dto);
   }
 
   @Post('invitations/accept')
@@ -105,10 +97,6 @@ export class HouseholdsController {
   @ApiResponse({ status: 403, description: 'Caller is not the owner' })
   @ApiResponse({ status: 404, description: 'Member not found' })
   removeMember(@Req() req: HouseholdRequest, @Param('id') id: string) {
-    return this.householdsService.removeMember(
-      req.household.householdId,
-      req.household.role,
-      id,
-    );
+    return this.householdsService.removeMember(req.household, id);
   }
 }

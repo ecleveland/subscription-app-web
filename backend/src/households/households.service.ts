@@ -29,6 +29,7 @@ import { UpdateHouseholdDto } from './dto/update-household.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { MAIL_SERVICE } from '../mail/mail.service';
 import type { MailService } from '../mail/mail.service';
+import type { HouseholdContext } from './interfaces/household-request.interface';
 
 export interface AddMemberParams {
   householdId: string;
@@ -167,9 +168,9 @@ export class HouseholdsService {
 
   // ---------------------------------------------------------------------------
   // VEG-390 — household management + member-invitation API.
-  // Methods below assume the caller's active household has already been resolved
-  // by HouseholdGuard; `householdId`/`role` come from `req.household`, never from
-  // client input. Owner-gated operations re-assert the role server-side.
+  // Owner-gated methods take the HouseholdContext that HouseholdGuard resolved
+  // and attached to `req.household` (householdId + role come from the same
+  // trusted source, never client input) and re-assert the role server-side.
   // ---------------------------------------------------------------------------
 
   /** Fetch a household plus its members (with user display info populated). */
@@ -198,13 +199,15 @@ export class HouseholdsService {
 
   /** Update a household's name/currency. Owner-only. */
   async updateHousehold(
-    householdId: string,
-    role: HouseholdRole,
+    ctx: HouseholdContext,
     dto: UpdateHouseholdDto,
   ): Promise<HouseholdDocument> {
-    this.assertOwner(role);
+    this.assertOwner(ctx.role);
     const updated = await this.householdModel
-      .findByIdAndUpdate(householdId, dto, { new: true, runValidators: true })
+      .findByIdAndUpdate(ctx.householdId, dto, {
+        new: true,
+        runValidators: true,
+      })
       .exec();
     if (!updated) {
       throw new NotFoundException('Household not found');
@@ -219,12 +222,12 @@ export class HouseholdsService {
    * any prior pending invitation for that household.
    */
   async inviteMember(
-    householdId: string,
-    role: HouseholdRole,
+    ctx: HouseholdContext,
     dto: InviteMemberDto,
   ): Promise<InvitationDocument> {
-    this.assertOwner(role);
+    this.assertOwner(ctx.role);
 
+    const householdId = ctx.householdId;
     const email = dto.email.toLowerCase();
     const invitedRole = dto.role ?? HouseholdRole.ADULT;
 
@@ -271,20 +274,35 @@ export class HouseholdsService {
     }).save();
 
     const household = await this.householdModel.findById(householdId).exec();
+    if (!household) {
+      // The household was just resolved by HouseholdGuard and we wrote an
+      // invitation scoped to it, so a null here is a real data-integrity
+      // anomaly (deleted out from under us / replica lag) — surface it rather
+      // than silently emailing an invite to "your household".
+      this.logger.warn(
+        { householdId },
+        'Household not found while composing invitation email',
+      );
+    }
     const householdName = household?.name ?? 'your household';
     const frontendUrl =
       this.configService.get<string>('frontendUrl') || 'http://localhost:3000';
     const inviteUrl = `${frontendUrl}/invitations/accept?token=${plainToken}`;
 
+    const invitationId = invitation._id.toString();
     void this.mailService
       .sendInvitationEmail(email, inviteUrl, householdName)
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`Failed to send invitation email: ${message}`);
+        // Include ids so the dangling PENDING invitation is correlatable.
+        this.logger.error(
+          { householdId, invitationId },
+          `Failed to send invitation email: ${message}`,
+        );
       });
 
     this.logger.log(
-      { householdId, invitationId: invitation._id.toString() },
+      { householdId, invitationId },
       'Household invitation created',
     );
     return invitation;
@@ -323,16 +341,19 @@ export class HouseholdsService {
 
     const householdId = invitation.householdId as unknown as Types.ObjectId;
 
-    // Already linked to the invited household — accept idempotently.
-    const existingLink = await this.memberModel
+    // Already an ACTIVE member of the invited household — accept idempotently.
+    // Filtered to ACTIVE so a stale non-active row can't short-circuit a real
+    // join (which would burn the token while leaving the user un-switched).
+    const existingActive = await this.memberModel
       .findOne({
         householdId,
         userId: user._id,
+        status: MembershipStatus.ACTIVE,
       } as Record<string, unknown>)
       .exec();
-    if (existingLink) {
+    if (existingActive) {
       await this.markAccepted(invitation);
-      return existingLink;
+      return existingActive;
     }
 
     // Switch the user's active household in place (or create one if somehow
@@ -340,10 +361,27 @@ export class HouseholdsService {
     const active = await this.findMembershipByUser(userId);
     let membership: HouseholdMemberDocument;
     if (active) {
-      active.householdId = householdId as never;
+      // Don't strand a shared household: an owner leaving a household that has
+      // other members would leave it with no owner (permanently unmanageable).
+      if (active.role === HouseholdRole.OWNER) {
+        const others = await this.memberModel
+          .countDocuments({
+            householdId: active.householdId,
+            userId: { $ne: user._id },
+          } as Record<string, unknown>)
+          .exec();
+        if (others > 0) {
+          throw new ConflictException(
+            'You own a household with other members. Remove them or transfer ' +
+              'ownership before joining another household.',
+          );
+        }
+      }
+
+      active.householdId = householdId as unknown as typeof active.householdId;
       active.role = invitation.role;
       active.joinedAt = new Date();
-      membership = await active.save();
+      membership = await this.saveSwitch(active);
     } else {
       membership = await this.addMember({
         householdId: householdId.toString(),
@@ -361,19 +399,20 @@ export class HouseholdsService {
     return membership;
   }
 
-  /** Remove a member from a household. Owner-only; the owner cannot be removed. */
-  async removeMember(
-    householdId: string,
-    role: HouseholdRole,
-    memberId: string,
-  ): Promise<void> {
-    this.assertOwner(role);
+  /**
+   * Remove a member from a household. Owner-only; the owner cannot be removed.
+   * The removed user is re-provisioned a personal household so they aren't
+   * locked out of every household-scoped route (HouseholdGuard needs an active
+   * membership). Shared data stays with the household they left.
+   */
+  async removeMember(ctx: HouseholdContext, memberId: string): Promise<void> {
+    this.assertOwner(ctx.role);
 
     const member = await this.memberModel.findById(memberId).exec();
     if (
       !member ||
       (member.householdId as unknown as Types.ObjectId).toString() !==
-        householdId
+        ctx.householdId
     ) {
       throw new NotFoundException('Member not found');
     }
@@ -381,9 +420,58 @@ export class HouseholdsService {
       throw new ForbiddenException('Cannot remove the household owner');
     }
 
+    const removedUserId = (
+      member.userId as unknown as Types.ObjectId
+    ).toString();
     await this.memberModel
       .deleteOne({ _id: member._id } as Record<string, unknown>)
       .exec();
+
+    await this.provisionPersonalHousehold(removedUserId);
+  }
+
+  /**
+   * Create a fresh personal household + active owner membership for a user who
+   * would otherwise have no active household (e.g. after being removed from a
+   * shared one). Mirrors the naming used at registration. Best-effort: a failure
+   * here must not undo the removal, so it is logged rather than thrown.
+   */
+  private async provisionPersonalHousehold(userId: string): Promise<void> {
+    try {
+      const user = await this.userModel.findById(userId).exec();
+      const label = user?.displayName?.trim() || user?.username || 'My';
+      await this.createHousehold(userId, { name: `${label}'s Household` });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { userId },
+        `Failed to re-provision personal household after removal: ${message}`,
+      );
+    }
+  }
+
+  /**
+   * Persist an in-place active-household switch, translating a duplicate-key
+   * error (the user already has a row for the target household) into a clean
+   * ConflictException instead of a raw Mongo 500 — mirrors addMember.
+   */
+  private async saveSwitch(
+    member: HouseholdMemberDocument,
+  ): Promise<HouseholdMemberDocument> {
+    try {
+      return await member.save();
+    } catch (error: unknown) {
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        (error as { code: number }).code === 11000
+      ) {
+        throw new ConflictException(
+          'You are already a member of that household',
+        );
+      }
+      throw error;
+    }
   }
 
   private assertOwner(role: HouseholdRole): void {

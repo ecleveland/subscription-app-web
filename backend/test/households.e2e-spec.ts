@@ -53,7 +53,9 @@ describe('Households (e2e)', () => {
       .send({ email, ...(role ? { role } : {}) })
       .expect(201);
 
-    const inviteUrl = mail.mock.calls[0][1] as string;
+    // Read the most recent send so repeated invites within a test each return
+    // their own token.
+    const inviteUrl = mail.mock.calls.at(-1)![1] as string;
     return new URL(inviteUrl).searchParams.get('token') as string;
   }
 
@@ -279,6 +281,96 @@ describe('Households (e2e)', () => {
         .delete(`/api/households/me/members/${ownerMemberId}`)
         .set(auth(outsider.token))
         .expect(404);
+    });
+
+    it('rejects inviting a member as owner', async () => {
+      const owner = await register(app, 'roleguard');
+      await request(app.getHttpServer())
+        .post('/api/households/me/invitations')
+        .set(auth(owner.token))
+        .send({ email: 'someone@example.com', role: 'owner' })
+        .expect(400);
+    });
+
+    it('supersedes a prior invitation: the old token stops working', async () => {
+      const owner = await register(app, 'supersede');
+      const invitee = await register(app, 'supersedee');
+
+      const firstToken = await invite(owner.token, invitee.email);
+      const secondToken = await invite(owner.token, invitee.email);
+      expect(firstToken).not.toBe(secondToken);
+
+      // The superseded (first) token is now revoked → rejected.
+      await request(app.getHttpServer())
+        .post('/api/households/invitations/accept')
+        .set(auth(invitee.token))
+        .send({ token: firstToken })
+        .expect(400);
+
+      // The newest token still works.
+      await request(app.getHttpServer())
+        .post('/api/households/invitations/accept')
+        .set(auth(invitee.token))
+        .send({ token: secondToken })
+        .expect(201);
+    });
+  });
+
+  describe('household lifecycle edges', () => {
+    it('blocks an owner of a multi-member household from accepting elsewhere', async () => {
+      const owner = await register(app, 'multiowner');
+      const member = await register(app, 'multimember');
+
+      // owner's household becomes multi-member.
+      const joinToken = await invite(owner.token, member.email);
+      await request(app.getHttpServer())
+        .post('/api/households/invitations/accept')
+        .set(auth(member.token))
+        .send({ token: joinToken })
+        .expect(201);
+
+      // A third party invites the owner away.
+      const outsider = await register(app, 'multioutsider');
+      const lureToken = await invite(outsider.token, owner.email);
+
+      // The owner cannot abandon a household that still has other members.
+      await request(app.getHttpServer())
+        .post('/api/households/invitations/accept')
+        .set(auth(owner.token))
+        .send({ token: lureToken })
+        .expect(409);
+    });
+
+    it('re-provisions a personal household for a removed member', async () => {
+      const owner = await register(app, 'evicter');
+      const member = await register(app, 'evictee');
+
+      const joinToken = await invite(owner.token, member.email);
+      await request(app.getHttpServer())
+        .post('/api/households/invitations/accept')
+        .set(auth(member.token))
+        .send({ token: joinToken })
+        .expect(201);
+
+      const members = await request(app.getHttpServer())
+        .get('/api/households/me/members')
+        .set(auth(owner.token))
+        .expect(200);
+      const memberId = members.body.find((m: any) => m.role === 'adult')._id;
+
+      await request(app.getHttpServer())
+        .delete(`/api/households/me/members/${memberId}`)
+        .set(auth(owner.token))
+        .expect(204);
+
+      // The removed member is not locked out: they land in a fresh personal
+      // household where they are the owner.
+      const view = await request(app.getHttpServer())
+        .get('/api/households/me')
+        .set(auth(member.token))
+        .expect(200);
+      expect(view.body.members).toHaveLength(1);
+      expect(view.body.members[0].role).toBe('owner');
     });
   });
 });
