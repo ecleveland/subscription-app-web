@@ -81,7 +81,15 @@ export class AccountsService {
     dto: UpdateAccountDto,
   ): Promise<AccountDocument> {
     const existing = await this.findOne(householdId, id);
-    Object.assign(existing, dto);
+    // Assign only the fields actually provided. A PartialType DTO instance can
+    // carry unset optional fields as `undefined` own-properties (TS class
+    // fields); assigning those would clobber required schema fields like
+    // `isArchived`/`balanceCents` and fail validation on save.
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        (existing as unknown as Record<string, unknown>)[key] = value;
+      }
+    }
     const saved = await existing.save();
     this.logger.log({ householdId, accountId: id }, 'Account updated');
     return saved;
