@@ -5,6 +5,23 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
+/** Format integer minor units (cents) as a currency string, e.g. -1234 -> -$12.34. */
+export function formatCents(cents: number): string {
+  return formatCurrency(cents / 100);
+}
+
+/**
+ * Convert a user-entered dollar amount to integer cents, or null if it isn't a
+ * valid non-negative number. Rounds to the nearest cent to avoid float drift.
+ */
+export function dollarsToCents(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) {
+    return null;
+  }
+  return Math.round(parseFloat(trimmed) * 100);
+}
+
 export function formatDate(date: Date | string): string {
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',

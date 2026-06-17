@@ -1,4 +1,33 @@
-import { formatCurrency, formatDate, getDailyCost, getWeeklyCost, getMonthlyCost, getYearlyCost, getPersonalShare, daysUntil } from '../utils';
+import { formatCurrency, formatDate, getDailyCost, getWeeklyCost, getMonthlyCost, getYearlyCost, getPersonalShare, daysUntil, formatCents, dollarsToCents } from '../utils';
+
+describe('formatCents', () => {
+  it('formats positive cents', () => {
+    expect(formatCents(1234)).toBe('$12.34');
+  });
+  it('formats negative cents (credit/loan balances)', () => {
+    expect(formatCents(-4500)).toBe('-$45.00');
+  });
+  it('formats zero', () => {
+    expect(formatCents(0)).toBe('$0.00');
+  });
+});
+
+describe('dollarsToCents', () => {
+  it.each([
+    ['12.34', 1234],
+    ['1000', 100000],
+    ['0.05', 5],
+    ['19.99', 1999],
+  ])('parses %s -> %d cents', (input, expected) => {
+    expect(dollarsToCents(input)).toBe(expected);
+  });
+  it.each(['', 'abc', '-5', '1.234', '1,000'])(
+    'rejects %s',
+    (input) => {
+      expect(dollarsToCents(input)).toBeNull();
+    },
+  );
+});
 
 describe('formatCurrency', () => {
   it('should format a typical price', () => {

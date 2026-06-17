@@ -599,6 +599,31 @@ describe('Transactions (e2e)', () => {
     });
   });
 
+  describe('editing fields', () => {
+    it('clears a payee when an empty string is sent', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: checkingA,
+          type: 'expense',
+          amountCents: 100,
+          date: '2026-05-20',
+          categoryId: expenseCatA,
+          payee: 'Original',
+        })
+        .expect(201);
+      expect(created.body.payee).toBe('Original');
+
+      const updated = await request(app.getHttpServer())
+        .patch(`/api/transactions/${created.body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ payee: '' })
+        .expect(200);
+      expect(updated.body.payee ?? '').toBe('');
+    });
+  });
+
   describe('auth', () => {
     it('returns 401 without a token', async () => {
       await request(app.getHttpServer()).get('/api/transactions').expect(401);

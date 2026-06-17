@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { HouseholdProvider } from "@/lib/household-context";
+import { AccountsProvider } from "@/lib/accounts-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import Header from "@/components/Header";
 import ToastProvider from "@/components/ToastProvider";
@@ -42,8 +43,10 @@ export default function RootLayout({
         <ThemeProvider>
           <AuthProvider>
             <HouseholdProvider>
-              <Header />
-              {children}
+              <AccountsProvider>
+                <Header />
+                {children}
+              </AccountsProvider>
             </HouseholdProvider>
           </AuthProvider>
           <ToastProvider />

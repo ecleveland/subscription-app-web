@@ -1,6 +1,5 @@
 import {
   IsString,
-  IsNotEmpty,
   IsEnum,
   IsInt,
   IsOptional,
@@ -56,13 +55,14 @@ export class CreateTransactionDto {
   @IsMongoId()
   transferAccountId?: string;
 
+  // Optional; an empty string is allowed so an update can clear a previously-set
+  // payee (the create path omits it when blank).
   @ApiPropertyOptional({
     description: 'Payee / description',
     example: 'Whole Foods',
   })
   @IsOptional()
   @IsString()
-  @IsNotEmpty()
   payee?: string;
 
   @ApiPropertyOptional({ description: 'Free-form notes' })

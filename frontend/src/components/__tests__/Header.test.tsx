@@ -63,6 +63,26 @@ describe('Header', () => {
     expect(screen.getByText('Logout')).toBeInTheDocument();
   });
 
+  it('links to the accounts and transactions pages', () => {
+    authState = {
+      isAuthenticated: true,
+      user: { userId: '1', username: 'test', role: 'user' },
+      isAdmin: false,
+      logout: mockLogout,
+    };
+
+    render(<Header />);
+
+    expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute(
+      'href',
+      '/accounts',
+    );
+    expect(screen.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
+      'href',
+      '/transactions',
+    );
+  });
+
   it('should show a Household link', () => {
     authState = {
       isAuthenticated: true,
