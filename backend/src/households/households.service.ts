@@ -30,6 +30,7 @@ import { InviteMemberDto } from './dto/invite-member.dto';
 import { MAIL_SERVICE } from '../mail/mail.service';
 import type { MailService } from '../mail/mail.service';
 import type { HouseholdContext } from './interfaces/household-request.interface';
+import { CategoriesService } from '../categories/categories.service';
 
 export interface AddMemberParams {
   householdId: string;
@@ -70,6 +71,7 @@ export class HouseholdsService {
     private userModel: Model<UserDocument>,
     private configService: ConfigService,
     @Inject(MAIL_SERVICE) private mailService: MailService,
+    private categoriesService: CategoriesService,
   ) {}
 
   /**
@@ -108,6 +110,22 @@ export class HouseholdsService {
         .deleteOne({ _id: saved._id } as Record<string, unknown>)
         .catch(() => undefined);
       throw error;
+    }
+
+    // Seed the household's default categories so transactions have something to
+    // categorize against from day one. Best-effort: a failure here must not undo
+    // a successfully-created household (categories are repairable), so it's
+    // logged and the idempotent startup backfill re-runs the seed next boot.
+    try {
+      await this.categoriesService.seedDefaultsForHousehold(
+        saved._id.toString(),
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { householdId: saved._id.toString() },
+        `Default category seeding failed; will be backfilled at startup: ${message}`,
+      );
     }
 
     this.logger.log(

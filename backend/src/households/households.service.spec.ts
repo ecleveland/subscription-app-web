@@ -19,6 +19,7 @@ import {
 import { Invitation, InvitationStatus } from './schemas/invitation.schema';
 import { User } from '../users/schemas/user.schema';
 import { MAIL_SERVICE } from '../mail/mail.service';
+import { CategoriesService } from '../categories/categories.service';
 
 const OWNER_ID = '507f1f77bcf86cd799439011';
 const HOUSEHOLD_ID = '507f191e810c19729de860ea';
@@ -51,6 +52,7 @@ describe('HouseholdsService', () => {
   let mockInvitationModel: any;
   let mockUserModel: any;
   let mockMailService: any;
+  let mockCategoriesService: any;
   let householdSave: jest.Mock;
   let memberSave: jest.Mock;
   let invitationSave: jest.Mock;
@@ -125,6 +127,10 @@ describe('HouseholdsService', () => {
       sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
     };
 
+    mockCategoriesService = {
+      seedDefaultsForHousehold: jest.fn().mockResolvedValue(0),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         HouseholdsService,
@@ -150,6 +156,7 @@ describe('HouseholdsService', () => {
           },
         },
         { provide: MAIL_SERVICE, useValue: mockMailService },
+        { provide: CategoriesService, useValue: mockCategoriesService },
       ],
     }).compile();
 
@@ -207,6 +214,27 @@ describe('HouseholdsService', () => {
       expect(mockHouseholdModel.deleteOne.mock.calls[0][0]._id.toString()).toBe(
         HOUSEHOLD_ID,
       );
+    });
+
+    it('seeds default categories for the new household', async () => {
+      await service.createHousehold(OWNER_ID, { name: 'Test Household' });
+
+      expect(
+        mockCategoriesService.seedDefaultsForHousehold,
+      ).toHaveBeenCalledWith(HOUSEHOLD_ID);
+    });
+
+    it('still returns the household when category seeding fails (best-effort)', async () => {
+      mockCategoriesService.seedDefaultsForHousehold.mockRejectedValueOnce(
+        new Error('seed boom'),
+      );
+
+      const result = await service.createHousehold(OWNER_ID, {
+        name: 'Test Household',
+      });
+
+      expect(result._id.toString()).toBe(HOUSEHOLD_ID);
+      expect(mockHouseholdModel.deleteOne).not.toHaveBeenCalled();
     });
   });
 
