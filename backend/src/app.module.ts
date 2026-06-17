@@ -11,6 +11,8 @@ import { AdminModule } from './admin/admin.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { HouseholdsModule } from './households/households.module';
+import { AccountsModule } from './accounts/accounts.module';
+import { CategoriesModule } from './categories/categories.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -84,6 +86,8 @@ import { HealthModule } from './health/health.module';
     SubscriptionsModule,
     NotificationsModule,
     HouseholdsModule,
+    AccountsModule,
+    CategoriesModule,
     HealthModule,
   ],
 })

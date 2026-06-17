@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { UsersService } from './users/users.service';
 import { HouseholdsMigrationService } from './households/households-migration.service';
+import { CategoriesService } from './categories/categories.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -78,6 +79,13 @@ async function bootstrap() {
     const householdsMigration = app.get(HouseholdsMigrationService);
     await householdsMigration.backfillPersonalHouseholds();
     await householdsMigration.stampExistingData();
+
+    // 3. Seed default budgeting categories into any household that lacks them
+    //    (Phase 2). Runs after the household backfill so every legacy user's
+    //    new household is included. Idempotent: a no-op once every household has
+    //    categories.
+    const categoriesService = app.get(CategoriesService);
+    await categoriesService.backfillDefaultCategories();
   } catch (error: unknown) {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);

@@ -5,6 +5,7 @@ import { HouseholdsMigrationService } from './households-migration.service';
 import { HouseholdsController } from './households.controller';
 import { HouseholdGuard } from './guards/household.guard';
 import { MailModule } from '../mail/mail.module';
+import { CategoriesModule } from '../categories/categories.module';
 import { Household, HouseholdSchema } from './schemas/household.schema';
 import {
   HouseholdMember,
@@ -39,6 +40,7 @@ import {
       { name: Notification.name, schema: NotificationSchema },
     ]),
     MailModule,
+    CategoriesModule,
   ],
   controllers: [HouseholdsController],
   providers: [HouseholdsService, HouseholdsMigrationService, HouseholdGuard],
