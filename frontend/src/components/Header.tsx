@@ -59,6 +59,20 @@ export default function Header() {
             + Add
           </Link>
           <Link
+            href="/accounts"
+            onClick={closeMenu}
+            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
+          >
+            Accounts
+          </Link>
+          <Link
+            href="/transactions"
+            onClick={closeMenu}
+            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
+          >
+            Transactions
+          </Link>
+          <Link
             href="/analytics"
             onClick={closeMenu}
             className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"

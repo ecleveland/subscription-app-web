@@ -93,6 +93,84 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number];
 
+// --- Budgeting (Phase 2): accounts, transactions, categories ----------------
+// All money is integer minor units (cents); convert to display strings only at
+// the UI boundary (see formatCents).
+
+export type AccountType =
+  | 'checking'
+  | 'savings'
+  | 'credit'
+  | 'cash'
+  | 'investment'
+  | 'loan';
+
+export const ACCOUNT_TYPES: readonly AccountType[] = [
+  'checking',
+  'savings',
+  'credit',
+  'cash',
+  'investment',
+  'loan',
+];
+
+export interface Account {
+  _id: string;
+  householdId: string;
+  name: string;
+  type: AccountType;
+  balanceCents: number;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TransactionType = 'income' | 'expense' | 'transfer';
+
+export interface Transaction {
+  _id: string;
+  householdId: string;
+  accountId: string;
+  categoryId?: string;
+  memberId?: string;
+  type: TransactionType;
+  amountCents: number;
+  date: string;
+  payee?: string;
+  notes?: string;
+  tags?: string[];
+  cleared: boolean;
+  transferAccountId?: string;
+  recurringId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// The seeded budgeting category the ledger references (distinct from the
+// subscription `Category` string union above).
+export interface BudgetCategory {
+  _id: string;
+  householdId: string;
+  groupId: string;
+  name: string;
+  isIncome: boolean;
+  sortOrder: number;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportRowError {
+  row: number;
+  message: string;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  errors: ImportRowError[];
+}
+
 export interface AppNotification {
   _id: string;
   userId: string;
