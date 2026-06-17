@@ -243,6 +243,29 @@ describe('CategoriesService', () => {
     });
   });
 
+  describe('findInHousehold', () => {
+    it('returns null for a malformed id without querying', async () => {
+      const result = await service.findInHousehold(HOUSEHOLD_ID, 'not-an-id');
+      expect(result).toBeNull();
+      expect(mockCategoryModel.find).not.toHaveBeenCalled();
+    });
+
+    it('queries the category scoped to the household', async () => {
+      const catId = new Types.ObjectId().toString();
+      const doc = { _id: catId };
+      mockCategoryModel.findOne = jest
+        .fn()
+        .mockReturnValue(createChainable(doc));
+
+      const result = await service.findInHousehold(HOUSEHOLD_ID, catId);
+
+      const filter = mockCategoryModel.findOne.mock.calls[0][0];
+      expect(filter._id.toString()).toBe(catId);
+      expect(filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(result).toBe(doc);
+    });
+  });
+
   describe('backfillDefaultCategories', () => {
     it('seeds only households that gained categories and counts them', async () => {
       mockHouseholdModel.find.mockReturnValue(

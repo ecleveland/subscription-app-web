@@ -102,6 +102,41 @@ export class AccountsService {
   }
 
   /**
+   * Atomically adjust an account's cached balance by an integer delta, scoped
+   * to the household. Used by the transaction ledger to keep `balanceCents` in
+   * sync on every write (create applies the effect, delete reverses it, update
+   * reverses-old-then-applies-new). A no-op delta is skipped. Integer cents only.
+   */
+  async applyBalanceDelta(
+    householdId: string,
+    accountId: string,
+    deltaCents: number,
+  ): Promise<void> {
+    if (deltaCents === 0) {
+      return;
+    }
+    const result = await this.accountModel
+      .updateOne(
+        {
+          _id: new Types.ObjectId(accountId),
+          householdId: new Types.ObjectId(householdId),
+        } as Record<string, unknown>,
+        { $inc: { balanceCents: deltaCents } },
+      )
+      .exec();
+    // The caller has already validated the account belongs to the household, so
+    // a zero match means the account vanished underneath us (concurrent hard
+    // delete). The $inc silently no-ops, leaving the cached balance drifted —
+    // surface it loudly rather than letting it pass unnoticed.
+    if (result.matchedCount === 0) {
+      this.logger.error(
+        { householdId, accountId, deltaCents },
+        'applyBalanceDelta matched no account; cached balance is now drifted',
+      );
+    }
+  }
+
+  /**
    * Archive (soft-delete) an account, scoped to the household. Archiving rather
    * than deleting preserves the transactions that reference it once the ledger
    * exists (VEG-399).
