@@ -266,6 +266,47 @@ describe('CategoriesService', () => {
     });
   });
 
+  describe('resolveImportCategories', () => {
+    it('builds a lowercased name map and picks Miscellaneous as fallback', async () => {
+      const groceries = new Types.ObjectId();
+      const misc = new Types.ObjectId();
+      mockCategoryModel.find.mockReturnValue(
+        createChainable([
+          { _id: groceries, name: 'Groceries', isIncome: false },
+          { _id: misc, name: 'Miscellaneous', isIncome: false },
+        ]),
+      );
+
+      const { byName, fallbackId } =
+        await service.resolveImportCategories(HOUSEHOLD_ID);
+
+      expect(byName.get('groceries')).toBe(groceries);
+      expect(fallbackId).toBe(misc);
+    });
+
+    it('falls back to an expense category when Miscellaneous is absent', async () => {
+      const income = new Types.ObjectId();
+      const expense = new Types.ObjectId();
+      mockCategoryModel.find.mockReturnValue(
+        createChainable([
+          { _id: income, name: 'Paycheck', isIncome: true },
+          { _id: expense, name: 'Rent', isIncome: false },
+        ]),
+      );
+
+      const { fallbackId } =
+        await service.resolveImportCategories(HOUSEHOLD_ID);
+      expect(fallbackId).toBe(expense);
+    });
+
+    it('returns a null fallback when the household has no categories', async () => {
+      mockCategoryModel.find.mockReturnValue(createChainable([]));
+      const { fallbackId } =
+        await service.resolveImportCategories(HOUSEHOLD_ID);
+      expect(fallbackId).toBeNull();
+    });
+  });
+
   describe('backfillDefaultCategories', () => {
     it('seeds only households that gained categories and counts them', async () => {
       mockHouseholdModel.find.mockReturnValue(

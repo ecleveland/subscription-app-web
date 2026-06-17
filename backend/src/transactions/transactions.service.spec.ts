@@ -51,7 +51,10 @@ describe('TransactionsService', () => {
   let mockModel: any;
   let txnSave: jest.Mock;
   let accountsService: { findOne: jest.Mock; applyBalanceDelta: jest.Mock };
-  let categoriesService: { findInHousehold: jest.Mock };
+  let categoriesService: {
+    findInHousehold: jest.Mock;
+    resolveImportCategories: jest.Mock;
+  };
 
   beforeEach(async () => {
     txnSave = jest.fn().mockImplementation(function (this: any) {
@@ -62,10 +65,12 @@ describe('TransactionsService', () => {
       .mockImplementation((dto) => ({ ...dto, save: txnSave }));
     mockModel.find = jest.fn().mockReturnValue(createChainable([]));
     mockModel.findById = jest.fn().mockReturnValue(createChainable(null));
+    mockModel.findOne = jest.fn().mockReturnValue(createChainable(null));
     mockModel.countDocuments = jest.fn().mockReturnValue(createChainable(0));
     mockModel.deleteOne = jest
       .fn()
       .mockReturnValue(createChainable({ deletedCount: 1 }));
+    mockModel.insertMany = jest.fn().mockResolvedValue([]);
 
     accountsService = {
       findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId(ACC_A) }),
@@ -75,6 +80,10 @@ describe('TransactionsService', () => {
       findInHousehold: jest
         .fn()
         .mockResolvedValue({ _id: new Types.ObjectId(CAT_ID) }),
+      resolveImportCategories: jest.fn().mockResolvedValue({
+        byName: new Map([['groceries', new Types.ObjectId(CAT_ID)]]),
+        fallbackId: new Types.ObjectId(CAT_ID),
+      }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -452,6 +461,164 @@ describe('TransactionsService', () => {
       expect(res.meta.hasNextPage).toBe(false);
       expect(chain.skip).not.toHaveBeenCalled();
       expect(chain.limit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('importTransactions', () => {
+    const mapping = {
+      date: 'Date',
+      amount: 'Amount',
+      payee: 'Payee',
+      category: 'Category',
+    };
+    const importDto = (rows: Record<string, string>[]) => ({
+      accountId: ACC_A,
+      mapping,
+      rows,
+    });
+
+    it('imports rows, deriving type from amount sign, and adjusts the balance once', async () => {
+      const result = await service.importTransactions(
+        HOUSEHOLD_ID,
+        MEMBER_ID,
+        importDto([
+          {
+            Date: '2026-06-01',
+            Amount: '-42.00',
+            Payee: 'Store',
+            Category: 'Groceries',
+          },
+          {
+            Date: '2026-06-02',
+            Amount: '1,000.00',
+            Payee: 'Job',
+            Category: '',
+          },
+        ]),
+      );
+
+      expect(result.imported).toBe(2);
+      expect(result.skipped).toBe(0);
+      expect(result.errors).toEqual([]);
+
+      const inserted = mockModel.insertMany.mock.calls[0][0];
+      expect(inserted[0]).toMatchObject({
+        type: TransactionType.EXPENSE,
+        amountCents: 4200,
+      });
+      expect(inserted[1]).toMatchObject({
+        type: TransactionType.INCOME,
+        amountCents: 100000,
+      });
+      // net delta: -4200 (expense) + 100000 (income) = 95800, applied once
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalledTimes(1);
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        ACC_A,
+        95800,
+      );
+    });
+
+    it('maps a category by name and falls back to the default otherwise', async () => {
+      await service.importTransactions(
+        HOUSEHOLD_ID,
+        MEMBER_ID,
+        importDto([
+          {
+            Date: '2026-06-01',
+            Amount: '-10',
+            Payee: 'A',
+            Category: 'Groceries',
+          },
+          { Date: '2026-06-02', Amount: '-20', Payee: 'B', Category: 'Nope' },
+        ]),
+      );
+      const inserted = mockModel.insertMany.mock.calls[0][0];
+      // both resolve to CAT_ID here (the by-name match and the fallback are the
+      // same id in this fixture), so assert both are set, not undefined
+      expect(inserted[0].categoryId).toBeDefined();
+      expect(inserted[1].categoryId).toBeDefined();
+    });
+
+    it('reports row-level errors for bad amount/date without aborting', async () => {
+      const result = await service.importTransactions(
+        HOUSEHOLD_ID,
+        MEMBER_ID,
+        importDto([
+          { Date: '2026-06-01', Amount: 'abc', Payee: 'A', Category: '' },
+          { Date: 'not-a-date', Amount: '-10', Payee: 'B', Category: '' },
+          { Date: '2026-06-03', Amount: '-30', Payee: 'C', Category: '' },
+        ]),
+      );
+
+      expect(result.imported).toBe(1);
+      expect(result.errors).toEqual([
+        { row: 0, message: 'Unparseable or zero amount' },
+        { row: 1, message: 'Unparseable date' },
+      ]);
+    });
+
+    it('skips rows that duplicate an existing transaction', async () => {
+      mockModel.findOne.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId(TXN_ID) }),
+      );
+
+      const result = await service.importTransactions(
+        HOUSEHOLD_ID,
+        MEMBER_ID,
+        importDto([
+          { Date: '2026-06-01', Amount: '-42', Payee: 'Store', Category: '' },
+        ]),
+      );
+
+      expect(result.imported).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(mockModel.insertMany).not.toHaveBeenCalled();
+    });
+
+    it('skips a duplicate within the same batch', async () => {
+      const result = await service.importTransactions(
+        HOUSEHOLD_ID,
+        MEMBER_ID,
+        importDto([
+          { Date: '2026-06-01', Amount: '-42', Payee: 'Store', Category: '' },
+          { Date: '2026-06-01', Amount: '-42', Payee: 'Store', Category: '' },
+        ]),
+      );
+
+      expect(result.imported).toBe(1);
+      expect(result.skipped).toBe(1);
+    });
+
+    it('rejects importing into an archived account', async () => {
+      accountsService.findOne.mockResolvedValueOnce({
+        _id: new Types.ObjectId(ACC_A),
+        isArchived: true,
+      });
+
+      await expect(
+        service.importTransactions(
+          HOUSEHOLD_ID,
+          MEMBER_ID,
+          importDto([
+            { Date: '2026-06-01', Amount: '-42', Payee: 'A', Category: '' },
+          ]),
+        ),
+      ).rejects.toThrow(/archived account/);
+    });
+
+    it("rejects importing into another household's account (400)", async () => {
+      accountsService.findOne.mockRejectedValueOnce(new NotFoundException());
+
+      await expect(
+        service.importTransactions(
+          HOUSEHOLD_ID,
+          MEMBER_ID,
+          importDto([
+            { Date: '2026-06-01', Amount: '-42', Payee: 'A', Category: '' },
+          ]),
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

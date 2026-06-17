@@ -14,6 +14,12 @@ import {
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { QueryTransactionDto } from './dto/query-transaction.dto';
+import { ImportTransactionsDto } from './dto/import-transactions.dto';
+import type {
+  ImportResult,
+  ImportRowError,
+} from './interfaces/import-result.interface';
+import { parseAmountToCents } from './csv-import.util';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
@@ -229,6 +235,123 @@ export class TransactionsService {
     // Reverse the deleted transaction's effect on its account balance(s).
     await this.syncBalances(householdId, this.balanceDeltas(before), [], id);
     this.logger.log({ householdId, transactionId: id }, 'Transaction deleted');
+  }
+
+  /**
+   * Bulk-import already-parsed CSV rows into one account. Each row's amount is
+   * parsed to signed cents (sign → expense/income); category column maps by name
+   * to a seeded category, falling back to the household's default. Rows with an
+   * unparseable amount/date are reported as row-level errors without aborting
+   * the batch; rows duplicating an existing (or already-in-batch) transaction
+   * are skipped so re-importing the same file is idempotent. The account balance
+   * is adjusted once with the net delta of everything imported.
+   */
+  async importTransactions(
+    householdId: string,
+    memberId: string,
+    dto: ImportTransactionsDto,
+  ): Promise<ImportResult> {
+    const account = await this.assertAccountInHousehold(
+      householdId,
+      dto.accountId,
+    );
+    if (account.isArchived) {
+      throw new BadRequestException('Cannot import into an archived account');
+    }
+
+    const { byName, fallbackId } =
+      await this.categoriesService.resolveImportCategories(householdId);
+    if (!fallbackId) {
+      throw new BadRequestException(
+        'The household has no categories to import against',
+      );
+    }
+
+    const errors: ImportRowError[] = [];
+    const seen = new Set<string>();
+    const docs: Record<string, unknown>[] = [];
+    let skipped = 0;
+    let netDelta = 0;
+
+    for (let i = 0; i < dto.rows.length; i++) {
+      const row = dto.rows[i];
+      const cents = parseAmountToCents(row[dto.mapping.amount]);
+      if (cents === null || cents === 0) {
+        errors.push({ row: i, message: 'Unparseable or zero amount' });
+        continue;
+      }
+      const date = new Date(row[dto.mapping.date]);
+      if (Number.isNaN(date.getTime())) {
+        errors.push({ row: i, message: 'Unparseable date' });
+        continue;
+      }
+
+      const type = cents < 0 ? TransactionType.EXPENSE : TransactionType.INCOME;
+      const amountCents = Math.abs(cents);
+      const payee = dto.mapping.payee
+        ? row[dto.mapping.payee]?.trim() || undefined
+        : undefined;
+
+      let categoryId = fallbackId;
+      if (dto.mapping.category) {
+        const name = row[dto.mapping.category]?.trim().toLowerCase();
+        if (name && byName.has(name)) {
+          categoryId = byName.get(name) as Types.ObjectId;
+        }
+      }
+
+      // Dedupe on account + date + amount + type + payee. A null payee matches
+      // missing-payee docs in Mongo, so re-imports of payee-less rows still skip.
+      const key = `${date.getTime()}|${amountCents}|${type}|${payee ?? ''}`;
+      if (seen.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(key);
+      const duplicate = await this.transactionModel
+        .findOne({
+          householdId: new Types.ObjectId(householdId),
+          accountId: account._id,
+          date,
+          amountCents,
+          type,
+          payee: payee ?? null,
+        } as Record<string, unknown>)
+        .exec();
+      if (duplicate) {
+        skipped += 1;
+        continue;
+      }
+
+      docs.push({
+        householdId: new Types.ObjectId(householdId),
+        accountId: account._id,
+        categoryId,
+        memberId: memberId ? new Types.ObjectId(memberId) : undefined,
+        type,
+        amountCents,
+        date,
+        payee,
+        tags: [],
+        cleared: false,
+      });
+      netDelta += type === TransactionType.EXPENSE ? -amountCents : amountCents;
+    }
+
+    if (docs.length > 0) {
+      await this.transactionModel.insertMany(docs);
+    }
+    await this.accountsService.applyBalanceDelta(
+      householdId,
+      account._id.toString(),
+      netDelta,
+    );
+
+    this.logger.log(
+      { householdId, accountId: dto.accountId, imported: docs.length, skipped },
+      'Transactions imported',
+    );
+    return { imported: docs.length, skipped, errors };
   }
 
   // --- helpers -------------------------------------------------------------
