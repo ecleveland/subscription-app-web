@@ -2,8 +2,6 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
-import { MAIL_SERVICE } from '../src/mail/mail.service';
-import type { MailService } from '../src/mail/mail.service';
 
 /**
  * Register a user (each gets their own personal household) and return a Bearer
@@ -25,37 +23,32 @@ const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
 describe('Households (e2e)', () => {
   let app: INestApplication<App>;
-  let mail: jest.SpyInstance;
 
   beforeAll(async () => {
     app = await createTestApp();
-    // The invite flow sends the raw token by email (the DB only stores its
-    // hash). Spy on the singleton mail service to recover the token for accept.
-    const mailService = app.get<MailService>(MAIL_SERVICE);
-    mail = jest.spyOn(mailService, 'sendInvitationEmail');
   });
 
   afterAll(async () => {
     await closeTestApp(app);
   });
 
-  afterEach(() => mail.mockClear());
-
-  /** Invite an email to the owner's household and return the raw token. */
+  /**
+   * Invite an email to the owner's household and return the raw token. The
+   * invite response carries a shareable `inviteUrl` (the "copy invite link"
+   * contract the frontend depends on); the raw token rides in that URL.
+   */
   async function invite(
     ownerToken: string,
     email: string,
     role?: string,
   ): Promise<string> {
-    await request(app.getHttpServer())
+    const res = await request(app.getHttpServer())
       .post('/api/households/me/invitations')
       .set(auth(ownerToken))
       .send({ email, ...(role ? { role } : {}) })
       .expect(201);
 
-    // Read the most recent send so repeated invites within a test each return
-    // their own token.
-    const inviteUrl = mail.mock.calls.at(-1)![1] as string;
+    const inviteUrl = res.body.inviteUrl as string;
     return new URL(inviteUrl).searchParams.get('token') as string;
   }
 
@@ -290,6 +283,21 @@ describe('Households (e2e)', () => {
         .set(auth(owner.token))
         .send({ email: 'someone@example.com', role: 'owner' })
         .expect(400);
+    });
+
+    it('returns a shareable invite link without exposing the token hash', async () => {
+      const owner = await register(app, 'linkowner');
+      const res = await request(app.getHttpServer())
+        .post('/api/households/me/invitations')
+        .set(auth(owner.token))
+        .send({ email: 'guest@example.com' })
+        .expect(201);
+
+      expect(res.body.inviteUrl).toContain('/household/accept?token=');
+      expect(res.body.email).toBe('guest@example.com');
+      expect(res.body.role).toBe('adult');
+      expect(res.body.status).toBe('pending');
+      expect(res.body).not.toHaveProperty('tokenHash');
     });
 
     it('supersedes a prior invitation: the old token stops working', async () => {

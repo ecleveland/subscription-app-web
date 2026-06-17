@@ -38,6 +38,19 @@ export interface AddMemberParams {
   status?: MembershipStatus;
 }
 
+// Sanitized invitation view returned to the inviting owner. Includes the
+// shareable `inviteUrl` (raw token) so the owner can copy/send the link
+// directly, and deliberately omits `tokenHash`.
+export interface InviteResult {
+  id: string;
+  householdId: string;
+  email: string;
+  role: HouseholdRole;
+  status: InvitationStatus;
+  expiresAt: Date;
+  inviteUrl: string;
+}
+
 // How long an invitation token stays valid. Longer than the 1h password-reset
 // window because an invitee may need to register an account before accepting.
 const INVITATION_TTL_MS = 72 * 60 * 60 * 1000;
@@ -224,7 +237,7 @@ export class HouseholdsService {
   async inviteMember(
     ctx: HouseholdContext,
     dto: InviteMemberDto,
-  ): Promise<InvitationDocument> {
+  ): Promise<InviteResult> {
     this.assertOwner(ctx.role);
 
     const householdId = ctx.householdId;
@@ -287,7 +300,7 @@ export class HouseholdsService {
     const householdName = household?.name ?? 'your household';
     const frontendUrl =
       this.configService.get<string>('frontendUrl') || 'http://localhost:3000';
-    const inviteUrl = `${frontendUrl}/invitations/accept?token=${plainToken}`;
+    const inviteUrl = `${frontendUrl}/household/accept?token=${plainToken}`;
 
     const invitationId = invitation._id.toString();
     void this.mailService
@@ -305,7 +318,18 @@ export class HouseholdsService {
       { householdId, invitationId },
       'Household invitation created',
     );
-    return invitation;
+
+    // Return the raw token (via inviteUrl) only to the owner who created the
+    // invite, so the UI can offer a copy-able link; never expose the tokenHash.
+    return {
+      id: invitationId,
+      householdId,
+      email,
+      role: invitation.role,
+      status: invitation.status,
+      expiresAt: invitation.expiresAt,
+      inviteUrl,
+    };
   }
 
   /**
