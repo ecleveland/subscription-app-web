@@ -6,10 +6,19 @@ const mockLogout = vi.fn();
 
 // We need to be able to vary the auth state between tests
 let authState: Record<string, unknown>;
+let householdState: Record<string, unknown>;
 
 vi.mock('@/lib/auth-context', () => ({
   useAuth: () => authState,
 }));
+
+vi.mock('@/lib/household-context', () => ({
+  useHousehold: () => householdState,
+}));
+
+beforeEach(() => {
+  householdState = { household: null };
+});
 
 // Mock ThemeToggle since it depends on ThemeProvider
 vi.mock('@/components/ThemeToggle', () => ({
@@ -52,6 +61,36 @@ describe('Header', () => {
     expect(screen.getByText('+ Add')).toBeInTheDocument();
     expect(screen.getByText('Profile')).toBeInTheDocument();
     expect(screen.getByText('Logout')).toBeInTheDocument();
+  });
+
+  it('should show a Household link', () => {
+    authState = {
+      isAuthenticated: true,
+      user: { userId: '1', username: 'test', role: 'user' },
+      isAdmin: false,
+      logout: mockLogout,
+    };
+
+    render(<Header />);
+
+    expect(screen.getByRole('link', { name: 'Household' })).toHaveAttribute(
+      'href',
+      '/household',
+    );
+  });
+
+  it('should show the active household name when present', () => {
+    authState = {
+      isAuthenticated: true,
+      user: { userId: '1', username: 'test', role: 'user' },
+      isAdmin: false,
+      logout: mockLogout,
+    };
+    householdState = { household: { _id: 'h1', name: 'The Smiths' } };
+
+    render(<Header />);
+
+    expect(screen.getByText('The Smiths')).toBeInTheDocument();
   });
 
   it('should render NotificationBell when authenticated', () => {

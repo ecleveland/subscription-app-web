@@ -430,7 +430,7 @@ describe('HouseholdsService', () => {
       });
 
       expect(mockInvitationModel.mock.calls).toHaveLength(1);
-      expect(invitation._id.toString()).toBe(INVITATION_ID);
+      expect(invitation.id).toBe(INVITATION_ID);
     });
 
     it('still persists the invitation when the email send fails', async () => {
@@ -442,7 +442,7 @@ describe('HouseholdsService', () => {
         email: 'unreachable@example.com',
       });
 
-      expect(invitation._id.toString()).toBe(INVITATION_ID);
+      expect(invitation.id).toBe(INVITATION_ID);
       expect(mockInvitationModel.mock.calls).toHaveLength(1);
     });
 
@@ -469,10 +469,15 @@ describe('HouseholdsService', () => {
       const [toEmail, inviteUrl] =
         mockMailService.sendInvitationEmail.mock.calls[0];
       expect(toEmail).toBe('new@example.com');
-      expect(inviteUrl).toContain('token=');
+      expect(inviteUrl).toContain('/household/accept?token=');
       expect(inviteUrl).not.toContain(args.tokenHash);
 
-      expect(invitation._id.toString()).toBe(INVITATION_ID);
+      // The returned result carries the shareable link + sanitized fields, and
+      // never the tokenHash.
+      expect(invitation.id).toBe(INVITATION_ID);
+      expect(invitation.inviteUrl).toBe(inviteUrl);
+      expect(invitation.status).toBe(InvitationStatus.PENDING);
+      expect(invitation).not.toHaveProperty('tokenHash');
     });
 
     it('respects an explicit role', async () => {

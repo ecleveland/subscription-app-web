@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import { useHousehold } from '@/lib/household-context';
 import ThemeToggle from '@/components/ThemeToggle';
 import NotificationBell from '@/components/NotificationBell';
 
 export default function Header() {
   const { isAuthenticated, isAdmin, logout } = useAuth();
+  const { household } = useHousehold();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   if (!isAuthenticated) return null;
@@ -17,9 +19,19 @@ export default function Header() {
   return (
     <header className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
       <div className="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between">
-        <Link href="/" className="text-xl font-bold text-gray-900 dark:text-gray-100">
-          Subscriptions
-        </Link>
+        <div className="flex flex-col">
+          <Link href="/" className="text-xl font-bold text-gray-900 dark:text-gray-100">
+            Subscriptions
+          </Link>
+          {household && (
+            <Link
+              href="/household"
+              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+            >
+              {household.name}
+            </Link>
+          )}
+        </div>
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="md:hidden p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
@@ -69,6 +81,13 @@ export default function Header() {
               Admin
             </Link>
           )}
+          <Link
+            href="/household"
+            onClick={closeMenu}
+            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
+          >
+            Household
+          </Link>
           <Link
             href="/profile"
             onClick={closeMenu}
