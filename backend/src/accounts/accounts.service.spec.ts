@@ -114,6 +114,13 @@ describe('AccountsService', () => {
       expect(result).toBe(doc);
     });
 
+    it('throws NotFound for a malformed id without querying', async () => {
+      await expect(service.findOne(HOUSEHOLD_ID, 'not-an-id')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockAccountModel.findById).not.toHaveBeenCalled();
+    });
+
     it('throws NotFound when the account does not exist', async () => {
       mockAccountModel.findById.mockReturnValue(createChainable(null));
 

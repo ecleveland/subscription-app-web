@@ -61,6 +61,12 @@ export class AccountsService {
    * scoping so cross-household reads surface as 404, never a leak.
    */
   async findOne(householdId: string, id: string): Promise<AccountDocument> {
+    // A malformed id would make findById throw a Mongoose CastError (→ 500);
+    // treat it as a clean 404 so a bad path param can't leak a different status
+    // than a real not-found, keeping the "never a leak" promise total.
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException(`Account with ID "${id}" not found`);
+    }
     const account = await this.accountModel.findById(id).exec();
     if (
       !account ||

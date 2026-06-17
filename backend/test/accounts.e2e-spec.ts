@@ -138,6 +138,30 @@ describe('Accounts (e2e)', () => {
         .expect(200);
       expect(res.body).toHaveLength(2);
     });
+
+    it('archives idempotently on a repeated DELETE', async () => {
+      await request(app.getHttpServer())
+        .delete(`/api/accounts/${savingsId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(204);
+      await request(app.getHttpServer())
+        .delete(`/api/accounts/${savingsId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(204);
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/accounts/${savingsId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(res.body.isArchived).toBe(true);
+
+      // Restore so later count-based assertions stay stable.
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${savingsId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isArchived: false })
+        .expect(200);
+    });
   });
 
   describe('validation', () => {
@@ -170,6 +194,20 @@ describe('Accounts (e2e)', () => {
         .post('/api/accounts')
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ name: 'Sneaky', type: 'checking', hacker: true })
+        .expect(400);
+    });
+
+    it('rejects a non-integer balanceCents on PATCH', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/accounts')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Patchy', type: 'checking' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${created.body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ balanceCents: 1.5 })
         .expect(400);
     });
   });
@@ -224,6 +262,13 @@ describe('Accounts (e2e)', () => {
     it('returns 404 for an unknown account id', async () => {
       await request(app.getHttpServer())
         .get('/api/accounts/507f1f77bcf86cd799439011')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(404);
+    });
+
+    it('returns 404 (not 500) for a malformed account id', async () => {
+      await request(app.getHttpServer())
+        .get('/api/accounts/not-an-id')
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(404);
     });
