@@ -174,6 +174,27 @@ export class CategoriesService {
   }
 
   /**
+   * Look up a single category scoped to a household. Returns null if the id is
+   * malformed, doesn't exist, or belongs to another household — callers use
+   * this to validate a client-supplied categoryId before referencing it (the
+   * transaction ledger's cross-household guard).
+   */
+  async findInHousehold(
+    householdId: string,
+    categoryId: string,
+  ): Promise<CategoryDocument | null> {
+    if (!Types.ObjectId.isValid(categoryId)) {
+      return null;
+    }
+    return this.categoryModel
+      .findOne({
+        _id: new Types.ObjectId(categoryId),
+        householdId: new Types.ObjectId(householdId),
+      } as Record<string, unknown>)
+      .exec();
+  }
+
+  /**
    * Seed defaults into every household, completing any that are missing or only
    * partially seeded (seedDefaultsForHousehold is itself idempotent/self-
    * repairing). Idempotent repair that runs at startup after the Phase 1

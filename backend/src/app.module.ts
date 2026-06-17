@@ -13,6 +13,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { HouseholdsModule } from './households/households.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { CategoriesModule } from './categories/categories.module';
+import { TransactionsModule } from './transactions/transactions.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -88,6 +89,7 @@ import { HealthModule } from './health/health.module';
     HouseholdsModule,
     AccountsModule,
     CategoriesModule,
+    TransactionsModule,
     HealthModule,
   ],
 })

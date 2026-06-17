@@ -200,6 +200,28 @@ describe('AccountsService', () => {
     });
   });
 
+  describe('applyBalanceDelta', () => {
+    beforeEach(() => {
+      mockAccountModel.updateOne = jest
+        .fn()
+        .mockReturnValue(createChainable({ modifiedCount: 1 }));
+    });
+
+    it('atomically $inc the household-scoped account by the delta', async () => {
+      await service.applyBalanceDelta(HOUSEHOLD_ID, ACCOUNT_ID, -4200);
+
+      const [filter, update] = mockAccountModel.updateOne.mock.calls[0];
+      expect(filter._id.toString()).toBe(ACCOUNT_ID);
+      expect(filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(update).toEqual({ $inc: { balanceCents: -4200 } });
+    });
+
+    it('skips the write for a zero delta', async () => {
+      await service.applyBalanceDelta(HOUSEHOLD_ID, ACCOUNT_ID, 0);
+      expect(mockAccountModel.updateOne).not.toHaveBeenCalled();
+    });
+  });
+
   describe('archive', () => {
     it('sets isArchived and saves', async () => {
       const doc: any = {
