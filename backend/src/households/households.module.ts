@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { HouseholdsService } from './households.service';
 import { HouseholdsMigrationService } from './households-migration.service';
+import { HouseholdsController } from './households.controller';
 import { HouseholdGuard } from './guards/household.guard';
+import { MailModule } from '../mail/mail.module';
 import { Household, HouseholdSchema } from './schemas/household.schema';
 import {
   HouseholdMember,
@@ -36,7 +38,9 @@ import {
       { name: Subscription.name, schema: SubscriptionSchema },
       { name: Notification.name, schema: NotificationSchema },
     ]),
+    MailModule,
   ],
+  controllers: [HouseholdsController],
   providers: [HouseholdsService, HouseholdsMigrationService, HouseholdGuard],
   exports: [HouseholdsService, HouseholdsMigrationService, HouseholdGuard],
 })

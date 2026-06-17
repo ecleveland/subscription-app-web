@@ -1,6 +1,16 @@
-import { Injectable, ConflictException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  BadRequestException,
+  Inject,
+  Logger,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import * as crypto from 'crypto';
 import { Household, HouseholdDocument } from './schemas/household.schema';
 import {
   HouseholdMember,
@@ -8,7 +18,18 @@ import {
   HouseholdRole,
   MembershipStatus,
 } from './schemas/household-member.schema';
+import {
+  Invitation,
+  InvitationDocument,
+  InvitationStatus,
+} from './schemas/invitation.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { CreateHouseholdDto } from './dto/create-household.dto';
+import { UpdateHouseholdDto } from './dto/update-household.dto';
+import { InviteMemberDto } from './dto/invite-member.dto';
+import { MAIL_SERVICE } from '../mail/mail.service';
+import type { MailService } from '../mail/mail.service';
+import type { HouseholdContext } from './interfaces/household-request.interface';
 
 export interface AddMemberParams {
   householdId: string;
@@ -16,6 +37,10 @@ export interface AddMemberParams {
   role: HouseholdRole;
   status?: MembershipStatus;
 }
+
+// How long an invitation token stays valid. Longer than the 1h password-reset
+// window because an invitee may need to register an account before accepting.
+const INVITATION_TTL_MS = 72 * 60 * 60 * 1000;
 
 @Injectable()
 export class HouseholdsService {
@@ -26,6 +51,12 @@ export class HouseholdsService {
     private householdModel: Model<HouseholdDocument>,
     @InjectModel(HouseholdMember.name)
     private memberModel: Model<HouseholdMemberDocument>,
+    @InjectModel(Invitation.name)
+    private invitationModel: Model<InvitationDocument>,
+    @InjectModel(User.name)
+    private userModel: Model<UserDocument>,
+    private configService: ConfigService,
+    @Inject(MAIL_SERVICE) private mailService: MailService,
   ) {}
 
   /**
@@ -133,5 +164,333 @@ export class HouseholdsService {
       >)
       .exec();
     return result.deletedCount;
+  }
+
+  // ---------------------------------------------------------------------------
+  // VEG-390 — household management + member-invitation API.
+  // Owner-gated methods take the HouseholdContext that HouseholdGuard resolved
+  // and attached to `req.household` (householdId + role come from the same
+  // trusted source, never client input) and re-assert the role server-side.
+  // ---------------------------------------------------------------------------
+
+  /** Fetch a household plus its members (with user display info populated). */
+  async getHouseholdWithMembers(householdId: string): Promise<{
+    household: HouseholdDocument;
+    members: HouseholdMemberDocument[];
+  }> {
+    const household = await this.householdModel.findById(householdId).exec();
+    if (!household) {
+      throw new NotFoundException('Household not found');
+    }
+    const members = await this.listMembers(householdId);
+    return { household, members };
+  }
+
+  /** List a household's members, each with the user's display fields populated. */
+  async listMembers(householdId: string): Promise<HouseholdMemberDocument[]> {
+    return this.memberModel
+      .find({ householdId: new Types.ObjectId(householdId) } as Record<
+        string,
+        unknown
+      >)
+      .populate('userId', 'username displayName email')
+      .exec();
+  }
+
+  /** Update a household's name/currency. Owner-only. */
+  async updateHousehold(
+    ctx: HouseholdContext,
+    dto: UpdateHouseholdDto,
+  ): Promise<HouseholdDocument> {
+    this.assertOwner(ctx.role);
+    const updated = await this.householdModel
+      .findByIdAndUpdate(ctx.householdId, dto, {
+        new: true,
+        runValidators: true,
+      })
+      .exec();
+    if (!updated) {
+      throw new NotFoundException('Household not found');
+    }
+    return updated;
+  }
+
+  /**
+   * Invite someone to a household by email. Owner-only. Creates a hashed,
+   * expiring Invitation and sends the raw token by email (fire-and-forget,
+   * mirroring the password-reset flow). Re-inviting the same email supersedes
+   * any prior pending invitation for that household.
+   */
+  async inviteMember(
+    ctx: HouseholdContext,
+    dto: InviteMemberDto,
+  ): Promise<InvitationDocument> {
+    this.assertOwner(ctx.role);
+
+    const householdId = ctx.householdId;
+    const email = dto.email.toLowerCase();
+    const invitedRole = dto.role ?? HouseholdRole.ADULT;
+
+    // Reject inviting someone who is already an active member.
+    const existingUser = await this.userModel
+      .findOne({ email } as Record<string, unknown>)
+      .exec();
+    if (existingUser) {
+      const membership = await this.memberModel
+        .findOne({
+          householdId: new Types.ObjectId(householdId),
+          userId: existingUser._id,
+          status: MembershipStatus.ACTIVE,
+        } as Record<string, unknown>)
+        .exec();
+      if (membership) {
+        throw new ConflictException(
+          'That user is already a member of this household',
+        );
+      }
+    }
+
+    // Supersede any outstanding pending invitations for the same email so only
+    // the newest token is valid (mirrors the password-reset invalidation).
+    await this.invitationModel
+      .updateMany(
+        {
+          householdId: new Types.ObjectId(householdId),
+          email,
+          status: InvitationStatus.PENDING,
+        } as Record<string, unknown>,
+        { status: InvitationStatus.REVOKED },
+      )
+      .exec();
+
+    const plainToken = crypto.randomBytes(32).toString('hex');
+    const invitation = await new this.invitationModel({
+      householdId: new Types.ObjectId(householdId),
+      email,
+      tokenHash: this.hashToken(plainToken),
+      role: invitedRole,
+      status: InvitationStatus.PENDING,
+      expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
+    }).save();
+
+    const household = await this.householdModel.findById(householdId).exec();
+    if (!household) {
+      // The household was just resolved by HouseholdGuard and we wrote an
+      // invitation scoped to it, so a null here is a real data-integrity
+      // anomaly (deleted out from under us / replica lag) — surface it rather
+      // than silently emailing an invite to "your household".
+      this.logger.warn(
+        { householdId },
+        'Household not found while composing invitation email',
+      );
+    }
+    const householdName = household?.name ?? 'your household';
+    const frontendUrl =
+      this.configService.get<string>('frontendUrl') || 'http://localhost:3000';
+    const inviteUrl = `${frontendUrl}/invitations/accept?token=${plainToken}`;
+
+    const invitationId = invitation._id.toString();
+    void this.mailService
+      .sendInvitationEmail(email, inviteUrl, householdName)
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        // Include ids so the dangling PENDING invitation is correlatable.
+        this.logger.error(
+          { householdId, invitationId },
+          `Failed to send invitation email: ${message}`,
+        );
+      });
+
+    this.logger.log(
+      { householdId, invitationId },
+      'Household invitation created',
+    );
+    return invitation;
+  }
+
+  /**
+   * Accept an invitation by raw token. The caller must be authenticated and
+   * their account email must match the invited email. Accepting switches the
+   * user's active household to the invited one: their existing active membership
+   * (their personal household) is mutated in place to the invited household and
+   * role, preserving the "one active membership per user" invariant.
+   */
+  async acceptInvitation(
+    userId: string,
+    token: string,
+  ): Promise<HouseholdMemberDocument> {
+    const invitation = await this.invitationModel
+      .findOne({
+        tokenHash: this.hashToken(token),
+        status: InvitationStatus.PENDING,
+        expiresAt: { $gt: new Date() },
+      } as Record<string, unknown>)
+      .exec();
+    if (!invitation) {
+      throw new BadRequestException('Invalid or expired invitation');
+    }
+
+    const user = await this.userModel.findById(userId).exec();
+    if (!user || !user.email || user.email !== invitation.email) {
+      // The invite is addressed to a specific email; don't let an unrelated
+      // (or email-less) account redeem a leaked token.
+      throw new ForbiddenException(
+        'This invitation was sent to a different email address',
+      );
+    }
+
+    const householdId = invitation.householdId as unknown as Types.ObjectId;
+
+    // Already an ACTIVE member of the invited household — accept idempotently.
+    // Filtered to ACTIVE so a stale non-active row can't short-circuit a real
+    // join (which would burn the token while leaving the user un-switched).
+    const existingActive = await this.memberModel
+      .findOne({
+        householdId,
+        userId: user._id,
+        status: MembershipStatus.ACTIVE,
+      } as Record<string, unknown>)
+      .exec();
+    if (existingActive) {
+      await this.markAccepted(invitation);
+      return existingActive;
+    }
+
+    // Switch the user's active household in place (or create one if somehow
+    // absent). Mutating the existing row keeps a single active membership.
+    const active = await this.findMembershipByUser(userId);
+    let membership: HouseholdMemberDocument;
+    if (active) {
+      // Don't strand a shared household: an owner leaving a household that has
+      // other members would leave it with no owner (permanently unmanageable).
+      if (active.role === HouseholdRole.OWNER) {
+        const others = await this.memberModel
+          .countDocuments({
+            householdId: active.householdId,
+            userId: { $ne: user._id },
+          } as Record<string, unknown>)
+          .exec();
+        if (others > 0) {
+          throw new ConflictException(
+            'You own a household with other members. Remove them or transfer ' +
+              'ownership before joining another household.',
+          );
+        }
+      }
+
+      active.householdId = householdId as unknown as typeof active.householdId;
+      active.role = invitation.role;
+      active.joinedAt = new Date();
+      membership = await this.saveSwitch(active);
+    } else {
+      membership = await this.addMember({
+        householdId: householdId.toString(),
+        userId,
+        role: invitation.role,
+        status: MembershipStatus.ACTIVE,
+      });
+    }
+
+    await this.markAccepted(invitation);
+    this.logger.log(
+      { householdId: householdId.toString(), userId },
+      'Household invitation accepted',
+    );
+    return membership;
+  }
+
+  /**
+   * Remove a member from a household. Owner-only; the owner cannot be removed.
+   * The removed user is re-provisioned a personal household so they aren't
+   * locked out of every household-scoped route (HouseholdGuard needs an active
+   * membership). Shared data stays with the household they left.
+   */
+  async removeMember(ctx: HouseholdContext, memberId: string): Promise<void> {
+    this.assertOwner(ctx.role);
+
+    const member = await this.memberModel.findById(memberId).exec();
+    if (
+      !member ||
+      (member.householdId as unknown as Types.ObjectId).toString() !==
+        ctx.householdId
+    ) {
+      throw new NotFoundException('Member not found');
+    }
+    if (member.role === HouseholdRole.OWNER) {
+      throw new ForbiddenException('Cannot remove the household owner');
+    }
+
+    const removedUserId = (
+      member.userId as unknown as Types.ObjectId
+    ).toString();
+    await this.memberModel
+      .deleteOne({ _id: member._id } as Record<string, unknown>)
+      .exec();
+
+    await this.provisionPersonalHousehold(removedUserId);
+  }
+
+  /**
+   * Create a fresh personal household + active owner membership for a user who
+   * would otherwise have no active household (e.g. after being removed from a
+   * shared one). Mirrors the naming used at registration. Best-effort: a failure
+   * here must not undo the removal, so it is logged rather than thrown.
+   */
+  private async provisionPersonalHousehold(userId: string): Promise<void> {
+    try {
+      const user = await this.userModel.findById(userId).exec();
+      const label = user?.displayName?.trim() || user?.username || 'My';
+      await this.createHousehold(userId, { name: `${label}'s Household` });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { userId },
+        `Failed to re-provision personal household after removal: ${message}`,
+      );
+    }
+  }
+
+  /**
+   * Persist an in-place active-household switch, translating a duplicate-key
+   * error (the user already has a row for the target household) into a clean
+   * ConflictException instead of a raw Mongo 500 — mirrors addMember.
+   */
+  private async saveSwitch(
+    member: HouseholdMemberDocument,
+  ): Promise<HouseholdMemberDocument> {
+    try {
+      return await member.save();
+    } catch (error: unknown) {
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        (error as { code: number }).code === 11000
+      ) {
+        throw new ConflictException(
+          'You are already a member of that household',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private assertOwner(role: HouseholdRole): void {
+    if (role !== HouseholdRole.OWNER) {
+      throw new ForbiddenException(
+        'Only the household owner can perform this action',
+      );
+    }
+  }
+
+  private async markAccepted(invitation: InvitationDocument): Promise<void> {
+    invitation.status = InvitationStatus.ACCEPTED;
+    await invitation.save();
+  }
+
+  // HMAC (keyed hash) so a leaked DB dump of token hashes can't be brute-forced
+  // without the server-side pepper — identical to the auth token pattern.
+  private hashToken(plain: string): string {
+    const pepper = this.configService.get<string>('auth.tokenPepper') ?? '';
+    return crypto.createHmac('sha256', pepper).update(plain).digest('hex');
   }
 }
