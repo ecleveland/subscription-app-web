@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LoggerModule } from 'nestjs-pino';
 import configuration from './config/configuration';
@@ -72,8 +73,11 @@ import { HealthModule } from './health/health.module';
       ],
       // Allow disabling rate limiting in automated test environments (e.g. the
       // Playwright E2E suite), where repeated auth requests would otherwise trip
-      // the per-route limits. Never set THROTTLE_DISABLED in production.
-      skipIf: () => process.env.THROTTLE_DISABLED === 'true',
+      // the per-route limits. Defence-in-depth: only honoured outside production
+      // (configuration.ts also throws at boot if this is set in production).
+      skipIf: () =>
+        process.env.NODE_ENV !== 'production' &&
+        process.env.THROTTLE_DISABLED === 'true',
     }),
     MongooseModule.forRootAsync({
       useFactory: (configService: ConfigService) => ({
@@ -94,5 +98,9 @@ import { HealthModule } from './health/health.module';
     TransactionsModule,
     HealthModule,
   ],
+  // Apply rate limiting globally (per-route @Throttle decorators still override
+  // the default limit). Without this, only routes with an explicit guard were
+  // throttled, leaving subscriptions/admin/notifications/bulk routes unbounded.
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

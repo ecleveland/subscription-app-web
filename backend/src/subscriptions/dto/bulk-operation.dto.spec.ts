@@ -30,4 +30,16 @@ describe('BulkOperationDto', () => {
     expect(errors).not.toHaveLength(0);
     expect(errors[0].property).toBe('ids');
   });
+
+  it('accepts exactly 100 ids', () => {
+    const ids = Array.from({ length: 100 }, () => validId);
+    expect(validate({ ids, action: BulkAction.DELETE })).toHaveLength(0);
+  });
+
+  it('rejects more than 100 ids (unbounded $in DoS guard)', () => {
+    const ids = Array.from({ length: 101 }, () => validId);
+    const errors = validate({ ids, action: BulkAction.DELETE });
+    expect(errors).not.toHaveLength(0);
+    expect(errors[0].property).toBe('ids');
+  });
 });

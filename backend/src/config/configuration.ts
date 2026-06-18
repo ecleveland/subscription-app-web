@@ -8,7 +8,21 @@ export default () => {
     );
   }
 
+  const nodeEnv = process.env.NODE_ENV || 'development';
+
+  // Production misconfiguration guards — fail fast at boot rather than running
+  // with rate limiting silently off or CORS falling back to a dev origin.
+  if (nodeEnv === 'production') {
+    if (process.env.THROTTLE_DISABLED === 'true') {
+      throw new Error('THROTTLE_DISABLED must not be set in production');
+    }
+    if (!process.env.FRONTEND_URL) {
+      throw new Error('FRONTEND_URL must be set in production');
+    }
+  }
+
   return {
+    nodeEnv,
     port: parseInt(process.env.PORT ?? '3001', 10),
     database: {
       uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/subscriptions',
