@@ -25,6 +25,56 @@ describe('NotificationBell', () => {
     expect(screen.getByLabelText('Notifications')).toBeInTheDocument();
   });
 
+  describe('visibility-aware polling', () => {
+    function setHidden(hidden: boolean) {
+      Object.defineProperty(document, 'hidden', {
+        configurable: true,
+        get: () => hidden,
+      });
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      setHidden(false);
+    });
+
+    it('does not poll while the tab is hidden', () => {
+      render(<NotificationBell />);
+      expect(mockApiFetch).toHaveBeenCalledTimes(1); // initial fetch on mount
+
+      setHidden(true);
+      vi.advanceTimersByTime(60000);
+      expect(mockApiFetch).toHaveBeenCalledTimes(1); // interval skipped while hidden
+
+      setHidden(false);
+      vi.advanceTimersByTime(60000);
+      expect(mockApiFetch).toHaveBeenCalledTimes(2); // resumes when visible
+    });
+
+    it('refreshes once when the tab becomes visible again', () => {
+      setHidden(true);
+      render(<NotificationBell />);
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
+
+      setHidden(false);
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('removes the visibility listener on unmount', () => {
+      const { unmount } = render(<NotificationBell />);
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
+
+      unmount();
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(120000);
+      expect(mockApiFetch).toHaveBeenCalledTimes(1); // no further calls after unmount
+    });
+  });
+
   it('should show badge when there are unread notifications', async () => {
     mockApiFetch.mockResolvedValue({ count: 3 });
 

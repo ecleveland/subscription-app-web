@@ -29,5 +29,21 @@ export default () => {
     cors: {
       origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     },
+    mail: {
+      // SMTP in production (real delivery), console stub otherwise (dev/test).
+      // Overridable via MAIL_DRIVER for local SMTP testing.
+      driver: (process.env.MAIL_DRIVER ||
+        (process.env.NODE_ENV === 'production' ? 'smtp' : 'console')) as
+        | 'smtp'
+        | 'console',
+      host: process.env.SMTP_HOST || '',
+      port: parseInt(process.env.SMTP_PORT ?? '587', 10),
+      secure: process.env.SMTP_SECURE === 'true',
+      user: process.env.SMTP_USER || undefined,
+      pass: process.env.SMTP_PASS || undefined,
+      from:
+        process.env.MAIL_FROM ||
+        'Subscription App <no-reply@subscription-app.local>',
+    },
   };
 };
