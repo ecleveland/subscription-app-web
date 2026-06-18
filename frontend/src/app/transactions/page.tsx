@@ -11,6 +11,7 @@ import { listCategories } from '@/lib/categories';
 import { formatCents, formatDate } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import TransactionForm from '@/components/TransactionForm';
+import CsvImportWizard from '@/components/CsvImportWizard';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import type {
   BudgetCategory,
@@ -34,6 +35,7 @@ export default function TransactionsPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState<Transaction | null>(null);
 
@@ -128,15 +130,25 @@ export default function TransactionsPage() {
     <div className="max-w-4xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Transactions</h1>
-        {!showCreate && !editing && (
-          <button
-            onClick={() => setShowCreate(true)}
-            disabled={!canAdd}
-            title={canAdd ? '' : 'Create an account first'}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            + Add transaction
-          </button>
+        {!showCreate && !editing && !showImport && (
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowImport(true)}
+              disabled={!canAdd}
+              title={canAdd ? '' : 'Create an account first'}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+              Import CSV
+            </button>
+            <button
+              onClick={() => setShowCreate(true)}
+              disabled={!canAdd}
+              title={canAdd ? '' : 'Create an account first'}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              + Add transaction
+            </button>
+          </div>
         )}
       </div>
 
@@ -163,6 +175,16 @@ export default function TransactionsPage() {
               setShowCreate(false);
               setEditing(null);
             }}
+          />
+        </div>
+      )}
+
+      {showImport && (
+        <div className="mb-6">
+          <CsvImportWizard
+            accounts={accounts}
+            onImported={afterMutation}
+            onCancel={() => setShowImport(false)}
           />
         </div>
       )}

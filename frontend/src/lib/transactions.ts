@@ -1,9 +1,17 @@
 import { apiFetch } from './api';
+import type { ColumnMapping } from './csv';
 import type {
   Transaction,
   TransactionType,
   PaginatedResponse,
+  ImportResult,
 } from './types';
+
+export interface ImportTransactionsInput {
+  accountId: string;
+  mapping: ColumnMapping;
+  rows: Record<string, string>[];
+}
 
 export interface TransactionFilters {
   accountId?: string;
@@ -68,4 +76,14 @@ export function updateTransaction(
 
 export function deleteTransaction(id: string): Promise<void> {
   return apiFetch<void>(`/transactions/${id}`, { method: 'DELETE' });
+}
+
+/** Bulk-import parsed CSV rows into an account via `POST /transactions/import`. */
+export function importTransactions(
+  input: ImportTransactionsInput,
+): Promise<ImportResult> {
+  return apiFetch<ImportResult>('/transactions/import', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 }

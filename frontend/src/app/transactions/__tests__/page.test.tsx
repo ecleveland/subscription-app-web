@@ -19,6 +19,14 @@ vi.mock('@/lib/toast', () => ({
 vi.mock('@/components/TransactionForm', () => ({
   default: () => <div>TransactionFormStub</div>,
 }));
+vi.mock('@/components/CsvImportWizard', () => ({
+  default: (props: { onImported: () => void }) => (
+    <div>
+      CsvImportWizardStub
+      <button onClick={props.onImported}>stub-import</button>
+    </div>
+  ),
+}));
 
 import { listTransactions, deleteTransaction } from '@/lib/transactions';
 import { listCategories } from '@/lib/categories';
@@ -128,6 +136,47 @@ describe('TransactionsPage', () => {
           .mock.calls.some((c) => c[0]?.type === 'income'),
       ).toBe(true),
     );
+  });
+
+  it('opens the CSV import wizard and hides the action buttons', async () => {
+    mockList([]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText('No transactions found.');
+
+    await user.click(screen.getByRole('button', { name: 'Import CSV' }));
+
+    expect(screen.getByText('CsvImportWizardStub')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import CSV' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ Add transaction' })).toBeNull();
+  });
+
+  it('warns when balances fail to refresh after an import', async () => {
+    accountsState = {
+      accounts,
+      error: null,
+      refresh: vi.fn().mockRejectedValue(new Error('refresh fail')),
+    };
+    mockList([]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText('No transactions found.');
+
+    await user.click(screen.getByRole('button', { name: 'Import CSV' }));
+    await user.click(screen.getByRole('button', { name: 'stub-import' }));
+
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith(
+        'Saved, but balances may be out of date — refresh to update.',
+      ),
+    );
+  });
+
+  it('disables the import button until an account exists', async () => {
+    accountsState = { accounts: [], error: null, refresh: vi.fn() };
+    mockList([]);
+    render(<TransactionsPage />);
+    expect(await screen.findByRole('button', { name: 'Import CSV' })).toBeDisabled();
   });
 
   it('deletes a transaction through the confirm dialog', async () => {
