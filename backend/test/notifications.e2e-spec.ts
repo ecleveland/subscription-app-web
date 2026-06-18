@@ -188,6 +188,19 @@ describe('Notifications (e2e)', () => {
     });
   });
 
+  describe('malformed :id', () => {
+    it('returns 400 (not 500) for a malformed id on PATCH/DELETE', async () => {
+      await request(app.getHttpServer())
+        .patch('/api/notifications/not-an-id/read')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+      await request(app.getHttpServer())
+        .delete('/api/notifications/not-an-id')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+    });
+  });
+
   describe('Auth required', () => {
     it('should return 401 without token', async () => {
       await request(app.getHttpServer()).get('/api/notifications').expect(401);

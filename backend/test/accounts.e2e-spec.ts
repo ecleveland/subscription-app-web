@@ -266,11 +266,11 @@ describe('Accounts (e2e)', () => {
         .expect(404);
     });
 
-    it('returns 404 (not 500) for a malformed account id', async () => {
+    it('returns 400 (not 500) for a malformed account id', async () => {
       await request(app.getHttpServer())
         .get('/api/accounts/not-an-id')
         .set('Authorization', `Bearer ${tokenA}`)
-        .expect(404);
+        .expect(400);
     });
 
     it('returns 401 without a token', async () => {

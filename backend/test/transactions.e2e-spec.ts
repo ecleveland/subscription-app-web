@@ -624,6 +624,24 @@ describe('Transactions (e2e)', () => {
     });
   });
 
+  describe('malformed :id', () => {
+    it('returns 400 (not 500) for a malformed id on GET/PATCH/DELETE', async () => {
+      await request(app.getHttpServer())
+        .get('/api/transactions/not-an-id')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+      await request(app.getHttpServer())
+        .patch('/api/transactions/not-an-id')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ amountCents: 100 })
+        .expect(400);
+      await request(app.getHttpServer())
+        .delete('/api/transactions/not-an-id')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+    });
+  });
+
   describe('auth', () => {
     it('returns 401 without a token', async () => {
       await request(app.getHttpServer()).get('/api/transactions').expect(401);
