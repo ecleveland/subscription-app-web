@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Subscription } from '@/lib/types';
-import { getMonthlyCost, formatCurrency } from '@/lib/utils';
+import { getMonthlyCost, getPersonalShare, formatCurrency } from '@/lib/utils';
 
 const CATEGORY_COLORS: Record<string, string> = {
   Streaming: '#a855f7',
@@ -37,7 +37,7 @@ export default function CategoryBreakdownChart({ subscriptions }: { subscription
     const active = subscriptions.filter((s) => s.isActive !== false);
     const byCategory: Record<string, number> = {};
     for (const sub of active) {
-      const monthly = getMonthlyCost(sub.cost, sub.billingCycle);
+      const monthly = getMonthlyCost(getPersonalShare(sub.cost, sub.sharedWith), sub.billingCycle);
       byCategory[sub.category] = (byCategory[sub.category] || 0) + monthly;
     }
     return Object.entries(byCategory)

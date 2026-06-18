@@ -70,9 +70,27 @@ export function getPersonalShare(
   return cost;
 }
 
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+/**
+ * Midnight (00:00:00.000) UTC of the day containing the given date. Stored
+ * date-only values (e.g. "2025-06-15") parse as UTC, so flooring to a UTC day
+ * keeps date math in one consistent frame regardless of the viewer's timezone.
+ */
+export function startOfUtcDay(date: Date | string): Date {
+  const d = new Date(date);
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+  );
+}
+
+/**
+ * Whole-day difference between now and the target, both floored to a UTC day,
+ * so "today" and "expiring soon (≤N)" stay day-granular and don't flip based on
+ * the time of day or proximity to midnight.
+ */
 export function daysUntil(date: Date | string): number {
-  const now = new Date();
-  const target = new Date(date);
-  const diffTime = target.getTime() - now.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const start = startOfUtcDay(new Date());
+  const target = startOfUtcDay(date);
+  return Math.round((target.getTime() - start.getTime()) / MS_PER_DAY);
 }

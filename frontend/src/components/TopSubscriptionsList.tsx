@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Subscription } from '@/lib/types';
-import { getMonthlyCost, formatCurrency } from '@/lib/utils';
+import { getMonthlyCost, getPersonalShare, formatCurrency } from '@/lib/utils';
 import CategoryBadge from '@/components/CategoryBadge';
 
 export default function TopSubscriptionsList({ subscriptions }: { subscriptions: Subscription[] }) {
@@ -9,7 +9,7 @@ export default function TopSubscriptionsList({ subscriptions }: { subscriptions:
       .filter((s) => s.isActive !== false)
       .map((sub) => ({
         ...sub,
-        monthlyCost: getMonthlyCost(sub.cost, sub.billingCycle),
+        monthlyCost: getMonthlyCost(getPersonalShare(sub.cost, sub.sharedWith), sub.billingCycle),
       }))
       .sort((a, b) => b.monthlyCost - a.monthlyCost)
       .slice(0, 5);

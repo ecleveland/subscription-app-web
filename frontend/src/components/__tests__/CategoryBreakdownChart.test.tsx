@@ -37,6 +37,15 @@ describe('CategoryBreakdownChart', () => {
     expect(container.firstChild).toBeTruthy();
   });
 
+  it('should render with shared subscriptions (uses personal share)', () => {
+    const subs = [
+      makeSub({ _id: '1', name: 'Netflix', cost: 40, category: 'Streaming', sharedWith: 4 }),
+    ];
+
+    const { container } = render(<CategoryBreakdownChart subscriptions={subs} />);
+    expect(container.firstChild).toBeTruthy();
+  });
+
   it('should handle empty subscriptions array', () => {
     render(<CategoryBreakdownChart subscriptions={[]} />);
 

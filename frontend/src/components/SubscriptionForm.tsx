@@ -52,6 +52,10 @@ export default function SubscriptionForm({ subscription }: Props) {
     setError('');
     setLoading(true);
 
+    // Guard the parse: an empty/non-numeric field yields NaN, which serializes
+    // to null and clobbers the value server-side. Fall back to the default (3).
+    const parsedReminder = parseInt(reminderDaysBefore, 10);
+
     const body: Record<string, unknown> = {
       name,
       cost: parseFloat(cost),
@@ -59,7 +63,7 @@ export default function SubscriptionForm({ subscription }: Props) {
       nextBillingDate,
       category,
       isActive,
-      reminderDaysBefore: parseInt(reminderDaysBefore, 10),
+      reminderDaysBefore: Number.isFinite(parsedReminder) ? parsedReminder : 3,
       ...(notes ? { notes } : {}),
       tags,
     };
@@ -235,6 +239,7 @@ export default function SubscriptionForm({ subscription }: Props) {
           type="number"
           min="0"
           max="30"
+          required
           value={reminderDaysBefore}
           onChange={(e) => setReminderDaysBefore(e.target.value)}
           className={inputClasses}

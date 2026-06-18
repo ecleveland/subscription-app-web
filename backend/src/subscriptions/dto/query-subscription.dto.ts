@@ -6,6 +6,7 @@ import {
   IsInt,
   Min,
   Max,
+  MaxLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { BillingCycle } from '../schemas/subscription.schema';
@@ -35,6 +36,15 @@ export class QuerySubscriptionDto {
   @IsOptional()
   @IsString()
   tags?: string;
+
+  @ApiPropertyOptional({
+    description: 'Case-insensitive search over name and notes',
+    example: 'netflix',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 
   @ApiPropertyOptional({
     enum: ['name', 'cost', 'nextBillingDate', 'createdAt'],

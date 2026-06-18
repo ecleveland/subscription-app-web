@@ -479,6 +479,44 @@ describe('SubscriptionsService', () => {
       );
     });
 
+    it('should add a case-insensitive $or search over name and notes when provided', async () => {
+      const chain = createChainable([]);
+      mockSubModel.find.mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
+
+      await service.findAll(householdId, { search: 'Netflix' });
+
+      const filter = mockSubModel.find.mock.calls[0][0];
+      expect(filter.$or).toHaveLength(2);
+      expect(filter.$or[0].name).toBeInstanceOf(RegExp);
+      expect(filter.$or[0].name.source).toBe('Netflix');
+      expect(filter.$or[0].name.flags).toContain('i');
+      expect(filter.$or[1].notes).toBeInstanceOf(RegExp);
+    });
+
+    it('should escape regex metacharacters in the search term', async () => {
+      const chain = createChainable([]);
+      mockSubModel.find.mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
+
+      await service.findAll(householdId, { search: 'a.b*c+' });
+
+      const filter = mockSubModel.find.mock.calls[0][0];
+      // Metacharacters are escaped so they match literally (no ReDoS/injection)
+      expect(filter.$or[0].name.source).toBe('a\\.b\\*c\\+');
+    });
+
+    it('should not add a search filter for a blank/whitespace term', async () => {
+      const chain = createChainable([]);
+      mockSubModel.find.mockReturnValueOnce(chain);
+      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
+
+      await service.findAll(householdId, { search: '   ' });
+
+      const filter = mockSubModel.find.mock.calls[0][0];
+      expect(filter.$or).toBeUndefined();
+    });
+
     it('should filter shared subscriptions when shared=shared', async () => {
       const chain = createChainable([]);
       mockSubModel.find.mockReturnValueOnce(chain);

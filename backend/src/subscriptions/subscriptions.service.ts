@@ -79,6 +79,11 @@ export class SubscriptionsService {
     return billingCycle === BillingCycle.YEARLY ? cost / 12 : cost;
   }
 
+  /** Escape user input so it matches literally in a RegExp (no ReDoS/injection). */
+  private static escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   /**
    * Advance every active subscription whose billing date is in the past to its
    * next future date. Runs from a scheduled cron (see SubscriptionsCronService)
@@ -178,6 +183,13 @@ export class SubscriptionsService {
       filter.sharedWith = { $gte: 2 };
     } else if (query.shared === 'individual') {
       filter.sharedWith = { $in: [null, undefined] };
+    }
+    if (query.search?.trim()) {
+      const regex = new RegExp(
+        SubscriptionsService.escapeRegex(query.search.trim()),
+        'i',
+      );
+      filter.$or = [{ name: regex }, { notes: regex }];
     }
 
     const page = query.page ?? 1;

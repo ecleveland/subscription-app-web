@@ -1,4 +1,4 @@
-import { formatCurrency, formatDate, getDailyCost, getWeeklyCost, getMonthlyCost, getYearlyCost, getPersonalShare, daysUntil, formatCents, dollarsToCents } from '../utils';
+import { formatCurrency, formatDate, getDailyCost, getWeeklyCost, getMonthlyCost, getYearlyCost, getPersonalShare, daysUntil, startOfUtcDay, formatCents, dollarsToCents } from '../utils';
 
 describe('formatCents', () => {
   it('formats positive cents', () => {
@@ -164,5 +164,35 @@ describe('daysUntil', () => {
 
   it('should return 1 when the target is tomorrow', () => {
     expect(daysUntil('2025-06-16T12:00:00')).toBe(1);
+  });
+
+  it('should be day-granular: a later time on the same UTC day is 0, not 1', () => {
+    vi.setSystemTime(new Date('2025-06-15T08:00:00Z'));
+    // ~12h later, still the same UTC day → not "expiring in 1 day"
+    expect(daysUntil('2025-06-15T20:00:00Z')).toBe(0);
+  });
+
+  it('should count a crossing into the next UTC day as 1 even if only hours away', () => {
+    vi.setSystemTime(new Date('2025-06-15T23:00:00Z'));
+    expect(daysUntil('2025-06-16T01:00:00Z')).toBe(1);
+  });
+
+  it('should treat a stored date-only value as a whole UTC day', () => {
+    vi.setSystemTime(new Date('2025-06-15T12:00:00Z'));
+    expect(daysUntil('2025-06-18')).toBe(3);
+  });
+});
+
+describe('startOfUtcDay', () => {
+  it('floors a date-time to UTC midnight', () => {
+    expect(startOfUtcDay('2025-06-15T18:30:00Z').toISOString()).toBe(
+      '2025-06-15T00:00:00.000Z',
+    );
+  });
+
+  it('treats a date-only string as that UTC day', () => {
+    expect(startOfUtcDay('2025-06-15').toISOString()).toBe(
+      '2025-06-15T00:00:00.000Z',
+    );
   });
 });

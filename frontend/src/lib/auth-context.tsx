@@ -24,6 +24,7 @@ interface UserInfo {
 
 interface AuthContextType {
   isAuthenticated: boolean;
+  isHydrated: boolean;
   user: UserInfo | null;
   isAdmin: boolean;
   login: (username: string, password: string) => Promise<void>;
@@ -196,6 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const contextValue = useMemo(
     () => ({
       isAuthenticated,
+      isHydrated: hydrated,
       user,
       isAdmin: user?.role === 'admin',
       login,
@@ -203,14 +205,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refreshProfile,
     }),
-    [isAuthenticated, user, login, register, logout, refreshProfile],
+    [isAuthenticated, hydrated, user, login, register, logout, refreshProfile],
   );
 
-  // Don't render children until hydrated to prevent flash of wrong UI
-  if (!hydrated) {
-    return null;
-  }
-
+  // Always render children (mirrors ThemeProvider) so the app isn't blanked
+  // during hydration — avoids the flash/CLS/SEO hit of returning null. Auth-
+  // dependent UI gates on `isAuthenticated`/`isHydrated` instead (e.g. Header
+  // returns null when unauthenticated).
   return (
     <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
   );

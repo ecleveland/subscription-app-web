@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import AcceptInvitationForm from '@/components/AcceptInvitationForm';
 
 export default function AcceptInvitationPage() {
@@ -6,7 +7,9 @@ export default function AcceptInvitationPage() {
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
         Accept Invitation
       </h1>
-      <AcceptInvitationForm />
+      <Suspense fallback={<p className="text-gray-500 dark:text-gray-400">Loading…</p>}>
+        <AcceptInvitationForm />
+      </Suspense>
     </div>
   );
 }

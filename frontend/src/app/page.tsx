@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
@@ -51,14 +51,28 @@ export default function DashboardPage() {
     setPage(1);
   }
 
-  // Paginated fetch for the list
+  // Build the list query from every active filter so the server does the
+  // filtering, sorting and pagination (no client-side re-derivation).
+  const buildListQuery = useCallback(() => {
+    const [sortBy, sortOrder] = sortKey.split('-');
+    const params = new URLSearchParams({
+      sortBy,
+      sortOrder,
+      page: String(page),
+      limit: '20',
+    });
+    const trimmedSearch = debouncedSearch.trim();
+    if (trimmedSearch) params.set('search', trimmedSearch);
+    if (selectedTags.size > 0) params.set('tags', Array.from(selectedTags).join(','));
+    if (sharedFilter !== 'all') params.set('shared', sharedFilter);
+    return params.toString();
+  }, [sortKey, page, debouncedSearch, selectedTags, sharedFilter]);
+
+  // Paginated, server-filtered fetch for the list
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelled = false;
-    const [sortBy, sortOrder] = sortKey.split('-');
-    apiFetch<PaginatedResponse<Subscription>>(
-      `/subscriptions?sortBy=${sortBy}&sortOrder=${sortOrder}&page=${page}&limit=20`,
-    )
+    apiFetch<PaginatedResponse<Subscription>>(`/subscriptions?${buildListQuery()}`)
       .then((res) => {
         if (!cancelled) {
           setSubscriptions(res.data);
@@ -74,7 +88,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, sortKey, page]);
+  }, [isAuthenticated, buildListQuery]);
 
   // Unpaginated fetch for summary (all subscriptions)
   useEffect(() => {
@@ -111,7 +125,7 @@ export default function DashboardPage() {
   }
 
   function handleSelectAll() {
-    setSelectedIds(new Set(displaySubscriptions.map((s) => s._id)));
+    setSelectedIds(new Set(subscriptions.map((s) => s._id)));
   }
 
   function handleDeselectAll() {
@@ -151,9 +165,8 @@ export default function DashboardPage() {
 
       if (result.failed > 0) {
         // Refetch if some operations failed
-        const [sortBy, sortOrder] = sortKey.split('-');
         const res = await apiFetch<PaginatedResponse<Subscription>>(
-          `/subscriptions?sortBy=${sortBy}&sortOrder=${sortOrder}&page=${page}&limit=20`,
+          `/subscriptions?${buildListQuery()}`,
         );
         setSubscriptions(res.data);
         setMeta(res.meta);
@@ -197,77 +210,6 @@ export default function DashboardPage() {
   }
 
   const isSearching = debouncedSearch.trim().length > 0;
-
-  const isTagFiltering = selectedTags.size > 0;
-
-  const isSharedFiltering = sharedFilter !== 'all';
-
-  const { displaySubscriptions, displayMeta } = useMemo(() => {
-    if (!isSearching && !isTagFiltering && !isSharedFiltering) {
-      return { displaySubscriptions: subscriptions, displayMeta: meta };
-    }
-
-    let filtered = allSubscriptions;
-
-    if (isSearching) {
-      const query = debouncedSearch.trim().toLowerCase();
-      filtered = filtered.filter(
-        (sub) =>
-          sub.name.toLowerCase().includes(query) ||
-          (sub.notes && sub.notes.toLowerCase().includes(query)),
-      );
-    }
-
-    if (isTagFiltering) {
-      filtered = filtered.filter(
-        (sub) => sub.tags?.some((t) => selectedTags.has(t)),
-      );
-    }
-
-    if (isSharedFiltering) {
-      filtered = filtered.filter((sub) =>
-        sharedFilter === 'shared'
-          ? sub.sharedWith != null && sub.sharedWith >= 2
-          : sub.sharedWith == null || sub.sharedWith < 2,
-      );
-    }
-
-    const [sortBy, sortOrder] = sortKey.split('-');
-    const sorted = [...filtered].sort((a, b) => {
-      let cmp = 0;
-      switch (sortBy) {
-        case 'name':
-          cmp = a.name.localeCompare(b.name);
-          break;
-        case 'cost':
-          cmp = a.cost - b.cost;
-          break;
-        case 'nextBillingDate':
-          cmp = new Date(a.nextBillingDate).getTime() - new Date(b.nextBillingDate).getTime();
-          break;
-        case 'createdAt':
-          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-          break;
-      }
-      return sortOrder === 'desc' ? -cmp : cmp;
-    });
-
-    const limit = 20;
-    const start = (page - 1) * limit;
-    const paged = sorted.slice(start, start + limit);
-    const totalPages = Math.max(1, Math.ceil(sorted.length / limit));
-
-    return {
-      displaySubscriptions: paged,
-      displayMeta: {
-        total: sorted.length,
-        page,
-        limit,
-        totalPages,
-        hasNextPage: page < totalPages,
-      } as PaginationMeta,
-    };
-  }, [isSearching, isTagFiltering, isSharedFiltering, debouncedSearch, selectedTags, sharedFilter, allSubscriptions, subscriptions, meta, sortKey, page]);
 
   if (loading) {
     return (
@@ -359,7 +301,7 @@ export default function DashboardPage() {
       {selectionMode && selectedIds.size > 0 && (
         <BulkActionToolbar
           selectedCount={selectedIds.size}
-          totalCount={displaySubscriptions.length}
+          totalCount={subscriptions.length}
           onSelectAll={handleSelectAll}
           onDeselectAll={handleDeselectAll}
           onBulkDelete={() => setConfirmAction({ action: 'delete' })}
@@ -369,21 +311,21 @@ export default function DashboardPage() {
           loading={bulkLoading}
         />
       )}
-      {isSearching && displaySubscriptions.length === 0 ? (
+      {isSearching && subscriptions.length === 0 ? (
         <p className="text-gray-500 dark:text-gray-400 text-center py-8">
           No subscriptions match &ldquo;{debouncedSearch.trim()}&rdquo;
         </p>
       ) : (
         <SubscriptionList
-          subscriptions={displaySubscriptions}
+          subscriptions={subscriptions}
           onToggleActive={handleToggleActive}
           selectionMode={selectionMode}
           selectedIds={selectedIds}
           onSelect={handleSelect}
         />
       )}
-      {displayMeta && displayMeta.totalPages > 1 && (
-        <Pagination page={page} totalPages={displayMeta.totalPages} onPageChange={setPage} />
+      {meta && meta.totalPages > 1 && (
+        <Pagination page={page} totalPages={meta.totalPages} onPageChange={setPage} />
       )}
       <ConfirmDialog
         open={!!confirmAction}
