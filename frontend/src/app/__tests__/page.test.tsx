@@ -101,7 +101,7 @@ describe('DashboardPage sorting', () => {
   });
 });
 
-describe('DashboardPage search', () => {
+describe('DashboardPage search (server-driven)', () => {
   const subs = [
     makeSub({ _id: '1', name: 'Netflix', notes: 'Family plan', cost: 15 }),
     makeSub({ _id: '2', name: 'Spotify', notes: 'Music streaming', cost: 10 }),
@@ -110,7 +110,6 @@ describe('DashboardPage search', () => {
 
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    // Paginated call returns all subs; unpaginated (limit=0) also returns all
     vi.mocked(apiFetch).mockResolvedValue(makeEnvelope(subs));
   });
 
@@ -124,29 +123,32 @@ describe('DashboardPage search', () => {
     expect(await screen.findByLabelText('Search subscriptions')).toBeInTheDocument();
   });
 
-  it('should filter subscriptions when search term is entered', async () => {
+  it('should send the (debounced) search term to the server on page 1', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<DashboardPage />);
 
     await screen.findByText('Netflix');
-    expect(screen.getByText('Spotify')).toBeInTheDocument();
-    expect(screen.getByText('GitHub')).toBeInTheDocument();
-
     await user.type(screen.getByLabelText('Search subscriptions'), 'net');
 
     await waitFor(() => {
-      expect(screen.getByText('Netflix')).toBeInTheDocument();
-      expect(screen.queryByText('Spotify')).not.toBeInTheDocument();
-      expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
+      const calls = vi.mocked(apiFetch).mock.calls.map((c) => c[0] as string);
+      expect(
+        calls.some((url) => url.includes('search=net') && url.includes('page=1')),
+      ).toBe(true);
     });
   });
 
-  it('should show no results message when nothing matches', async () => {
+  it('should show the no-results message when the server returns no matches', async () => {
+    // mount: [0] list, [1] summary (limit=0); then the search refetch is empty
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce(makeEnvelope(subs))
+      .mockResolvedValueOnce(makeEnvelope(subs))
+      .mockResolvedValue(makeEnvelope([], { total: 0 }));
+
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<DashboardPage />);
 
     await screen.findByText('Netflix');
-
     await user.type(screen.getByLabelText('Search subscriptions'), 'zzzzz');
 
     await waitFor(() => {
@@ -154,38 +156,61 @@ describe('DashboardPage search', () => {
     });
   });
 
-  it('should search in notes field', async () => {
+  it('should drop the search param when the field is cleared', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<DashboardPage />);
 
     await screen.findByText('Netflix');
-
-    await user.type(screen.getByLabelText('Search subscriptions'), 'family');
-
-    await waitFor(() => {
-      expect(screen.getByText('Netflix')).toBeInTheDocument();
-      expect(screen.queryByText('Spotify')).not.toBeInTheDocument();
-    });
-  });
-
-  it('should return to full list when search is cleared', async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<DashboardPage />);
-
-    await screen.findByText('Netflix');
-
     await user.type(screen.getByLabelText('Search subscriptions'), 'net');
 
     await waitFor(() => {
-      expect(screen.queryByText('Spotify')).not.toBeInTheDocument();
+      const calls = vi.mocked(apiFetch).mock.calls.map((c) => c[0] as string);
+      expect(calls.some((url) => url.includes('search=net'))).toBe(true);
     });
 
     await user.click(screen.getByLabelText('Clear search'));
 
     await waitFor(() => {
-      expect(screen.getByText('Netflix')).toBeInTheDocument();
-      expect(screen.getByText('Spotify')).toBeInTheDocument();
-      expect(screen.getByText('GitHub')).toBeInTheDocument();
+      const lastListCall = vi
+        .mocked(apiFetch)
+        .mock.calls.map((c) => c[0] as string)
+        .filter((url) => url.includes('sortBy='))
+        .at(-1)!;
+      expect(lastListCall).not.toContain('search=');
+    });
+  });
+});
+
+describe('DashboardPage filters (server-driven)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should send the shared filter to the server', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(makeEnvelope([makeSub()]));
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Shared' }));
+
+    await waitFor(() => {
+      const calls = vi.mocked(apiFetch).mock.calls.map((c) => c[0] as string);
+      expect(calls.some((url) => url.includes('shared=shared'))).toBe(true);
+    });
+  });
+
+  it('should send selected tags to the server', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      makeEnvelope([makeSub({ tags: ['essential'] })]),
+    );
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'essential' }));
+
+    await waitFor(() => {
+      const calls = vi.mocked(apiFetch).mock.calls.map((c) => c[0] as string);
+      expect(calls.some((url) => url.includes('tags=essential'))).toBe(true);
     });
   });
 });

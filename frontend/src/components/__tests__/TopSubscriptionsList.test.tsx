@@ -54,6 +54,32 @@ describe('TopSubscriptionsList', () => {
     expect(screen.getByText('$15.99/mo')).toBeInTheDocument();
   });
 
+  it('should use the personal share for shared subscriptions', () => {
+    const subs = [
+      makeSub({ _id: '1', name: 'Netflix', cost: 40, billingCycle: 'monthly', sharedWith: 4 }),
+    ];
+
+    render(<TopSubscriptionsList subscriptions={subs} />);
+
+    // $40 split 4 ways → $10.00/mo personal share (matches the dashboard tiles)
+    expect(screen.getByText('$10.00/mo')).toBeInTheDocument();
+    expect(screen.queryByText('$40.00/mo')).not.toBeInTheDocument();
+  });
+
+  it('should rank by personal share, not full cost', () => {
+    const subs = [
+      // Full cost $60 but split 6 ways → $10 personal
+      makeSub({ _id: '1', name: 'SharedBig', cost: 60, billingCycle: 'monthly', sharedWith: 6 }),
+      // Unshared $25 → ranks above the shared one once split
+      makeSub({ _id: '2', name: 'SoloMid', cost: 25, billingCycle: 'monthly' }),
+    ];
+
+    render(<TopSubscriptionsList subscriptions={subs} />);
+
+    const names = screen.getAllByText(/SharedBig|SoloMid/).map((el) => el.textContent);
+    expect(names).toEqual(['SoloMid', 'SharedBig']);
+  });
+
   it('should handle empty subscriptions array', () => {
     render(<TopSubscriptionsList subscriptions={[]} />);
 

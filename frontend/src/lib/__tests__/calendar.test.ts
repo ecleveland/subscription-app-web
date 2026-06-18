@@ -23,16 +23,16 @@ describe('getBillingDatesInMonth', () => {
     const sub = makeSub({ nextBillingDate: '2026-03-15', billingCycle: 'monthly' });
     const dates = getBillingDatesInMonth(sub, 2026, 2); // March 2026
     expect(dates).toHaveLength(1);
-    expect(dates[0].getDate()).toBe(15);
-    expect(dates[0].getMonth()).toBe(2);
+    expect(dates[0].getUTCDate()).toBe(15);
+    expect(dates[0].getUTCMonth()).toBe(2);
   });
 
   it('should return the correct day for a monthly subscription in a different month', () => {
     const sub = makeSub({ nextBillingDate: '2026-03-15', billingCycle: 'monthly' });
     const dates = getBillingDatesInMonth(sub, 2026, 5); // June 2026
     expect(dates).toHaveLength(1);
-    expect(dates[0].getDate()).toBe(15);
-    expect(dates[0].getMonth()).toBe(5);
+    expect(dates[0].getUTCDate()).toBe(15);
+    expect(dates[0].getUTCMonth()).toBe(5);
   });
 
   it('should clamp end-of-month for monthly subscriptions (31st in a 30-day month)', () => {
@@ -40,14 +40,14 @@ describe('getBillingDatesInMonth', () => {
     // April has 30 days
     const dates = getBillingDatesInMonth(sub, 2026, 3); // April 2026
     expect(dates).toHaveLength(1);
-    expect(dates[0].getDate()).toBe(30);
+    expect(dates[0].getUTCDate()).toBe(30);
   });
 
   it('should clamp end-of-month for monthly subscriptions (31st in February)', () => {
     const sub = makeSub({ nextBillingDate: '2026-01-31', billingCycle: 'monthly' });
     const dates = getBillingDatesInMonth(sub, 2026, 1); // February 2026 (28 days)
     expect(dates).toHaveLength(1);
-    expect(dates[0].getDate()).toBe(28);
+    expect(dates[0].getUTCDate()).toBe(28);
   });
 
   it('should return multiple dates for a weekly subscription', () => {
@@ -56,7 +56,7 @@ describe('getBillingDatesInMonth', () => {
     const dates = getBillingDatesInMonth(sub, 2026, 2); // March 2026
     // Mondays in March 2026: 2, 9, 16, 23, 30
     expect(dates).toHaveLength(5);
-    expect(dates.map((d) => d.getDate())).toEqual([2, 9, 16, 23, 30]);
+    expect(dates.map((d) => d.getUTCDate())).toEqual([2, 9, 16, 23, 30]);
   });
 
   it('should return 4 weekly billing dates when the month has only 4 of that weekday', () => {
@@ -65,7 +65,7 @@ describe('getBillingDatesInMonth', () => {
     const dates = getBillingDatesInMonth(sub, 2026, 2); // March 2026
     // Tuesdays in March 2026: 3, 10, 17, 24, 31
     expect(dates).toHaveLength(5);
-    expect(dates.map((d) => d.getDate())).toEqual([3, 10, 17, 24, 31]);
+    expect(dates.map((d) => d.getUTCDate())).toEqual([3, 10, 17, 24, 31]);
   });
 
   it('should return billing date only in the correct month for yearly subscriptions', () => {
@@ -74,7 +74,7 @@ describe('getBillingDatesInMonth', () => {
     // Should bill in June
     const juneDate = getBillingDatesInMonth(sub, 2026, 5);
     expect(juneDate).toHaveLength(1);
-    expect(juneDate[0].getDate()).toBe(15);
+    expect(juneDate[0].getUTCDate()).toBe(15);
 
     // Should NOT bill in March
     const marchDates = getBillingDatesInMonth(sub, 2026, 2);
@@ -86,7 +86,7 @@ describe('getBillingDatesInMonth', () => {
     // In a leap year February has 29 days, but 2026 is not a leap year
     const dates = getBillingDatesInMonth(sub, 2026, 1);
     expect(dates).toHaveLength(1);
-    expect(dates[0].getDate()).toBe(28);
+    expect(dates[0].getUTCDate()).toBe(28);
   });
 
   it('should return empty array for invalid nextBillingDate', () => {

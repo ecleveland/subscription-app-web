@@ -341,6 +341,48 @@ describe('SubscriptionForm', () => {
     });
   });
 
+  describe('reminder days', () => {
+    it('should mark the reminder field as required', () => {
+      render(<SubscriptionForm />);
+      expect(screen.getByLabelText(/Remind me before renewal/)).toBeRequired();
+    });
+
+    it('should block submission when the reminder field is cleared (no null sent)', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockClear();
+
+      render(<SubscriptionForm subscription={existingSub} />);
+
+      // Empty + required → the browser blocks submit, so parseInt('') → NaN → null
+      // can never reach the API.
+      await user.clear(screen.getByLabelText(/Remind me before renewal/));
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      expect(apiFetch).not.toHaveBeenCalled();
+    });
+
+    it('should send the entered reminder value as an integer', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm subscription={existingSub} />);
+
+      const field = screen.getByLabelText(/Remind me before renewal/);
+      await user.clear(field);
+      await user.type(field, '7');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => {
+        expect(apiFetch).toHaveBeenCalled();
+        const body = JSON.parse(
+          vi.mocked(apiFetch).mock.calls[0][1]!.body as string,
+        );
+        expect(body.reminderDaysBefore).toBe(7);
+      });
+    });
+  });
+
   describe('loading state', () => {
     it('should show Saving... and disable button during submission', async () => {
       const user = userEvent.setup();

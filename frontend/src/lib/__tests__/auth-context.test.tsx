@@ -1,4 +1,4 @@
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { render, renderHook, act, screen, waitFor } from '@testing-library/react';
 import { AuthProvider, useAuth } from '../auth-context';
 
 const mockPush = vi.fn();
@@ -49,6 +49,24 @@ describe('useAuth', () => {
       'useAuth must be used within an AuthProvider',
     );
     spy.mockRestore();
+  });
+
+  it('should always render children (not blank the app during hydration)', () => {
+    render(
+      <AuthProvider>
+        <div>child content</div>
+      </AuthProvider>,
+    );
+
+    expect(screen.getByText('child content')).toBeInTheDocument();
+  });
+
+  it('should expose isHydrated as true after mount', async () => {
+    const { result } = renderAuthHook();
+
+    await waitFor(() => {
+      expect(result.current.isHydrated).toBe(true);
+    });
   });
 
   it('should be unauthenticated when no token in localStorage', async () => {

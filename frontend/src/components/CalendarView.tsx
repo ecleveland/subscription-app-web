@@ -35,7 +35,9 @@ export default function CalendarView({ subscriptions }: Props) {
       if (!sub.isActive) continue;
       const dates = getBillingDatesInMonth(sub, currentYear, currentMonth);
       for (const d of dates) {
-        const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        // Billing dates are UTC days (see lib/calendar) — read them in UTC to
+        // match the numeric grid keys below.
+        const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
         const existing = map.get(key) || [];
         existing.push({ subscription: sub, date: d });
         map.set(key, existing);

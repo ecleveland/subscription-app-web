@@ -20,32 +20,35 @@ export function getBillingDatesInMonth(
   if (isNaN(anchor.getTime())) return [];
 
   const results: Date[] = [];
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  // Operate entirely in UTC: the stored anchor is a UTC date-only value, so
+  // reading it with local methods would land billing markers a day off in
+  // negative-UTC timezones. Construct results with Date.UTC and read days/
+  // weekdays with getUTC* so the whole module stays in one frame.
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
 
   if (subscription.billingCycle === 'weekly') {
     // Find the first occurrence of the same weekday in or before this month
     const anchorDay = anchor.getUTCDay();
-    const firstOfMonth = new Date(year, month, 1);
-    const firstDayOfWeek = firstOfMonth.getDay();
+    const firstDayOfWeek = new Date(Date.UTC(year, month, 1)).getUTCDay();
     let diff = anchorDay - firstDayOfWeek;
     if (diff < 0) diff += 7;
     let day = 1 + diff;
 
     while (day <= daysInMonth) {
-      results.push(new Date(year, month, day));
+      results.push(new Date(Date.UTC(year, month, day)));
       day += 7;
     }
   } else if (subscription.billingCycle === 'monthly') {
     const anchorDay = anchor.getUTCDate();
     // Clamp to last day of month if needed (e.g., 31st in a 30-day month)
     const billingDay = Math.min(anchorDay, daysInMonth);
-    results.push(new Date(year, month, billingDay));
+    results.push(new Date(Date.UTC(year, month, billingDay)));
   } else if (subscription.billingCycle === 'yearly') {
     const anchorMonth = anchor.getUTCMonth();
     if (anchorMonth === month) {
       const anchorDay = anchor.getUTCDate();
       const billingDay = Math.min(anchorDay, daysInMonth);
-      results.push(new Date(year, month, billingDay));
+      results.push(new Date(Date.UTC(year, month, billingDay)));
     }
   }
 
@@ -57,9 +60,11 @@ export function getBillingDatesInMonth(
  * including leading days from the previous month and trailing days from the next.
  */
 export function getCalendarDays(year: number, month: number): CalendarDay[] {
-  const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daysInPrevMonth = new Date(year, month, 0).getDate();
+  // UTC frame (see getBillingDatesInMonth) — these are pure calendar numbers,
+  // so reading them in UTC keeps the grid independent of the viewer's timezone.
+  const firstDay = new Date(Date.UTC(year, month, 1)).getUTCDay(); // 0=Sun
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const daysInPrevMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
 
   const days: CalendarDay[] = [];
 
