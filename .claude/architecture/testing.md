@@ -48,10 +48,39 @@ All new code must include tests. No feature or bug fix is considered complete wi
 
 - Located in `backend/test/*.e2e-spec.ts`
 - Use shared helper `backend/test/helpers/test-app.ts` which provides:
-  - `createTestApp()` — spins up NestJS app with in-memory MongoDB (`mongodb-memory-server`)
-  - `closeTestApp(app)` — tears down app and stops MongoDB
+  - `createTestApp()` — spins up a NestJS app against the in-memory MongoDB,
+    on its own uniquely-named database for isolation
+  - `closeTestApp(app)` — closes the app (the MongoDB server itself is shared,
+    see below)
 - Use `supertest` for HTTP assertions
 - New API endpoints or significant behavior changes require E2E tests
+
+#### In-memory MongoDB: one shared server (VEG-433)
+
+A **single** `mongodb-memory-server` is started once per run by Jest
+`globalSetup` (`test/helpers/global-setup.ts`), published via `E2E_MONGO_URI`,
+and stopped in `globalTeardown`. Each `createTestApp()` connects to its own
+fresh database (`e2e_<uuid>`) on that one server, so specs stay isolated without
+each spawning their own mongod.
+
+This replaced the old model where every spec started and stopped its own server
+(~13 spawn/stop cycles per run), which intermittently **hung the whole suite**.
+Two distinct hangs were diagnosed and fixed:
+
+1. **Startup race** — `MongoMemoryServer` occasionally wedges at 0% CPU during
+   startup (a timing race in the library, masked by `MONGOMS_DEBUG`). Collapsing
+   ~13 starts to 1 shrinks the exposure; `startInMemoryMongo()`
+   (`test/helpers/mongo-server.ts`) additionally bounds startup with a 20s
+   timeout and retries (3×), turning a multi-minute hang into a fast self-heal.
+2. **Exit hang** — after all tests pass, a lingering post-test handle (a mongo
+   driver socket left mid-close across the many app lifecycles; not attributable
+   even by `--detectOpenHandles`) kept the Node process alive ("Jest did not
+   exit…"). `test:e2e` runs with `--forceExit` so the runner exits promptly once
+   the suite is green. This is safe: all tests pass and `globalTeardown` owns the
+   server shutdown — it is not masking a failure.
+
+Do **not** reintroduce per-spec `MongoMemoryServer.create()` in specs; always go
+through `createTestApp()`.
 
 ### Run commands
 

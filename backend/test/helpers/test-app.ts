@@ -1,24 +1,60 @@
+import { randomUUID } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from '../../src/app.module';
+import { startInMemoryMongo } from './mongo-server';
 
-// Track mongod instances per app for proper cleanup
+// Per-app fallback servers, only used when E2E_MONGO_URI is absent (see below).
 const mongodInstances = new WeakMap<INestApplication, MongoMemoryServer>();
+
+/**
+ * A globally-unique database name for one app on the shared server. Must not
+ * rely on any cross-file shared counter: jest runs each spec file with its own
+ * module registry AND its own copy of `process.env`, so neither a module
+ * variable nor an env counter is shared between files — two specs would collide
+ * on the same name and leak data. A random UUID is collision-free without any
+ * shared state.
+ */
+function uniqueDbName(): string {
+  return `e2e_${randomUUID().replace(/-/g, '')}`;
+}
 
 export interface TestAppOptions {
   disableThrottling?: boolean;
 }
 
+/**
+ * Resolve the MongoDB URI for a fresh, isolated database.
+ *
+ * Normal path: a single in-memory server is started once by `global-setup.ts`
+ * and published as `E2E_MONGO_URI`; each app gets its own uniquely-named
+ * database on it. Fallback path: if that env var is missing (e.g. a spec run
+ * through a jest
+ * config without the globalSetup wired in), spin up a dedicated server for this
+ * app and track it so `closeTestApp` can stop it.
+ */
+async function resolveMongoUri(): Promise<{
+  uri: string;
+  mongod?: MongoMemoryServer;
+}> {
+  const shared = process.env.E2E_MONGO_URI;
+  if (shared) {
+    return { uri: `${shared.replace(/\/$/, '')}/${uniqueDbName()}` };
+  }
+  const mongod = await startInMemoryMongo();
+  return { uri: mongod.getUri(), mongod };
+}
+
 export async function createTestApp(
   options: TestAppOptions = { disableThrottling: true },
 ): Promise<INestApplication> {
-  const mongod = await MongoMemoryServer.create();
+  const { uri, mongod } = await resolveMongoUri();
 
-  process.env.MONGODB_URI = mongod.getUri();
+  process.env.MONGODB_URI = uri;
   process.env.JWT_SECRET = 'test-jwt-secret-at-least-32-chars-long';
   process.env.JWT_EXPIRES_IN = '1h';
   process.env.AUTH_PASSWORD_HASH = '';
@@ -74,12 +110,16 @@ export async function createTestApp(
   SwaggerModule.setup('api/docs', app, document);
 
   await app.init();
-  mongodInstances.set(app, mongod);
+  if (mongod) {
+    mongodInstances.set(app, mongod);
+  }
   return app;
 }
 
 export async function closeTestApp(app: INestApplication): Promise<void> {
   await app.close();
+  // Only fallback (non-shared) apps own a server that needs stopping; the shared
+  // server is owned by global-teardown.ts.
   const mongod = mongodInstances.get(app);
   if (mongod) {
     await mongod.stop();
