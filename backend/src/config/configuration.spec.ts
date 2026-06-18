@@ -77,6 +77,20 @@ describe('configuration', () => {
       expect(configuration().mail.driver).toBe('console');
     });
 
+    it('defaults the SMTP port to 587 and secure to false when unset', () => {
+      delete process.env.SMTP_SECURE;
+      const { mail } = configuration();
+      expect(mail.port).toBe(587);
+      expect(mail.secure).toBe(false);
+    });
+
+    it('treats SMTP_SECURE as true only for the literal "true"', () => {
+      process.env.SMTP_SECURE = 'true';
+      expect(configuration().mail.secure).toBe(true);
+      process.env.SMTP_SECURE = '1';
+      expect(configuration().mail.secure).toBe(false);
+    });
+
     it('reads SMTP host/port and the from address from env', () => {
       process.env.SMTP_HOST = 'smtp.example.com';
       process.env.SMTP_PORT = '2525';

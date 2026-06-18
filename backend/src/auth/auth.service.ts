@@ -224,7 +224,12 @@ export class AuthService {
       .sendPasswordResetEmail(user.email, resetUrl)
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`Failed to send password reset email: ${message}`);
+        // Stable marker + user id (never the token) so a silent mail outage is
+        // alertable — this catch is the only signal delivery is broken, since
+        // the request already returned the generic "email sent" response.
+        this.logger.error(
+          `MAIL_SEND_FAILED: password reset email for user ${user._id.toString()} could not be sent: ${message}`,
+        );
       });
   }
 

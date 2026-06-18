@@ -75,6 +75,16 @@ export class SmtpMailService implements MailService {
       });
   }
 
+  /**
+   * Probe the SMTP connection/credentials. Called at startup so a wrong host or
+   * bad credentials fails the deploy immediately, instead of booting fine and
+   * silently no-opping every send (nodemailer builds the transport lazily, so
+   * the factory's host check alone can't catch a populated-but-wrong relay).
+   */
+  async verifyConnection(): Promise<void> {
+    await this.transporter.verify();
+  }
+
   async sendPasswordResetEmail(email: string, resetUrl: string): Promise<void> {
     await this.transporter.sendMail({
       from: this.config.from,

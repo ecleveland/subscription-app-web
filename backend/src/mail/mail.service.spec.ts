@@ -1,3 +1,11 @@
+jest.mock('nodemailer', () => ({
+  createTransport: jest.fn(() => ({
+    sendMail: jest.fn().mockResolvedValue({}),
+    verify: jest.fn().mockResolvedValue(true),
+  })),
+}));
+
+import { createTransport } from 'nodemailer';
 import {
   ConsoleMailService,
   SmtpMailService,
@@ -26,6 +34,21 @@ describe('ConsoleMailService', () => {
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('token=abc123'),
     );
+  });
+
+  it('logs the invitation link and household name without throwing', async () => {
+    const logSpy = jest.spyOn((service as any).logger, 'log');
+
+    await service.sendInvitationEmail(
+      'invitee@example.com',
+      'http://localhost:3000/household/accept?token=xyz',
+      'The Vegas',
+    );
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('invitee@example.com'),
+    );
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('The Vegas'));
   });
 });
 
@@ -93,6 +116,55 @@ describe('SmtpMailService', () => {
     await expect(
       service.sendInvitationEmail('x@example.com', 'url', 'H'),
     ).rejects.toThrow('SMTP down');
+  });
+
+  it('verifies the SMTP connection as a startup probe and propagates failures', async () => {
+    const verify = jest.fn().mockResolvedValue(true);
+    const service = new SmtpMailService(config, {
+      sendMail: jest.fn(),
+      verify,
+    } as any);
+
+    await service.verifyConnection();
+    expect(verify).toHaveBeenCalledTimes(1);
+
+    verify.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    await expect(service.verifyConnection()).rejects.toThrow('ECONNREFUSED');
+  });
+
+  describe('transporter construction', () => {
+    beforeEach(() => jest.clearAllMocks());
+
+    it('builds the transporter from config with auth when a user is set', () => {
+      new SmtpMailService({
+        host: 'smtp.example.com',
+        port: 465,
+        secure: true,
+        user: 'mailer',
+        pass: 'secret',
+        from: 'f@example.com',
+      });
+      expect(createTransport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: 'smtp.example.com',
+          port: 465,
+          secure: true,
+          auth: { user: 'mailer', pass: 'secret' },
+        }),
+      );
+    });
+
+    it('omits auth when no user is configured (open relay)', () => {
+      new SmtpMailService({
+        host: 'smtp.example.com',
+        port: 587,
+        secure: false,
+        from: 'f@example.com',
+      });
+      expect(createTransport).toHaveBeenCalledWith(
+        expect.objectContaining({ auth: undefined }),
+      );
+    });
   });
 });
 

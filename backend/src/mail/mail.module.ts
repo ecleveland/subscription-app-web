@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   MAIL_SERVICE,
+  SmtpMailService,
   mailServiceFactory,
   type MailConfig,
 } from './mail.service';
@@ -11,7 +12,7 @@ import {
     {
       provide: MAIL_SERVICE,
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
+      useFactory: async (configService: ConfigService) => {
         const config: MailConfig = {
           driver:
             configService.get<'smtp' | 'console'>('mail.driver') ?? 'console',
@@ -26,10 +27,17 @@ import {
               'no-reply@subscription-app.local',
           },
         };
-        return mailServiceFactory(
+        const service = mailServiceFactory(
           config,
           process.env.NODE_ENV === 'production',
         );
+        // Fail the boot if the configured SMTP relay is unreachable/misauth'd,
+        // so a broken mail config halts the deploy instead of silently dropping
+        // every password-reset email at send time.
+        if (service instanceof SmtpMailService) {
+          await service.verifyConnection();
+        }
+        return service;
       },
     },
   ],

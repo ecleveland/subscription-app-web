@@ -51,8 +51,10 @@ For each service:
 
 > **Email is required in production.** Password reset and household invitations
 > send real email. With `NODE_ENV=production` the app boots with the SMTP driver
-> and **fails fast at startup** if `SMTP_HOST` is missing — it will not silently
-> fall back to the console stub (which would log reset tokens and send nothing).
+> and **fails fast at startup** — it verifies the SMTP connection on boot, so a
+> missing `SMTP_HOST` or an unreachable/misauthenticated relay halts the deploy
+> rather than booting and silently dropping every email. It will not fall back to
+> the console stub (which would log reset tokens and send nothing).
 
 ### Frontend service
 
