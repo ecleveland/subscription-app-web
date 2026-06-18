@@ -13,11 +13,13 @@ export enum BillingCycle {
 export class Subscription {
   // Ownership/visibility scope: the household this subscription belongs to.
   // Resolved server-side by HouseholdGuard — never trusted from the client.
+  // No standalone index here: the compound { householdId: 1, createdAt: -1 }
+  // below has householdId as its prefix, so it already serves household-scoped
+  // lookups/counts (a separate single-field index would be redundant writes).
   @Prop({
     type: MongooseSchema.Types.ObjectId,
     ref: 'Household',
     required: true,
-    index: true,
   })
   householdId: MongooseSchema.Types.ObjectId;
 
@@ -61,3 +63,9 @@ export class Subscription {
 }
 
 export const SubscriptionSchema = SchemaFactory.createForClass(Subscription);
+
+// List + default sort: household-scoped queries ordered by newest first.
+SubscriptionSchema.index({ householdId: 1, createdAt: -1 });
+// Daily renewal-reminder cron: scans active subs by upcoming billing date
+// across all households (isActive equality prefix + nextBillingDate range).
+SubscriptionSchema.index({ isActive: 1, nextBillingDate: 1 });

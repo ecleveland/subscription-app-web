@@ -1,6 +1,7 @@
 import {
   IsArray,
   ArrayMinSize,
+  IsMongoId,
   IsString,
   IsEnum,
   IsNotEmpty,
@@ -17,7 +18,7 @@ export enum BulkAction {
 export class BulkOperationDto {
   @IsArray()
   @ArrayMinSize(1)
-  @IsString({ each: true })
+  @IsMongoId({ each: true })
   ids: string[];
 
   @IsEnum(BulkAction)

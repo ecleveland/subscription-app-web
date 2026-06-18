@@ -25,6 +25,7 @@ import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
 import { BulkOperationDto } from './dto/bulk-operation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { HouseholdGuard } from '../households/guards/household.guard';
 import type { HouseholdRequest } from '../households/interfaces/household-request.interface';
 import type { Response } from 'express';
@@ -98,7 +99,10 @@ export class SubscriptionsController {
   @ApiResponse({ status: 200, description: 'Subscription found' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Subscription not found' })
-  findOne(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  findOne(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     return this.subscriptionsService.findOne(req.household.householdId, id);
   }
 
@@ -110,7 +114,7 @@ export class SubscriptionsController {
   @ApiResponse({ status: 404, description: 'Subscription not found' })
   update(
     @Req() req: HouseholdRequest,
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() updateDto: UpdateSubscriptionDto,
   ) {
     return this.subscriptionsService.update(
@@ -126,7 +130,10 @@ export class SubscriptionsController {
   @ApiResponse({ status: 204, description: 'Subscription deleted' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Subscription not found' })
-  remove(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  remove(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     return this.subscriptionsService.remove(req.household.householdId, id);
   }
 }

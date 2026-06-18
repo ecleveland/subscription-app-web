@@ -16,6 +16,7 @@ describe('AdminController', () => {
       | 'update'
       | 'remove'
       | 'countAdmins'
+      | 'demoteAdminSafely'
     >
   >;
 
@@ -23,12 +24,6 @@ describe('AdminController', () => {
     _id: 'user-id-1',
     username: 'testuser',
     role: UserRole.USER,
-  };
-
-  const mockAdmin = {
-    _id: 'admin-id-1',
-    username: 'admin',
-    role: UserRole.ADMIN,
   };
 
   const mockReq = {
@@ -44,6 +39,7 @@ describe('AdminController', () => {
       update: jest.fn().mockResolvedValue(mockUser),
       remove: jest.fn().mockResolvedValue(undefined),
       countAdmins: jest.fn().mockResolvedValue(2),
+      demoteAdminSafely: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -90,13 +86,13 @@ describe('AdminController', () => {
   });
 
   describe('update', () => {
-    it('should allow non-role updates without checking admin count and log', async () => {
+    it('should allow non-role updates without the admin guard and log', async () => {
       const logSpy = jest.spyOn(Logger.prototype, 'log');
       await controller.update(mockReq, 'user-id-1', {
         displayName: 'New Name',
       });
 
-      expect(usersService.countAdmins).not.toHaveBeenCalled();
+      expect(usersService.demoteAdminSafely).not.toHaveBeenCalled();
       expect(usersService.update).toHaveBeenCalledWith('user-id-1', {
         displayName: 'New Name',
       });
@@ -106,33 +102,19 @@ describe('AdminController', () => {
       );
     });
 
-    it('should allow role change when target is not an admin', async () => {
-      usersService.findOne.mockResolvedValue({
-        ...mockUser,
-        role: UserRole.USER,
-      } as any);
-
-      await controller.update(mockReq, 'user-id-1', { role: UserRole.ADMIN });
-
-      // findOne is called but countAdmins is not because target is not admin
-      expect(usersService.update).toHaveBeenCalled();
-    });
-
-    it('should allow demoting admin when multiple admins exist', async () => {
-      usersService.findOne.mockResolvedValue(mockAdmin as any);
-      usersService.countAdmins.mockResolvedValue(2);
-
+    it('demotes atomically via demoteAdminSafely before applying the update', async () => {
       await controller.update(mockReq, 'admin-id-1', { role: UserRole.USER });
 
-      expect(usersService.countAdmins).toHaveBeenCalled();
+      expect(usersService.demoteAdminSafely).toHaveBeenCalledWith('admin-id-1');
       expect(usersService.update).toHaveBeenCalledWith('admin-id-1', {
         role: UserRole.USER,
       });
     });
 
-    it('should throw ForbiddenException when demoting the last admin', async () => {
-      usersService.findOne.mockResolvedValue(mockAdmin as any);
-      usersService.countAdmins.mockResolvedValue(1);
+    it('propagates the guard error and skips the update for the last admin', async () => {
+      usersService.demoteAdminSafely.mockRejectedValue(
+        new ForbiddenException('Cannot remove the last admin'),
+      );
 
       await expect(
         controller.update(mockReq, 'admin-id-1', { role: UserRole.USER }),
@@ -140,11 +122,10 @@ describe('AdminController', () => {
       expect(usersService.update).not.toHaveBeenCalled();
     });
 
-    it('should not check admin count when setting role to admin', async () => {
+    it('does not run the demote guard when promoting to admin', async () => {
       await controller.update(mockReq, 'user-id-1', { role: UserRole.ADMIN });
 
-      // No ForbiddenException concern when promoting to admin
-      expect(usersService.countAdmins).not.toHaveBeenCalled();
+      expect(usersService.demoteAdminSafely).not.toHaveBeenCalled();
       expect(usersService.update).toHaveBeenCalled();
     });
   });
@@ -158,12 +139,14 @@ describe('AdminController', () => {
       await expect(controller.remove(reqSelf, 'user-id-1')).rejects.toThrow(
         ForbiddenException,
       );
+      expect(usersService.demoteAdminSafely).not.toHaveBeenCalled();
       expect(usersService.remove).not.toHaveBeenCalled();
     });
 
-    it('should throw ForbiddenException when deleting the last admin', async () => {
-      usersService.findOne.mockResolvedValue(mockAdmin as any);
-      usersService.countAdmins.mockResolvedValue(1);
+    it('propagates the guard error and skips the delete for the last admin', async () => {
+      usersService.demoteAdminSafely.mockRejectedValue(
+        new ForbiddenException('Cannot remove the last admin'),
+      );
 
       await expect(controller.remove(mockReq, 'admin-id-1')).rejects.toThrow(
         ForbiddenException,
@@ -171,13 +154,12 @@ describe('AdminController', () => {
       expect(usersService.remove).not.toHaveBeenCalled();
     });
 
-    it('should allow deleting an admin when multiple admins exist and log', async () => {
-      usersService.findOne.mockResolvedValue(mockAdmin as any);
-      usersService.countAdmins.mockResolvedValue(2);
+    it('demotes-then-deletes (guard first) and logs', async () => {
       const logSpy = jest.spyOn(Logger.prototype, 'log');
 
       await controller.remove(mockReq, 'admin-id-1');
 
+      expect(usersService.demoteAdminSafely).toHaveBeenCalledWith('admin-id-1');
       expect(usersService.remove).toHaveBeenCalledWith('admin-id-1');
       expect(logSpy).toHaveBeenCalledWith(
         { adminId: 'requester-id', targetUserId: 'admin-id-1' },
@@ -185,16 +167,27 @@ describe('AdminController', () => {
       );
     });
 
-    it('should allow deleting a non-admin user', async () => {
-      usersService.findOne.mockResolvedValue({
-        ...mockUser,
-        role: UserRole.USER,
-      } as any);
+    it('restores the admin role when the delete fails after demotion', async () => {
+      usersService.demoteAdminSafely.mockResolvedValue(true); // it demoted an admin
+      usersService.remove.mockRejectedValue(new Error('db down'));
 
-      await controller.remove(mockReq, 'user-id-1');
+      await expect(controller.remove(mockReq, 'admin-id-1')).rejects.toThrow(
+        'db down',
+      );
+      // Prior admin role restored so a failed delete doesn't silently demote.
+      expect(usersService.update).toHaveBeenCalledWith('admin-id-1', {
+        role: UserRole.ADMIN,
+      });
+    });
 
-      expect(usersService.countAdmins).not.toHaveBeenCalled();
-      expect(usersService.remove).toHaveBeenCalledWith('user-id-1');
+    it('does not re-promote a non-admin when the delete fails', async () => {
+      usersService.demoteAdminSafely.mockResolvedValue(false); // target wasn't an admin
+      usersService.remove.mockRejectedValue(new Error('db down'));
+
+      await expect(controller.remove(mockReq, 'user-id-1')).rejects.toThrow(
+        'db down',
+      );
+      expect(usersService.update).not.toHaveBeenCalled();
     });
   });
 });

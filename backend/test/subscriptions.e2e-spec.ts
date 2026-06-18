@@ -124,6 +124,13 @@ describe('Subscriptions (e2e)', () => {
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(404);
     });
+
+    it('returns 400 (not 500) for a malformed id in the path', async () => {
+      await request(app.getHttpServer())
+        .get('/api/subscriptions/not-an-object-id')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+    });
   });
 
   describe('Ownership isolation', () => {
@@ -659,6 +666,14 @@ describe('Subscriptions (e2e)', () => {
         .post('/api/subscriptions/bulk')
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ ids: ['507f1f77bcf86cd799439011'], action: 'changeCategory' })
+        .expect(400);
+    });
+
+    it('should return 400 (not 500) when an id is not a valid ObjectId', async () => {
+      await request(app.getHttpServer())
+        .post('/api/subscriptions/bulk')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ ids: ['not-an-object-id'], action: 'delete' })
         .expect(400);
     });
 

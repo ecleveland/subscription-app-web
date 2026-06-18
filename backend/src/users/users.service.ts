@@ -1,6 +1,7 @@
 import {
   Injectable,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   UnauthorizedException,
   Logger,
@@ -128,14 +129,73 @@ export class UsersService {
     id: string,
     updateDto: UpdateUserDto | AdminUpdateUserDto,
   ): Promise<UserDocument> {
-    const user = await this.userModel
-      .findByIdAndUpdate(id, updateDto, { new: true, runValidators: true })
-      .select('-passwordHash')
-      .exec();
+    let user: UserDocument | null;
+    try {
+      user = await this.userModel
+        .findByIdAndUpdate(id, updateDto, { new: true, runValidators: true })
+        .select('-passwordHash')
+        .exec();
+    } catch (error: unknown) {
+      // A username/email change colliding with another user surfaces as a
+      // duplicate-key error; report it as a 409 like create() does, not a 500.
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        (error as { code: number }).code === 11000
+      ) {
+        throw new ConflictException('Username or email already exists');
+      }
+      throw error;
+    }
     if (!user) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
     return user;
+  }
+
+  /**
+   * Demote an admin to a regular user without ever stripping the last admin.
+   * Single-node Mongo has no multi-document transactions, so instead of the
+   * racy check-then-act (count admins, then demote) we demote first via an
+   * atomic `findOneAndUpdate({_id, role: ADMIN})`, then count: if that left zero
+   * admins we roll the demotion back and reject. Two concurrent demotes can't
+   * both observe a safe count, so the "at least one admin" invariant holds.
+   * No-op when the target isn't currently an admin. Returns true when it
+   * actually demoted an admin (so a caller can compensate if a follow-up step,
+   * e.g. a delete, then fails), false when it was a no-op.
+   */
+  async demoteAdminSafely(id: string): Promise<boolean> {
+    const demoted = await this.userModel
+      .findOneAndUpdate(
+        { _id: new Types.ObjectId(id), role: UserRole.ADMIN } as Record<
+          string,
+          unknown
+        >,
+        { $set: { role: UserRole.USER } },
+        { new: true },
+      )
+      .exec();
+    if (!demoted) {
+      return false;
+    }
+    if ((await this.countAdmins()) === 0) {
+      // We just removed the last admin — restore it and reject. Log loudly: if
+      // the rollback write itself fails the system is left with zero admins,
+      // which must be greppable rather than silent.
+      this.logger.warn({ userId: id }, 'Blocked demotion of the last admin');
+      try {
+        await this.userModel
+          .findByIdAndUpdate(id, { $set: { role: UserRole.ADMIN } })
+          .exec();
+      } catch (error: unknown) {
+        this.logger.error(
+          { userId: id, error },
+          'CRITICAL: failed to roll back last-admin demotion; system may now have zero admins',
+        );
+      }
+      throw new ForbiddenException('Cannot remove the last admin');
+    }
+    return true;
   }
 
   async changePassword(
@@ -188,6 +248,24 @@ export class UsersService {
     }
     await this.householdsService.removeMembershipsByUser(id);
     await this.userModel.findByIdAndDelete(id).exec();
+    // Drop the deleted user's refresh tokens so a stolen/active token can't be
+    // used to mint new access tokens after the account is gone. The user is
+    // already deleted, so don't fail the whole request if cleanup throws — the
+    // orphaned rows reference a now-missing user (harmless for auth) and the
+    // refresh token TTL reaps them; log so the partial failure stays greppable.
+    try {
+      await this.refreshTokenModel
+        .deleteMany({ userId: new Types.ObjectId(id) } as Record<
+          string,
+          unknown
+        >)
+        .exec();
+    } catch (error: unknown) {
+      this.logger.error(
+        { userId: id, error },
+        'User deleted but refresh-token cleanup failed; orphaned tokens remain',
+      );
+    }
     this.logger.log({ userId: id }, 'User deleted');
   }
 

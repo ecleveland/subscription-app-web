@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   UnauthorizedException,
   Logger,
 } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
+import { Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from './users.service';
 import { User, UserRole } from './schemas/user.schema';
@@ -57,6 +59,9 @@ describe('UsersService', () => {
     mockUserModel.findByIdAndUpdate = jest
       .fn()
       .mockReturnValue(createChainable(null));
+    mockUserModel.findOneAndUpdate = jest
+      .fn()
+      .mockReturnValue(createChainable(null));
     mockUserModel.findByIdAndDelete = jest
       .fn()
       .mockReturnValue(createChainable(null));
@@ -70,6 +75,9 @@ describe('UsersService', () => {
     mockRefreshTokenModel = {
       updateMany: jest.fn().mockReturnValue({
         exec: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
+      }),
+      deleteMany: jest.fn().mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ deletedCount: 0 }),
       }),
     };
 
@@ -355,6 +363,85 @@ describe('UsersService', () => {
         service.update('nonexistent', { displayName: 'X' }),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('maps a duplicate-key (11000) collision to a ConflictException', async () => {
+      const dupError = Object.assign(new Error('dup'), { code: 11000 });
+      mockUserModel.findByIdAndUpdate.mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          exec: jest.fn().mockRejectedValue(dupError),
+        }),
+      });
+
+      await expect(
+        service.update('507f1f77bcf86cd799439011', { email: 'taken@x.com' }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('demoteAdminSafely', () => {
+    const adminId = '507f1f77bcf86cd799439011';
+
+    it('demotes the admin and keeps the change when other admins remain', async () => {
+      mockUserModel.findOneAndUpdate.mockReturnValue(
+        createChainable({ _id: adminId, role: UserRole.USER }),
+      );
+      mockUserModel.countDocuments.mockReturnValue(createChainable(1));
+
+      const result = await service.demoteAdminSafely(adminId);
+
+      expect(result).toBe(true);
+      expect(mockUserModel.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ role: UserRole.ADMIN }),
+        { $set: { role: UserRole.USER } },
+        { new: true },
+      );
+      // No rollback when an admin still remains.
+      expect(mockUserModel.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('rolls back and throws when the demotion left zero admins', async () => {
+      mockUserModel.findOneAndUpdate.mockReturnValue(
+        createChainable({ _id: adminId, role: UserRole.USER }),
+      );
+      mockUserModel.countDocuments.mockReturnValue(createChainable(0));
+
+      await expect(service.demoteAdminSafely(adminId)).rejects.toThrow(
+        ForbiddenException,
+      );
+      // Re-promotes the user it just demoted.
+      expect(mockUserModel.findByIdAndUpdate).toHaveBeenCalledWith(adminId, {
+        $set: { role: UserRole.ADMIN },
+      });
+    });
+
+    it('is a no-op when the target is not an admin', async () => {
+      mockUserModel.findOneAndUpdate.mockReturnValue(createChainable(null));
+
+      const result = await service.demoteAdminSafely(adminId);
+
+      expect(result).toBe(false);
+      expect(mockUserModel.countDocuments).not.toHaveBeenCalled();
+      expect(mockUserModel.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('logs CRITICAL and still throws when the rollback write also fails', async () => {
+      mockUserModel.findOneAndUpdate.mockReturnValue(
+        createChainable({ _id: adminId, role: UserRole.USER }),
+      );
+      mockUserModel.countDocuments.mockReturnValue(createChainable(0));
+      mockUserModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('db down')),
+      });
+      const errSpy = jest.spyOn(Logger.prototype, 'error');
+
+      await expect(service.demoteAdminSafely(adminId)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: adminId }),
+        expect.stringContaining('CRITICAL'),
+      );
+    });
   });
 
   describe('changePassword', () => {
@@ -452,6 +539,38 @@ describe('UsersService', () => {
       expect(logSpy).toHaveBeenCalledWith(
         { userId: '507f1f77bcf86cd799439011' },
         'User deleted',
+      );
+    });
+
+    it("deletes the user's refresh tokens so they can't mint new access tokens", async () => {
+      mockUserModel.findById.mockReturnValue(createChainable(mockUser));
+      mockUserModel.findByIdAndDelete.mockReturnValue(
+        createChainable(mockUser),
+      );
+
+      await service.remove('507f1f77bcf86cd799439011');
+
+      expect(mockRefreshTokenModel.deleteMany).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: expect.any(Types.ObjectId) }),
+      );
+    });
+
+    it('still resolves (logging) when refresh-token cleanup fails after the user is deleted', async () => {
+      mockUserModel.findById.mockReturnValue(createChainable(mockUser));
+      mockUserModel.findByIdAndDelete.mockReturnValue(
+        createChainable(mockUser),
+      );
+      mockRefreshTokenModel.deleteMany.mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('tokens boom')),
+      });
+      const errSpy = jest.spyOn(Logger.prototype, 'error');
+
+      await expect(
+        service.remove('507f1f77bcf86cd799439011'),
+      ).resolves.toBeUndefined();
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: '507f1f77bcf86cd799439011' }),
+        expect.stringContaining('orphaned tokens remain'),
       );
     });
 
