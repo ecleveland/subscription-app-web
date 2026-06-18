@@ -109,13 +109,13 @@ describe('CsvImportWizard', () => {
     expect(screen.getByText('Duplicate — will be skipped')).toBeInTheDocument();
   });
 
-  it('commits all parsed rows and shows the result summary on success', async () => {
+  it('commits all parsed rows and shows a success summary on a clean import', async () => {
     const user = userEvent.setup();
     const onImported = vi.fn();
     vi.mocked(importTransactions).mockResolvedValue({
       imported: 2,
       skipped: 1,
-      errors: [{ row: 2, message: 'Zero amount' }],
+      errors: [],
     });
     render(
       <CsvImportWizard accounts={accounts} onImported={onImported} onCancel={vi.fn()} />,
@@ -139,7 +139,87 @@ describe('CsvImportWizard', () => {
     expect(showSuccessToast).toHaveBeenCalledWith('Imported 2, skipped 1');
     expect(await screen.findByText('Imported 2')).toBeInTheDocument();
     expect(screen.getByText('Skipped 1')).toBeInTheDocument();
-    expect(screen.getByText('Row 3: Zero amount')).toBeInTheDocument();
+  });
+
+  it('warns (not a plain success) when some rows fail server-side', async () => {
+    const user = userEvent.setup();
+    vi.mocked(importTransactions).mockResolvedValue({
+      imported: 2,
+      skipped: 0,
+      errors: [{ row: 2, message: 'Zero amount' }],
+    });
+    render(<CsvImportWizard accounts={accounts} onImported={vi.fn()} onCancel={vi.fn()} />);
+    await uploadAndMap(user);
+    await user.click(screen.getByRole('button', { name: /Import 2 rows/ }));
+
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith(
+        'Imported 2, but 1 row failed — see details below.',
+      ),
+    );
+    expect(showSuccessToast).not.toHaveBeenCalled();
+    expect(await screen.findByText('Row 3: Zero amount')).toBeInTheDocument();
+  });
+
+  it('shows an error toast (not success) when nothing was imported', async () => {
+    const user = userEvent.setup();
+    const onImported = vi.fn();
+    vi.mocked(importTransactions).mockResolvedValue({
+      imported: 0,
+      skipped: 2,
+      errors: [],
+    });
+    render(
+      <CsvImportWizard accounts={accounts} onImported={onImported} onCancel={vi.fn()} />,
+    );
+    await uploadAndMap(user);
+    await user.click(screen.getByRole('button', { name: /Import 2 rows/ }));
+
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith(
+        'Nothing imported — all 2 rows were duplicates.',
+      ),
+    );
+    expect(showSuccessToast).not.toHaveBeenCalled();
+    // Still refreshes so any concurrent change is reflected.
+    expect(onImported).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Imported 0')).toBeInTheDocument();
+  });
+
+  it('closes via the Done button after a successful import', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    vi.mocked(importTransactions).mockResolvedValue({ imported: 2, skipped: 0, errors: [] });
+    render(
+      <CsvImportWizard accounts={accounts} onImported={vi.fn()} onCancel={onCancel} />,
+    );
+    await uploadAndMap(user);
+    await user.click(screen.getByRole('button', { name: /Import 2 rows/ }));
+    await user.click(await screen.findByRole('button', { name: 'Done' }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('auto-guesses common bank-export header aliases', async () => {
+    const user = userEvent.setup();
+    render(<CsvImportWizard accounts={accounts} onImported={vi.fn()} onCancel={vi.fn()} />);
+    await user.upload(
+      screen.getByLabelText('CSV file'),
+      csvFile('Posted Date,Debit,Description\n2026-06-01,-5.00,Store\n'),
+    );
+    expect(await screen.findByLabelText('Date column')).toHaveValue('Posted Date');
+    expect(screen.getByLabelText('Amount column')).toHaveValue('Debit');
+    expect(screen.getByLabelText('Payee column')).toHaveValue('Description');
+  });
+
+  it('recovers after a bad file followed by a good one', async () => {
+    const user = userEvent.setup();
+    render(<CsvImportWizard accounts={accounts} onImported={vi.fn()} onCancel={vi.fn()} />);
+    const input = screen.getByLabelText('CSV file');
+    await user.upload(input, csvFile('Date,Amount\n'));
+    expect(await screen.findByText('That file has no rows to import.')).toBeInTheDocument();
+    await user.upload(input, csvFile(SAMPLE_CSV));
+    expect(await screen.findByRole('button', { name: 'Preview' })).toBeInTheDocument();
+    expect(screen.queryByText('That file has no rows to import.')).not.toBeInTheDocument();
   });
 
   it('shows a toast and stays on preview when the import request rejects', async () => {

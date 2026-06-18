@@ -20,7 +20,12 @@ vi.mock('@/components/TransactionForm', () => ({
   default: () => <div>TransactionFormStub</div>,
 }));
 vi.mock('@/components/CsvImportWizard', () => ({
-  default: () => <div>CsvImportWizardStub</div>,
+  default: (props: { onImported: () => void }) => (
+    <div>
+      CsvImportWizardStub
+      <button onClick={props.onImported}>stub-import</button>
+    </div>
+  ),
 }));
 
 import { listTransactions, deleteTransaction } from '@/lib/transactions';
@@ -144,6 +149,27 @@ describe('TransactionsPage', () => {
     expect(screen.getByText('CsvImportWizardStub')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import CSV' })).toBeNull();
     expect(screen.queryByRole('button', { name: '+ Add transaction' })).toBeNull();
+  });
+
+  it('warns when balances fail to refresh after an import', async () => {
+    accountsState = {
+      accounts,
+      error: null,
+      refresh: vi.fn().mockRejectedValue(new Error('refresh fail')),
+    };
+    mockList([]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText('No transactions found.');
+
+    await user.click(screen.getByRole('button', { name: 'Import CSV' }));
+    await user.click(screen.getByRole('button', { name: 'stub-import' }));
+
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith(
+        'Saved, but balances may be out of date — refresh to update.',
+      ),
+    );
   });
 
   it('disables the import button until an account exists', async () => {

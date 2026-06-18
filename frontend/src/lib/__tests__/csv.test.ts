@@ -235,6 +235,14 @@ describe('deriveImportRows', () => {
     expect(derived.map((d) => d.status)).toEqual(['ok', 'ok']);
   });
 
+  it('does not treat rows with differing dates as duplicates', () => {
+    const derived = deriveImportRows(
+      [row('2026-06-01', '-10.00', 'Store'), row('2026-06-02', '-10.00', 'Store')],
+      mapping,
+    );
+    expect(derived.map((d) => d.status)).toEqual(['ok', 'ok']);
+  });
+
   it('omits payee when no payee column is mapped, and dedupes on empty payee', () => {
     const noPayee: ColumnMapping = { date: 'Date', amount: 'Amount' };
     const derived = deriveImportRows(

@@ -139,7 +139,23 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
       });
       setResult(res);
       setStep('result');
-      showSuccessToast(`Imported ${res.imported}, skipped ${res.skipped}`);
+      // The backend dedupes against stored transactions and can reject rows we
+      // couldn't see in the preview, so it may import fewer than `summary.ok`
+      // (even zero). Keep the toast honest rather than always green.
+      const plural = (n: number) => `${n} row${n === 1 ? '' : 's'}`;
+      if (res.imported === 0) {
+        showErrorToast(
+          res.errors.length > 0
+            ? `Nothing imported — ${plural(res.errors.length)} failed, ${res.skipped} skipped.`
+            : `Nothing imported — all ${plural(res.skipped)} were duplicates.`,
+        );
+      } else if (res.errors.length > 0) {
+        showErrorToast(
+          `Imported ${res.imported}, but ${plural(res.errors.length)} failed — see details below.`,
+        );
+      } else {
+        showSuccessToast(`Imported ${res.imported}, skipped ${res.skipped}`);
+      }
       onImported();
     } catch (err) {
       showErrorToast(err instanceof Error ? err.message : 'Import failed');
@@ -353,7 +369,15 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
       {step === 'result' && result && (
         <div className="space-y-4">
           <p className="text-sm">
-            <span className="font-medium text-green-600">Imported {result.imported}</span>
+            <span
+              className={
+                result.imported > 0
+                  ? 'font-medium text-green-600'
+                  : 'font-medium text-gray-500'
+              }
+            >
+              Imported {result.imported}
+            </span>
             {' · '}
             <span className="text-gray-500">Skipped {result.skipped}</span>
             {result.errors.length > 0 && (
