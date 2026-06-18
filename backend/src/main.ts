@@ -99,6 +99,10 @@ async function bootstrap() {
     );
   }
 
+  // Drain in-flight requests and close the Mongoose connection cleanly on
+  // SIGTERM/SIGINT (e.g. Railway redeploys) instead of dropping live requests.
+  app.enableShutdownHooks();
+
   const port = configService.get<number>('port') ?? 3001;
   await app.listen(port);
 }

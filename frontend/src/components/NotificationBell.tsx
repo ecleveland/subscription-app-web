@@ -39,8 +39,19 @@ export default function NotificationBell() {
 
   useEffect(() => {
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 60000);
-    return () => clearInterval(interval);
+    // Don't poll a backgrounded tab; refresh once when it becomes visible again
+    // so the count is current without burning requests while hidden.
+    const interval = setInterval(() => {
+      if (!document.hidden) fetchUnreadCount();
+    }, 60000);
+    const handleVisibility = () => {
+      if (!document.hidden) fetchUnreadCount();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [fetchUnreadCount]);
 
   useEffect(() => {
