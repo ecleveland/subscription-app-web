@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -11,7 +12,9 @@ import { HouseholdsMigrationService } from './households/households-migration.se
 import { CategoriesService } from './categories/categories.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
   app.useLogger(app.get(PinoLogger));
 
   const configService = app.get(ConfigService);
@@ -43,6 +46,12 @@ async function bootstrap() {
   );
 
   app.use(cookieParser());
+
+  // Behind Railway's reverse proxy, trust the first hop so `req.ip` is the real
+  // client IP. Without this the global rate limiter buckets every request under
+  // the proxy's single IP — collapsing the per-IP limit into one shared limit
+  // for the whole deployment.
+  app.set('trust proxy', 1);
 
   app.enableCors({
     origin: configService.get<string>('cors.origin'),

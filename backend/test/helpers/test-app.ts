@@ -22,10 +22,13 @@ export async function createTestApp(
   process.env.JWT_SECRET = 'test-jwt-secret-at-least-32-chars-long';
   process.env.JWT_EXPIRES_IN = '1h';
   process.env.AUTH_PASSWORD_HASH = '';
+  // Pin a non-production env so the production boot guards (configuration.ts)
+  // never trip and skipIf stays eligible regardless of the caller's shell.
+  process.env.NODE_ENV = 'test';
   // ThrottlerGuard is now a global APP_GUARD, which overrideGuard() can't
   // replace. Drive throttling through the app's real switch instead: the
-  // module's skipIf honours THROTTLE_DISABLED outside production (NODE_ENV is
-  // 'test' here). The guard reads this per-request, so it tracks the option.
+  // module's skipIf honours THROTTLE_DISABLED outside production. The guard
+  // reads this per-request, so it tracks the option.
   process.env.THROTTLE_DISABLED = options.disableThrottling ? 'true' : 'false';
 
   const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -56,6 +59,10 @@ export async function createTestApp(
   );
 
   app.use(cookieParser());
+
+  // Mirror main.ts so per-IP rate-limit tracking (X-Forwarded-For) behaves the
+  // same under test as in production behind the Railway proxy.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Subscription App API')
