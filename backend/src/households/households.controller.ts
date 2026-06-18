@@ -23,6 +23,7 @@ import { InviteMemberDto } from './dto/invite-member.dto';
 import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from './guards/household.guard';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import type { HouseholdRequest } from './interfaces/household-request.interface';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 
@@ -96,7 +97,10 @@ export class HouseholdsController {
   @ApiResponse({ status: 204, description: 'Member removed' })
   @ApiResponse({ status: 403, description: 'Caller is not the owner' })
   @ApiResponse({ status: 404, description: 'Member not found' })
-  removeMember(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  removeMember(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     return this.householdsService.removeMember(req.household, id);
   }
 }

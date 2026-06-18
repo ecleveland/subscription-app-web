@@ -25,6 +25,7 @@ import { QueryTransactionDto } from './dto/query-transaction.dto';
 import { ImportTransactionsDto } from './dto/import-transactions.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../households/guards/household.guard';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import type { HouseholdRequest } from '../households/interfaces/household-request.interface';
 
 @ApiTags('Transactions')
@@ -88,7 +89,10 @@ export class TransactionsController {
   @ApiResponse({ status: 200, description: 'Transaction found' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Transaction not found' })
-  findOne(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  findOne(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     return this.transactionsService.findOne(req.household.householdId, id);
   }
 
@@ -100,7 +104,7 @@ export class TransactionsController {
   @ApiResponse({ status: 404, description: 'Transaction not found' })
   update(
     @Req() req: HouseholdRequest,
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() updateDto: UpdateTransactionDto,
   ) {
     return this.transactionsService.update(
@@ -118,7 +122,10 @@ export class TransactionsController {
   @ApiResponse({ status: 204, description: 'Transaction deleted' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Transaction not found' })
-  remove(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  remove(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     return this.transactionsService.remove(req.household.householdId, id);
   }
 }

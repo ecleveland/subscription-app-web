@@ -24,6 +24,7 @@ import { UpdateAccountDto } from './dto/update-account.dto';
 import { QueryAccountDto } from './dto/query-account.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../households/guards/household.guard';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import type { HouseholdRequest } from '../households/interfaces/household-request.interface';
 
 @ApiTags('Accounts')
@@ -58,7 +59,10 @@ export class AccountsController {
   @ApiResponse({ status: 200, description: 'Account found' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Account not found' })
-  findOne(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  findOne(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     return this.accountsService.findOne(req.household.householdId, id);
   }
 
@@ -70,7 +74,7 @@ export class AccountsController {
   @ApiResponse({ status: 404, description: 'Account not found' })
   update(
     @Req() req: HouseholdRequest,
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() updateDto: UpdateAccountDto,
   ) {
     return this.accountsService.update(
@@ -92,7 +96,10 @@ export class AccountsController {
   @ApiResponse({ status: 204, description: 'Account archived' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Account not found' })
-  async remove(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  async remove(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     await this.accountsService.archive(req.household.householdId, id);
   }
 }

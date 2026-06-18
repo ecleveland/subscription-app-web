@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../households/guards/household.guard';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { NotificationsService } from './notifications.service';
 import { QueryNotificationDto } from './dto/query-notification.dto';
 import type { HouseholdRequest } from '../households/interfaces/household-request.interface';
@@ -35,7 +36,10 @@ export class NotificationsController {
   }
 
   @Patch(':id/read')
-  markAsRead(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  markAsRead(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     return this.notificationsService.markAsRead(req.household.householdId, id);
   }
 
@@ -47,7 +51,10 @@ export class NotificationsController {
 
   @Delete(':id')
   @HttpCode(204)
-  remove(@Req() req: HouseholdRequest, @Param('id') id: string) {
+  remove(
+    @Req() req: HouseholdRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     return this.notificationsService.remove(req.household.householdId, id);
   }
 }

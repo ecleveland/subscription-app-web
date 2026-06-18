@@ -216,6 +216,13 @@ describe('Households (e2e)', () => {
         .expect(200);
       expect(members.body).toHaveLength(1);
     });
+
+    it('returns 400 (not 500) for a malformed member id', async () => {
+      await request(app.getHttpServer())
+        .delete('/api/households/me/members/not-an-id')
+        .set(auth(ownerToken))
+        .expect(400);
+    });
   });
 
   describe('invitation validation & isolation', () => {
