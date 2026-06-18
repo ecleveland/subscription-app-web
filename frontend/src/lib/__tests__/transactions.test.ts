@@ -6,6 +6,7 @@ import {
   createTransaction,
   updateTransaction,
   deleteTransaction,
+  importTransactions,
 } from '../transactions';
 
 describe('transactions api wrappers', () => {
@@ -48,5 +49,18 @@ describe('transactions api wrappers', () => {
     });
     await deleteTransaction('t1');
     expect(apiFetch).toHaveBeenCalledWith('/transactions/t1', { method: 'DELETE' });
+  });
+
+  it('importTransactions POSTs accountId, mapping and rows to /transactions/import', async () => {
+    const input = {
+      accountId: 'a1',
+      mapping: { date: 'Date', amount: 'Amount', payee: 'Payee' },
+      rows: [{ Date: '2026-06-01', Amount: '-42.00', Payee: 'Store' }],
+    };
+    await importTransactions(input);
+    expect(apiFetch).toHaveBeenCalledWith('/transactions/import', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   });
 });

@@ -19,6 +19,9 @@ vi.mock('@/lib/toast', () => ({
 vi.mock('@/components/TransactionForm', () => ({
   default: () => <div>TransactionFormStub</div>,
 }));
+vi.mock('@/components/CsvImportWizard', () => ({
+  default: () => <div>CsvImportWizardStub</div>,
+}));
 
 import { listTransactions, deleteTransaction } from '@/lib/transactions';
 import { listCategories } from '@/lib/categories';
@@ -128,6 +131,26 @@ describe('TransactionsPage', () => {
           .mock.calls.some((c) => c[0]?.type === 'income'),
       ).toBe(true),
     );
+  });
+
+  it('opens the CSV import wizard and hides the action buttons', async () => {
+    mockList([]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText('No transactions found.');
+
+    await user.click(screen.getByRole('button', { name: 'Import CSV' }));
+
+    expect(screen.getByText('CsvImportWizardStub')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Import CSV' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ Add transaction' })).toBeNull();
+  });
+
+  it('disables the import button until an account exists', async () => {
+    accountsState = { accounts: [], error: null, refresh: vi.fn() };
+    mockList([]);
+    render(<TransactionsPage />);
+    expect(await screen.findByRole('button', { name: 'Import CSV' })).toBeDisabled();
   });
 
   it('deletes a transaction through the confirm dialog', async () => {

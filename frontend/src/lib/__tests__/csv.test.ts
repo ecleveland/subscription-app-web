@@ -1,4 +1,10 @@
-import { downloadSubscriptionsCsv, parseCsv } from '../csv';
+import {
+  downloadSubscriptionsCsv,
+  parseCsv,
+  parseAmountToCents,
+  deriveImportRows,
+  type ColumnMapping,
+} from '../csv';
 
 const OriginalURL = globalThis.URL;
 
@@ -135,5 +141,115 @@ describe('parseCsv', () => {
 
   it('returns an empty result for empty input', () => {
     expect(parseCsv('')).toEqual({ headers: [], rows: [] });
+  });
+});
+
+// Mirror of the backend's csv-import.util.spec.ts cases — keep in lockstep with
+// backend/src/transactions/csv-import.util.ts so the import preview matches what
+// the server will actually do.
+describe('parseAmountToCents', () => {
+  it.each([
+    ['1234.56', 123456],
+    ['$1,234.56', 123456],
+    ['1234.5', 123450],
+    ['50', 5000],
+    ['0.07', 7],
+    ['-50.00', -5000],
+    ['+50', 5000],
+    ['(1,234.56)', -123456],
+    ['$ (12.30)', -1230],
+    ['  $1,000  ', 100000],
+    ['1.1', 110],
+    ['19.99', 1999],
+    ['0.1', 10],
+  ])('parses %s -> %d cents', (input, expected) => {
+    expect(parseAmountToCents(input)).toBe(expected);
+  });
+
+  it.each([['', null], ['abc', null], ['1.2.3', null], ['--5', null], ['$', null], ['12-34', null]])(
+    'rejects %s as unparseable',
+    (input, expected) => {
+      expect(parseAmountToCents(input)).toBe(expected);
+    },
+  );
+
+  it('returns null for non-string input', () => {
+    expect(parseAmountToCents(undefined)).toBeNull();
+    expect(parseAmountToCents(42 as unknown as string)).toBeNull();
+  });
+});
+
+describe('deriveImportRows', () => {
+  const mapping: ColumnMapping = {
+    date: 'Date',
+    amount: 'Amount',
+    payee: 'Payee',
+  };
+  const row = (Date: string, Amount: string, Payee = '') => ({ Date, Amount, Payee });
+
+  it('derives expense from a negative amount and income from a positive one', () => {
+    const derived = deriveImportRows(
+      [row('2026-06-01', '-42.00', 'Store'), row('2026-06-02', '100.00', 'Job')],
+      mapping,
+    );
+    expect(derived[0]).toMatchObject({
+      index: 0,
+      status: 'ok',
+      type: 'expense',
+      amountCents: 4200,
+      payee: 'Store',
+    });
+    expect(derived[1]).toMatchObject({
+      index: 1,
+      status: 'ok',
+      type: 'income',
+      amountCents: 10000,
+      payee: 'Job',
+    });
+  });
+
+  it('flags unparseable amount, zero amount, and unparseable date as errors', () => {
+    const derived = deriveImportRows(
+      [row('2026-06-01', 'abc'), row('2026-06-01', '0'), row('not-a-date', '5.00')],
+      mapping,
+    );
+    expect(derived[0]).toMatchObject({ index: 0, status: 'error', error: 'Unparseable amount' });
+    expect(derived[1]).toMatchObject({ index: 1, status: 'error', error: 'Zero amount' });
+    expect(derived[2]).toMatchObject({ index: 2, status: 'error', error: 'Unparseable date' });
+  });
+
+  it('marks a within-batch duplicate (same date/amount/type/payee) as duplicate', () => {
+    const derived = deriveImportRows(
+      [row('2026-06-01', '-10.00', 'Store'), row('2026-06-01', '-10.00', 'Store')],
+      mapping,
+    );
+    expect(derived[0].status).toBe('ok');
+    expect(derived[1].status).toBe('duplicate');
+  });
+
+  it('does not treat rows with differing payees as duplicates', () => {
+    const derived = deriveImportRows(
+      [row('2026-06-01', '-10.00', 'A'), row('2026-06-01', '-10.00', 'B')],
+      mapping,
+    );
+    expect(derived.map((d) => d.status)).toEqual(['ok', 'ok']);
+  });
+
+  it('omits payee when no payee column is mapped, and dedupes on empty payee', () => {
+    const noPayee: ColumnMapping = { date: 'Date', amount: 'Amount' };
+    const derived = deriveImportRows(
+      [row('2026-06-01', '-10.00', 'ignored'), row('2026-06-01', '-10.00', 'also-ignored')],
+      noPayee,
+    );
+    expect(derived[0].payee).toBeUndefined();
+    expect(derived[1].status).toBe('duplicate');
+  });
+
+  it('preserves the original row index across error rows', () => {
+    const derived = deriveImportRows(
+      [row('2026-06-01', 'abc'), row('2026-06-02', '-5.00', 'Store')],
+      mapping,
+    );
+    expect(derived[1].index).toBe(1);
   });
 });
