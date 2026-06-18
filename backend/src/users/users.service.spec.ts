@@ -423,6 +423,25 @@ describe('UsersService', () => {
       expect(mockUserModel.countDocuments).not.toHaveBeenCalled();
       expect(mockUserModel.findByIdAndUpdate).not.toHaveBeenCalled();
     });
+
+    it('logs CRITICAL and still throws when the rollback write also fails', async () => {
+      mockUserModel.findOneAndUpdate.mockReturnValue(
+        createChainable({ _id: adminId, role: UserRole.USER }),
+      );
+      mockUserModel.countDocuments.mockReturnValue(createChainable(0));
+      mockUserModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('db down')),
+      });
+      const errSpy = jest.spyOn(Logger.prototype, 'error');
+
+      await expect(service.demoteAdminSafely(adminId)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: adminId }),
+        expect.stringContaining('CRITICAL'),
+      );
+    });
   });
 
   describe('changePassword', () => {
@@ -533,6 +552,25 @@ describe('UsersService', () => {
 
       expect(mockRefreshTokenModel.deleteMany).toHaveBeenCalledWith(
         expect.objectContaining({ userId: expect.any(Types.ObjectId) }),
+      );
+    });
+
+    it('still resolves (logging) when refresh-token cleanup fails after the user is deleted', async () => {
+      mockUserModel.findById.mockReturnValue(createChainable(mockUser));
+      mockUserModel.findByIdAndDelete.mockReturnValue(
+        createChainable(mockUser),
+      );
+      mockRefreshTokenModel.deleteMany.mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('tokens boom')),
+      });
+      const errSpy = jest.spyOn(Logger.prototype, 'error');
+
+      await expect(
+        service.remove('507f1f77bcf86cd799439011'),
+      ).resolves.toBeUndefined();
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: '507f1f77bcf86cd799439011' }),
+        expect.stringContaining('orphaned tokens remain'),
       );
     });
 

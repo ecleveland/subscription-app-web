@@ -249,10 +249,23 @@ export class UsersService {
     await this.householdsService.removeMembershipsByUser(id);
     await this.userModel.findByIdAndDelete(id).exec();
     // Drop the deleted user's refresh tokens so a stolen/active token can't be
-    // used to mint new access tokens after the account is gone.
-    await this.refreshTokenModel
-      .deleteMany({ userId: new Types.ObjectId(id) } as Record<string, unknown>)
-      .exec();
+    // used to mint new access tokens after the account is gone. The user is
+    // already deleted, so don't fail the whole request if cleanup throws — the
+    // orphaned rows reference a now-missing user (harmless for auth) and the
+    // refresh token TTL reaps them; log so the partial failure stays greppable.
+    try {
+      await this.refreshTokenModel
+        .deleteMany({ userId: new Types.ObjectId(id) } as Record<
+          string,
+          unknown
+        >)
+        .exec();
+    } catch (error: unknown) {
+      this.logger.error(
+        { userId: id, error },
+        'User deleted but refresh-token cleanup failed; orphaned tokens remain',
+      );
+    }
     this.logger.log({ userId: id }, 'User deleted');
   }
 
