@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, ConnectionStates } from 'mongoose';
 
@@ -8,13 +8,22 @@ export class HealthController {
 
   @Get()
   check() {
+    const timestamp = new Date().toISOString();
+
+    if (this.connection.readyState !== ConnectionStates.connected) {
+      // Return 503 (not 200) so Railway/uptime monitors treat a DB outage as
+      // unhealthy. Same diagnostic body, surfaced as the exception response.
+      throw new ServiceUnavailableException({
+        status: 'error',
+        timestamp,
+        database: 'disconnected',
+      });
+    }
+
     return {
       status: 'ok',
-      timestamp: new Date().toISOString(),
-      database:
-        this.connection.readyState === ConnectionStates.connected
-          ? 'connected'
-          : 'disconnected',
+      timestamp,
+      database: 'connected',
     };
   }
 }

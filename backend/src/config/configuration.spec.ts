@@ -52,9 +52,69 @@ describe('configuration', () => {
     expect(config.auth.jwtExpiresIn).toBe('15m');
   });
 
+  describe('nodeEnv', () => {
+    beforeEach(() => {
+      process.env.JWT_SECRET = STRONG_SECRET;
+    });
+
+    it('defaults to development when NODE_ENV is unset', () => {
+      delete process.env.NODE_ENV;
+      expect(configuration().nodeEnv).toBe('development');
+    });
+
+    it('reflects NODE_ENV when set', () => {
+      process.env.NODE_ENV = 'test';
+      expect(configuration().nodeEnv).toBe('test');
+    });
+  });
+
+  describe('production guards', () => {
+    beforeEach(() => {
+      process.env.JWT_SECRET = STRONG_SECRET;
+      process.env.NODE_ENV = 'production';
+      process.env.FRONTEND_URL = 'https://app.example.com';
+      delete process.env.THROTTLE_DISABLED;
+    });
+
+    it('throws when THROTTLE_DISABLED is set in production', () => {
+      process.env.THROTTLE_DISABLED = 'true';
+      expect(() => configuration()).toThrow(
+        'THROTTLE_DISABLED must not be set in production',
+      );
+    });
+
+    it('allows THROTTLE_DISABLED outside production', () => {
+      process.env.NODE_ENV = 'development';
+      process.env.THROTTLE_DISABLED = 'true';
+      delete process.env.FRONTEND_URL;
+      expect(() => configuration()).not.toThrow();
+    });
+
+    it('throws when FRONTEND_URL is unset in production', () => {
+      delete process.env.FRONTEND_URL;
+      expect(() => configuration()).toThrow(
+        'FRONTEND_URL must be set in production',
+      );
+    });
+
+    it('does not throw in production when FRONTEND_URL is set and throttling is enabled', () => {
+      expect(() => configuration()).not.toThrow();
+      expect(configuration().cors.origin).toBe('https://app.example.com');
+    });
+
+    it('falls back to a localhost CORS origin outside production', () => {
+      process.env.NODE_ENV = 'development';
+      delete process.env.FRONTEND_URL;
+      expect(configuration().cors.origin).toBe('http://localhost:3000');
+    });
+  });
+
   describe('mail', () => {
     beforeEach(() => {
       process.env.JWT_SECRET = STRONG_SECRET;
+      // The smtp-in-production cases below set NODE_ENV=production, which now
+      // requires FRONTEND_URL — provide one so only the mail behaviour is tested.
+      process.env.FRONTEND_URL = 'https://app.example.com';
       delete process.env.MAIL_DRIVER;
       delete process.env.NODE_ENV;
       delete process.env.SMTP_HOST;

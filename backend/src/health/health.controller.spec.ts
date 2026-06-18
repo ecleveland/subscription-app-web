@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { getConnectionToken } from '@nestjs/mongoose';
 import { HealthController } from './health.controller';
 
@@ -25,12 +26,22 @@ describe('HealthController', () => {
     expect(result.timestamp).toBeDefined();
   });
 
-  it('should return disconnected when database is not ready', () => {
+  it('should throw 503 ServiceUnavailable with a diagnostic body when the database is not ready', () => {
     mockConnection.readyState = 0;
 
-    const result = controller.check();
+    expect(() => controller.check()).toThrow(ServiceUnavailableException);
 
-    expect(result.status).toBe('ok');
-    expect(result.database).toBe('disconnected');
+    try {
+      controller.check();
+      throw new Error('expected check() to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ServiceUnavailableException);
+      const response = (err as ServiceUnavailableException).getResponse();
+      expect(response).toMatchObject({
+        status: 'error',
+        database: 'disconnected',
+      });
+      expect((response as { timestamp: string }).timestamp).toBeDefined();
+    }
   });
 });

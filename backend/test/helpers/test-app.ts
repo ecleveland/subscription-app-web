@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { ThrottlerGuard } from '@nestjs/throttler';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -23,18 +22,15 @@ export async function createTestApp(
   process.env.JWT_SECRET = 'test-jwt-secret-at-least-32-chars-long';
   process.env.JWT_EXPIRES_IN = '1h';
   process.env.AUTH_PASSWORD_HASH = '';
+  // ThrottlerGuard is now a global APP_GUARD, which overrideGuard() can't
+  // replace. Drive throttling through the app's real switch instead: the
+  // module's skipIf honours THROTTLE_DISABLED outside production (NODE_ENV is
+  // 'test' here). The guard reads this per-request, so it tracks the option.
+  process.env.THROTTLE_DISABLED = options.disableThrottling ? 'true' : 'false';
 
-  let builder = Test.createTestingModule({
+  const moduleFixture: TestingModule = await Test.createTestingModule({
     imports: [AppModule],
-  });
-
-  if (options.disableThrottling) {
-    builder = builder
-      .overrideGuard(ThrottlerGuard)
-      .useValue({ canActivate: () => true }) as unknown as typeof builder;
-  }
-
-  const moduleFixture: TestingModule = await builder.compile();
+  }).compile();
 
   const app = moduleFixture.createNestApplication();
   app.setGlobalPrefix('api');

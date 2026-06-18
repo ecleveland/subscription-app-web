@@ -49,14 +49,18 @@ async function bootstrap() {
     credentials: true,
   });
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Subscription App API')
-    .setDescription('REST API for managing subscriptions')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+  // Swagger UI + /api/docs-json expose the full API surface; keep them out of
+  // production so they're available in dev/staging only.
+  if (configService.get<string>('nodeEnv') !== 'production') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Subscription App API')
+      .setDescription('REST API for managing subscriptions')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   // Idempotent startup tasks, run on every boot of every replica. seedAdmin
   // already swallows its own benign concurrent-boot duplicate; this outer guard
