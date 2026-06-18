@@ -285,10 +285,9 @@ export class SubscriptionsService {
 
     const validDocs = await this.subscriptionModel.find(filter).exec();
     const validIds = validDocs.map((doc) => doc._id);
-    const failed = dto.ids.length - validIds.length;
 
     if (validIds.length === 0) {
-      return { success: 0, failed };
+      return { success: 0, failed: dto.ids.length };
     }
 
     const validFilter = {
@@ -296,38 +295,51 @@ export class SubscriptionsService {
       householdId: new Types.ObjectId(householdId),
     } as Record<string, unknown>;
 
+    // Report the count actually affected by the write (deletedCount, or
+    // matchedCount for updates — matched, not modified, so re-applying a value a
+    // doc already has still counts as a success), rather than the pre-write
+    // candidate count which would over-report if a concurrent change raced us.
+    let success = 0;
     switch (dto.action) {
-      case BulkAction.DELETE:
-        await this.subscriptionModel.deleteMany(validFilter).exec();
+      case BulkAction.DELETE: {
+        const res = await this.subscriptionModel.deleteMany(validFilter).exec();
+        success = res.deletedCount;
         break;
-      case BulkAction.ACTIVATE:
-        await this.subscriptionModel
+      }
+      case BulkAction.ACTIVATE: {
+        const res = await this.subscriptionModel
           .updateMany(validFilter, { $set: { isActive: true } })
           .exec();
+        success = res.matchedCount;
         break;
-      case BulkAction.DEACTIVATE:
-        await this.subscriptionModel
+      }
+      case BulkAction.DEACTIVATE: {
+        const res = await this.subscriptionModel
           .updateMany(validFilter, { $set: { isActive: false } })
           .exec();
+        success = res.matchedCount;
         break;
-      case BulkAction.CHANGE_CATEGORY:
+      }
+      case BulkAction.CHANGE_CATEGORY: {
         if (!dto.category) {
           throw new BadRequestException(
             'Category is required for changeCategory action',
           );
         }
-        await this.subscriptionModel
+        const res = await this.subscriptionModel
           .updateMany(validFilter, { $set: { category: dto.category } })
           .exec();
+        success = res.matchedCount;
         break;
+      }
     }
 
     this.logger.log(
-      { householdId, action: dto.action, count: validIds.length },
+      { householdId, action: dto.action, count: success },
       'Bulk operation completed',
     );
 
-    return { success: validIds.length, failed };
+    return { success, failed: dto.ids.length - success };
   }
 
   private escapeCsvField(field: string): string {

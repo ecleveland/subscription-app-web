@@ -858,7 +858,7 @@ describe('SubscriptionsService', () => {
       const validDoc = { _id: new Types.ObjectId(subId) };
       mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
       mockSubModel.updateMany.mockReturnValueOnce(
-        createChainable({ modifiedCount: 1 }),
+        createChainable({ matchedCount: 1, modifiedCount: 1 }),
       );
 
       const result = await service.bulkOperation(householdId, {
@@ -879,7 +879,7 @@ describe('SubscriptionsService', () => {
       const validDoc = { _id: new Types.ObjectId(subId) };
       mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
       mockSubModel.updateMany.mockReturnValueOnce(
-        createChainable({ modifiedCount: 1 }),
+        createChainable({ matchedCount: 1, modifiedCount: 1 }),
       );
 
       const result = await service.bulkOperation(householdId, {
@@ -900,7 +900,7 @@ describe('SubscriptionsService', () => {
       const validDoc = { _id: new Types.ObjectId(subId) };
       mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
       mockSubModel.updateMany.mockReturnValueOnce(
-        createChainable({ modifiedCount: 1 }),
+        createChainable({ matchedCount: 1, modifiedCount: 1 }),
       );
 
       const result = await service.bulkOperation(householdId, {
@@ -955,6 +955,41 @@ describe('SubscriptionsService', () => {
 
       expect(result).toEqual({ success: 0, failed: 1 });
       expect(mockSubModel.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('reports matchedCount (not modifiedCount) so no-op updates still count', async () => {
+      const validDoc = { _id: new Types.ObjectId(subId) };
+      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
+      // Already active → Mongo matches the doc but modifies nothing.
+      mockSubModel.updateMany.mockReturnValueOnce(
+        createChainable({ matchedCount: 1, modifiedCount: 0 }),
+      );
+
+      const result = await service.bulkOperation(householdId, {
+        ids: [subId],
+        action: BulkAction.ACTIVATE,
+      });
+
+      expect(result).toEqual({ success: 1, failed: 0 });
+    });
+
+    it('reports the real deletedCount when a concurrent delete already removed some', async () => {
+      const validDoc = { _id: new Types.ObjectId(subId) };
+      const validDoc2 = { _id: new Types.ObjectId(subId2) };
+      mockSubModel.find.mockReturnValueOnce(
+        createChainable([validDoc, validDoc2]),
+      );
+      // Both matched the pre-write read, but only one was actually deleted.
+      mockSubModel.deleteMany.mockReturnValueOnce(
+        createChainable({ deletedCount: 1 }),
+      );
+
+      const result = await service.bulkOperation(householdId, {
+        ids: [subId, subId2],
+        action: BulkAction.DELETE,
+      });
+
+      expect(result).toEqual({ success: 1, failed: 1 });
     });
 
     it('should filter by householdId for household scoping', async () => {

@@ -20,6 +20,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
@@ -71,7 +72,7 @@ export class AdminController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden — admin only' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseObjectIdPipe) id: string) {
     return this.usersService.findOnePublic(id);
   }
 
@@ -84,17 +85,14 @@ export class AdminController {
   @ApiResponse({ status: 404, description: 'User not found' })
   async update(
     @Req() req: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', ParseObjectIdPipe) id: string,
     @Body() updateDto: AdminUpdateUserDto,
   ) {
+    // Demoting an admin? Do it atomically so two concurrent demotes can't race
+    // the last admin away (demoteAdminSafely demotes-then-counts and rolls back
+    // if it left zero admins). No-op when the target isn't an admin.
     if (updateDto.role && updateDto.role !== UserRole.ADMIN) {
-      const user = await this.usersService.findOne(id);
-      if (user.role === UserRole.ADMIN) {
-        const adminCount = await this.usersService.countAdmins();
-        if (adminCount <= 1) {
-          throw new ForbiddenException('Cannot remove the last admin');
-        }
-      }
+      await this.usersService.demoteAdminSafely(id);
     }
     const result = await this.usersService.update(id, updateDto);
     this.logger.log(
@@ -111,18 +109,36 @@ export class AdminController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden — admin only' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async remove(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+  async remove(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseObjectIdPipe) id: string,
+  ) {
     if (req.user.userId === id) {
       throw new ForbiddenException('Cannot delete your own account');
     }
-    const user = await this.usersService.findOne(id);
-    if (user.role === UserRole.ADMIN) {
-      const adminCount = await this.usersService.countAdmins();
-      if (adminCount <= 1) {
-        throw new ForbiddenException('Cannot delete the last admin');
+    // Demote-then-delete: demoteAdminSafely atomically guarantees we never strip
+    // the last admin (throws if so; no-op for non-admins). Once demoted, the
+    // now-USER account no longer affects the admin count, so the delete is safe
+    // under concurrency without multi-document transactions.
+    const demoted = await this.usersService.demoteAdminSafely(id);
+    try {
+      await this.usersService.remove(id);
+    } catch (err) {
+      // The delete failed after we demoted — restore the prior admin role so a
+      // failed delete doesn't silently strip admin (best-effort; the user may
+      // already be partially removed, in which case re-promote no-ops).
+      if (demoted) {
+        await this.usersService
+          .update(id, { role: UserRole.ADMIN })
+          .catch((rollbackErr: unknown) =>
+            this.logger.error(
+              { targetUserId: id, rollbackErr },
+              'Failed to restore admin role after a failed delete',
+            ),
+          );
       }
+      throw err;
     }
-    await this.usersService.remove(id);
     this.logger.log(
       { adminId: req.user.userId, targetUserId: id },
       'Admin deleted user',

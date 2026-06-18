@@ -167,6 +167,13 @@ describe('Admin (e2e)', () => {
         .expect(403);
     });
 
+    it('returns 400 (not 500) for a malformed user id in the path', async () => {
+      await request(app.getHttpServer())
+        .get('/api/admin/users/not-an-object-id')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(400);
+    });
+
     it('should allow deleting a non-admin user with 204', async () => {
       // Create a throwaway user
       const createRes = await request(app.getHttpServer())

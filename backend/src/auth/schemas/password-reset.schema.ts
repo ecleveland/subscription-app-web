@@ -5,7 +5,9 @@ export type PasswordResetDocument = HydratedDocument<PasswordReset>;
 
 @Schema({ timestamps: true })
 export class PasswordReset {
-  @Prop({ required: true })
+  // Indexed: requestPasswordReset invalidates prior unused tokens by email
+  // (updateMany over { email, usedAt }) on every reset request.
+  @Prop({ required: true, index: true })
   email: string;
 
   @Prop({ required: true, index: true })
