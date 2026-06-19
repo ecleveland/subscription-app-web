@@ -54,6 +54,16 @@ describe('BudgetSchema validation', () => {
     ).toBeDefined();
   });
 
+  it('rejects ill-sized year/month components (regex stays anchored)', () => {
+    // Pins the ^\d{4} year width and the two-digit month group against an
+    // accidental de-anchoring or width change.
+    for (const month of ['26-06', '2026-6', '2026-066', '02026-06']) {
+      expect(
+        new BudgetModel({ householdId, month }).validateSync()?.errors.month,
+      ).toBeDefined();
+    }
+  });
+
   it('rejects an out-of-range month number', () => {
     expect(
       new BudgetModel({ householdId, month: '2026-13' }).validateSync()?.errors

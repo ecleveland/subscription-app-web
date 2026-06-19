@@ -37,6 +37,17 @@ describe('BudgetCategorySchema validation', () => {
     expect(err).toBeUndefined();
   });
 
+  it('accepts a zero plannedCents (a deliberately budgeted-to-zero category)', () => {
+    // Pins the min:0 accept-edge: a $0 limit is a legitimate budget entry, so
+    // the boundary must sit at 0, not at 1.
+    const err = new BudgetCategoryModel({
+      budgetId,
+      categoryId,
+      plannedCents: 0,
+    }).validateSync();
+    expect(err).toBeUndefined();
+  });
+
   it('requires budgetId, categoryId and plannedCents', () => {
     const err = new BudgetCategoryModel({}).validateSync();
     expect(err?.errors.budgetId).toBeDefined();
