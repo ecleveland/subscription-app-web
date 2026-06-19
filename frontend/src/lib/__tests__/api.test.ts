@@ -102,10 +102,111 @@ describe('apiFetch', () => {
     // Original request 401, and the cookie-based refresh also fails.
     mockFetch.mockResolvedValue({ ok: false, status: 401 });
 
-    await expect(apiFetch('/subscriptions')).rejects.toThrow('Unauthorized');
+    await expect(apiFetch('/subscriptions')).rejects.toThrow(
+      'Session expired. Please log in again.',
+    );
 
     expect(window.localStorage.getItem('token')).toBeNull();
     expect(window.localStorage.getItem('user')).toBeNull();
+  });
+
+  it('surfaces a real error on the retried request without logging out', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+    window.localStorage.setItem('user', '{}');
+
+    mockFetch
+      // Original request → 401
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      // Refresh succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ access_token: 'new-jwt' }),
+      })
+      // Retry with the fresh token → a genuine server error
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ message: 'Internal Server Error' }),
+      });
+
+    // The real error surfaces verbatim — not relabeled as "Unauthorized".
+    await expect(apiFetch('/subscriptions')).rejects.toThrow(
+      'Internal Server Error',
+    );
+
+    // A server error after a successful refresh is NOT an expired session, so
+    // auth state is preserved and the user is not redirected to /login.
+    expect(window.localStorage.getItem('token')).toBe('new-jwt');
+    expect(window.localStorage.getItem('user')).toBe('{}');
+  });
+
+  it('surfaces a network failure on the retried request without logging out', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+    window.localStorage.setItem('user', '{}');
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ access_token: 'new-jwt' }),
+      })
+      // Retry fetch rejects (transient network blip)
+      .mockRejectedValueOnce(new Error('Network request failed'));
+
+    await expect(apiFetch('/subscriptions')).rejects.toThrow(
+      'Network request failed',
+    );
+
+    expect(window.localStorage.getItem('token')).toBe('new-jwt');
+    expect(window.localStorage.getItem('user')).toBe('{}');
+  });
+
+  it('surfaces a repeated 401 on the retried request without logging out', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+    window.localStorage.setItem('user', '{}');
+
+    mockFetch
+      // Original request → 401
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      // Refresh succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ access_token: 'new-jwt' }),
+      })
+      // Retry with the fresh token STILL 401s (e.g. a server-state issue, not a
+      // stale token) — surfaces verbatim rather than relabeling/looping.
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ message: 'Forbidden resource' }),
+      });
+
+    await expect(apiFetch('/subscriptions')).rejects.toThrow('Forbidden resource');
+
+    // A 401 after a successful refresh is not treated as a dead session here,
+    // so auth state is preserved (no clear/redirect).
+    expect(window.localStorage.getItem('token')).toBe('new-jwt');
+    expect(window.localStorage.getItem('user')).toBe('{}');
+  });
+
+  it('returns undefined for a 204 on the retried request', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+
+    mockFetch
+      // Original request (e.g. a DELETE) → 401
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      // Refresh succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ access_token: 'new-jwt' }),
+      })
+      // Retry → 204 No Content (DELETE / change-password shape)
+      .mockResolvedValueOnce({ ok: true, status: 204 });
+
+    const result = await apiFetch('/subscriptions/123', { method: 'DELETE' });
+
+    expect(result).toBeUndefined();
+    expect(window.localStorage.getItem('token')).toBe('new-jwt');
   });
 
   it('should only call refresh once for concurrent 401s', async () => {
