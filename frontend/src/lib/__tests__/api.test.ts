@@ -161,6 +161,54 @@ describe('apiFetch', () => {
     expect(window.localStorage.getItem('user')).toBe('{}');
   });
 
+  it('surfaces a repeated 401 on the retried request without logging out', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+    window.localStorage.setItem('user', '{}');
+
+    mockFetch
+      // Original request → 401
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      // Refresh succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ access_token: 'new-jwt' }),
+      })
+      // Retry with the fresh token STILL 401s (e.g. a server-state issue, not a
+      // stale token) — surfaces verbatim rather than relabeling/looping.
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ message: 'Forbidden resource' }),
+      });
+
+    await expect(apiFetch('/subscriptions')).rejects.toThrow('Forbidden resource');
+
+    // A 401 after a successful refresh is not treated as a dead session here,
+    // so auth state is preserved (no clear/redirect).
+    expect(window.localStorage.getItem('token')).toBe('new-jwt');
+    expect(window.localStorage.getItem('user')).toBe('{}');
+  });
+
+  it('returns undefined for a 204 on the retried request', async () => {
+    window.localStorage.setItem('token', 'expired-jwt');
+
+    mockFetch
+      // Original request (e.g. a DELETE) → 401
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      // Refresh succeeds
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ access_token: 'new-jwt' }),
+      })
+      // Retry → 204 No Content (DELETE / change-password shape)
+      .mockResolvedValueOnce({ ok: true, status: 204 });
+
+    const result = await apiFetch('/subscriptions/123', { method: 'DELETE' });
+
+    expect(result).toBeUndefined();
+    expect(window.localStorage.getItem('token')).toBe('new-jwt');
+  });
+
   it('should only call refresh once for concurrent 401s', async () => {
     window.localStorage.setItem('token', 'expired-jwt');
 
