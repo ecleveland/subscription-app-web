@@ -141,10 +141,13 @@ export class BudgetsService {
 
   /**
    * Upsert several category limits in one call (the optional bulk endpoint).
-   * Validates every categoryId against the household up front so the whole batch
-   * is rejected (no partial writes) if any is foreign, then upserts them in a
-   * single bulkWrite. Returns the recomputed budget-vs-actual view so the client
-   * gets the updated state in one round-trip.
+   * Validates every categoryId against the household up front, so a foreign
+   * category rejects the whole request before any write. The upserts are
+   * independent and idempotent (keyed by the unique (budgetId, categoryId)), so
+   * re-sending the same batch converges — there is no multi-document
+   * transaction (consistent with the rest of the codebase). Returns the
+   * recomputed budget-vs-actual view so the client gets the updated state in one
+   * round-trip.
    */
   async bulkSetBudgetCategories(
     householdId: string,
@@ -178,7 +181,21 @@ export class BudgetsService {
           upsert: true,
         },
       })) as unknown as AnyBulkWriteOperation<BudgetCategoryDocument>[];
-      await this.budgetCategoryModel.bulkWrite(operations);
+      try {
+        await this.budgetCategoryModel.bulkWrite(operations);
+      } catch (error: unknown) {
+        // No multi-doc transaction here, so a mid-batch failure can leave some
+        // limits set and others not. The upserts are idempotent (a retry
+        // converges), but log the partial state with full context so it's a
+        // greppable event rather than a silent drift, then rethrow.
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          { householdId, month, attempted: operations.length },
+          `Bulk budget upsert failed; some category limits may be partially ` +
+            `applied: ${message}`,
+        );
+        throw error;
+      }
     }
 
     return this.getBudgetVsActual(householdId, month);
@@ -297,6 +314,15 @@ export class BudgetsService {
         if (existing) {
           return existing;
         }
+        // Lost the upsert race but the winner's insert isn't readable yet (read
+        // concern / an interleaved delete). Log with context — unlike the
+        // category seeder, this path has no per-household logging caller — then
+        // surface the real cause instead of a misleading duplicate-key error.
+        this.logger.error(
+          { householdId, month },
+          'Budget upsert lost a duplicate-key race but the existing budget ' +
+            'could not be re-read',
+        );
         throw new Error(
           `Budget upsert for "${month}" lost a duplicate-key race but the ` +
             'existing budget could not be re-read',

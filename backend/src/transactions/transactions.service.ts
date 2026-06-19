@@ -209,6 +209,15 @@ export class TransactionsService {
 
     // Drop any income/expense row missing a categoryId (shouldn't occur — the
     // create/update validation requires one — but never key a Map on null).
+    // Warn if it ever does, so a data-integrity issue surfaces instead of cents
+    // silently vanishing from a budget's actuals.
+    const withoutCategory = rows.filter((r) => r._id.categoryId == null);
+    if (withoutCategory.length > 0) {
+      this.logger.warn(
+        { householdId, count: withoutCategory.length },
+        'Dropped income/expense transactions with no categoryId from budget actuals',
+      );
+    }
     return rows
       .filter((r) => r._id.categoryId != null)
       .map((r) => ({

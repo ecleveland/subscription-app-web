@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { BudgetsService } from './budgets.service';
@@ -84,6 +84,8 @@ describe('BudgetsService', () => {
     }).compile();
 
     service = module.get<BudgetsService>(BudgetsService);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -213,6 +215,24 @@ describe('BudgetsService', () => {
       ).toBe(310000);
     });
 
+    it('excludes an income category’s planned limit from totalPlannedCents', async () => {
+      withExistingBudget();
+      withPlanned([{ categoryId: CAT_INC, plannedCents: 100000 }]);
+      categoriesService.listCategories.mockResolvedValue([cat(CAT_INC, true)]);
+
+      const view = await service.getBudgetVsActual(HH, '2026-06');
+      // The income category still appears as a row...
+      expect(view.categories).toHaveLength(1);
+      expect(view.categories[0]).toMatchObject({
+        categoryId: CAT_INC,
+        plannedCents: 100000,
+        isIncome: true,
+      });
+      // ...but its planned limit does not inflate the (expense-only) rollup.
+      expect(view.totalPlannedCents).toBe(0);
+      expect(view.totalActualCents).toBe(0);
+    });
+
     it('drops actuals for a category not in the household', async () => {
       categoriesService.listCategories.mockResolvedValue([]); // unknown category
       transactionsService.aggregateMonthlyActualsByCategory.mockResolvedValue([
@@ -262,6 +282,20 @@ describe('BudgetsService', () => {
 
       await service.setBudgetCategory(HH, '2026-06', CAT_EXP, 50000);
       expect(budgetCategoryModel.updateOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('surfaces a descriptive error if the dup-key race re-read finds nothing', async () => {
+      budgetModel.findOneAndUpdate.mockReturnValue({
+        exec: jest
+          .fn()
+          .mockRejectedValue(Object.assign(new Error(), { code: 11000 })),
+      });
+      budgetModel.findOne.mockReturnValue(createChainable(null));
+
+      await expect(
+        service.setBudgetCategory(HH, '2026-06', CAT_EXP, 50000),
+      ).rejects.toThrow(/duplicate-key race/);
+      expect(budgetCategoryModel.updateOne).not.toHaveBeenCalled();
     });
   });
 
