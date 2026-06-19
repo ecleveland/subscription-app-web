@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, PipelineStage, Types } from 'mongoose';
 import {
   Transaction,
   TransactionDocument,
@@ -49,6 +49,17 @@ export interface PaginatedTransactions {
     totalPages: number;
     hasNextPage: boolean;
   };
+}
+
+// One row of the monthly budget-vs-actual aggregation: the summed magnitude of
+// a household's transactions in a single category, split by type. `categoryId`
+// is a hex string (the aggregation's ObjectId `_id` stringified) so callers can
+// key a plain Map without ObjectId reference-equality pitfalls. Transfers are
+// excluded — they carry no category and are net-zero to the budget.
+export interface MonthlyCategoryActual {
+  categoryId: string;
+  type: TransactionType.INCOME | TransactionType.EXPENSE;
+  totalCents: number;
 }
 
 @Injectable()
@@ -156,6 +167,55 @@ export class TransactionsService {
         hasNextPage: limit === 0 ? false : page < totalPages,
       },
     };
+  }
+
+  /**
+   * Sum a household's income/expense transactions for a month, grouped by
+   * category and type, for the budget-vs-actual reader (VEG-439). One
+   * aggregation, no N+1 per category. The month is passed as an explicit UTC
+   * `[start, end)` range (the budget layer owns "YYYY-MM" → range), so the match
+   * is timezone-stable. Transfers are excluded (no category, net-zero to the
+   * budget). `_id` ObjectIds are stringified so callers key a plain Map safely.
+   */
+  async aggregateMonthlyActualsByCategory(
+    householdId: string,
+    start: Date,
+    end: Date,
+  ): Promise<MonthlyCategoryActual[]> {
+    const pipeline: PipelineStage[] = [
+      {
+        $match: {
+          householdId: new Types.ObjectId(householdId),
+          type: {
+            $in: [TransactionType.INCOME, TransactionType.EXPENSE],
+          },
+          date: { $gte: start, $lt: end },
+        },
+      },
+      {
+        $group: {
+          _id: { categoryId: '$categoryId', type: '$type' },
+          totalCents: { $sum: '$amountCents' },
+        },
+      },
+    ];
+
+    const rows = (await this.transactionModel
+      .aggregate(pipeline)
+      .exec()) as unknown as {
+      _id: { categoryId: Types.ObjectId | null; type: TransactionType };
+      totalCents: number;
+    }[];
+
+    // Drop any income/expense row missing a categoryId (shouldn't occur — the
+    // create/update validation requires one — but never key a Map on null).
+    return rows
+      .filter((r) => r._id.categoryId != null)
+      .map((r) => ({
+        categoryId: (r._id.categoryId as Types.ObjectId).toString(),
+        type: r._id.type as TransactionType.INCOME | TransactionType.EXPENSE,
+        totalCents: r.totalCents,
+      }));
   }
 
   async findOne(householdId: string, id: string): Promise<TransactionDocument> {
