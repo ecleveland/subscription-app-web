@@ -77,6 +77,7 @@ describe('TransactionsService', () => {
     mockModel.insertMany = jest
       .fn()
       .mockImplementation((docs) => Promise.resolve(docs));
+    mockModel.aggregate = jest.fn().mockReturnValue(createChainable([]));
 
     accountsService = {
       findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId(ACC_A) }),
@@ -674,6 +675,109 @@ describe('TransactionsService', () => {
       await expect(
         service.update(HOUSEHOLD_ID, TXN_ID, { amountCents: 5000 }),
       ).resolves.toBeDefined();
+    });
+  });
+
+  describe('aggregateMonthlyActualsByCategory', () => {
+    const start = new Date('2026-06-01T00:00:00.000Z');
+    const end = new Date('2026-07-01T00:00:00.000Z');
+    const CAT_EXP = '507f191e810c19729de86011';
+    const CAT_INC = '507f191e810c19729de86022';
+
+    it('scopes the match to the household, the date range, and non-transfer types', async () => {
+      await service.aggregateMonthlyActualsByCategory(HOUSEHOLD_ID, start, end);
+
+      const pipeline = mockModel.aggregate.mock.calls[0][0];
+      expect(pipeline[0].$match).toEqual({
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        type: { $in: [TransactionType.INCOME, TransactionType.EXPENSE] },
+        date: { $gte: start, $lt: end },
+      });
+      // Grouped by (categoryId, type) so income vs expense stay distinct.
+      expect(pipeline[1].$group._id).toEqual({
+        categoryId: '$categoryId',
+        type: '$type',
+      });
+    });
+
+    it('returns one stringified row per (category, type) with summed cents', async () => {
+      mockModel.aggregate.mockReturnValue(
+        createChainable([
+          {
+            _id: {
+              categoryId: new Types.ObjectId(CAT_EXP),
+              type: TransactionType.EXPENSE,
+            },
+            totalCents: 8400,
+          },
+          {
+            _id: {
+              categoryId: new Types.ObjectId(CAT_INC),
+              type: TransactionType.INCOME,
+            },
+            totalCents: 310000,
+          },
+        ]),
+      );
+
+      const result = await service.aggregateMonthlyActualsByCategory(
+        HOUSEHOLD_ID,
+        start,
+        end,
+      );
+
+      expect(result).toEqual([
+        {
+          categoryId: CAT_EXP,
+          type: TransactionType.EXPENSE,
+          totalCents: 8400,
+        },
+        {
+          categoryId: CAT_INC,
+          type: TransactionType.INCOME,
+          totalCents: 310000,
+        },
+      ]);
+    });
+
+    it('returns an empty array when no transactions match the month', async () => {
+      mockModel.aggregate.mockReturnValue(createChainable([]));
+
+      const result = await service.aggregateMonthlyActualsByCategory(
+        HOUSEHOLD_ID,
+        start,
+        end,
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it('drops rows with a null categoryId rather than keying a Map on null', async () => {
+      mockModel.aggregate.mockReturnValue(
+        createChainable([
+          {
+            _id: { categoryId: null, type: TransactionType.EXPENSE },
+            totalCents: 999,
+          },
+          {
+            _id: {
+              categoryId: new Types.ObjectId(CAT_EXP),
+              type: TransactionType.EXPENSE,
+            },
+            totalCents: 100,
+          },
+        ]),
+      );
+
+      const result = await service.aggregateMonthlyActualsByCategory(
+        HOUSEHOLD_ID,
+        start,
+        end,
+      );
+
+      expect(result).toEqual([
+        { categoryId: CAT_EXP, type: TransactionType.EXPENSE, totalCents: 100 },
+      ]);
     });
   });
 });

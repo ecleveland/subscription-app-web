@@ -7,16 +7,25 @@ import {
   BudgetCategory,
   BudgetCategorySchema,
 } from './schemas/budget-category.schema';
+import { TransactionsModule } from '../transactions/transactions.module';
+import { CategoriesModule } from '../categories/categories.module';
+import { HouseholdsModule } from '../households/households.module';
 
-// Phase 3: the Budget / BudgetCategory data model and module scaffold (VEG-438).
-// The monthly-limit CRUD and budget-vs-actual reader land in VEG-439; the
-// service is exported so that work (and any future reporting) can build on it.
+// Phase 3: the budget-vs-actual API (VEG-439), built on the Budget /
+// BudgetCategory model scaffolded in VEG-438. Depends on TransactionsService (to
+// aggregate monthly actuals from the ledger) and CategoriesService (to resolve
+// each category's isIncome flag and validate cross-household writes);
+// HouseholdsModule provides the HouseholdGuard the controller applies after
+// JwtAuthGuard. None of these import BudgetsModule, so the graph is acyclic.
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Budget.name, schema: BudgetSchema },
       { name: BudgetCategory.name, schema: BudgetCategorySchema },
     ]),
+    TransactionsModule,
+    CategoriesModule,
+    HouseholdsModule,
   ],
   controllers: [BudgetsController],
   providers: [BudgetsService],
