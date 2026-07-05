@@ -1,11 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { CategoriesService } from './categories.service';
 import { CategoryGroup } from './schemas/category-group.schema';
 import { Category } from './schemas/category.schema';
 import { Household } from '../households/schemas/household.schema';
+import { Transaction } from '../transactions/schemas/transaction.schema';
+import { BudgetCategory } from '../budgets/schemas/budget-category.schema';
 import { DEFAULT_CATEGORY_GROUPS } from './default-categories';
 
 const HOUSEHOLD_ID = '507f191e810c19729de860ea';
@@ -40,29 +47,62 @@ describe('CategoriesService', () => {
   let mockGroupModel: any;
   let mockCategoryModel: any;
   let mockHouseholdModel: any;
+  let mockTransactionModel: any;
+  let mockBudgetCategoryModel: any;
+  // save() mocks for documents built via `new this.model({...})` (the create
+  // paths); constructed docs echo their fields plus a fresh _id.
+  let categorySave: jest.Mock;
+  let groupSave: jest.Mock;
+  let errorLogSpy: jest.SpyInstance;
 
   beforeEach(async () => {
-    mockGroupModel = {
-      // Default: every group upsert succeeds, echoing a fresh _id + the name.
-      findOneAndUpdate: jest
-        .fn()
-        .mockImplementation((filter: any) =>
-          createChainable({ _id: new Types.ObjectId(), name: filter.name }),
-        ),
-      findOne: jest.fn().mockReturnValue(createChainable(null)),
-      find: jest.fn().mockReturnValue(createChainable([])),
-    };
+    categorySave = jest.fn().mockImplementation(function (this: any) {
+      return Promise.resolve({ _id: new Types.ObjectId(), ...this });
+    });
+    groupSave = jest.fn().mockImplementation(function (this: any) {
+      return Promise.resolve({ _id: new Types.ObjectId(), ...this });
+    });
 
-    mockCategoryModel = {
-      // Default: every category upsert inserts a new row.
-      updateOne: jest
-        .fn()
-        .mockReturnValue(createChainable({ upsertedCount: 1 })),
-      find: jest.fn().mockReturnValue(createChainable([])),
-    };
+    mockGroupModel = jest
+      .fn()
+      .mockImplementation((doc: any) => ({ ...doc, save: groupSave }));
+    // Default: every group upsert succeeds, echoing a fresh _id + the name.
+    mockGroupModel.findOneAndUpdate = jest
+      .fn()
+      .mockImplementation((filter: any) =>
+        createChainable({ _id: new Types.ObjectId(), name: filter.name }),
+      );
+    mockGroupModel.findOne = jest.fn().mockReturnValue(createChainable(null));
+    mockGroupModel.find = jest.fn().mockReturnValue(createChainable([]));
+
+    mockCategoryModel = jest
+      .fn()
+      .mockImplementation((doc: any) => ({ ...doc, save: categorySave }));
+    // Default: every category upsert inserts a new row.
+    mockCategoryModel.updateOne = jest
+      .fn()
+      .mockReturnValue(createChainable({ upsertedCount: 1 }));
+    mockCategoryModel.find = jest.fn().mockReturnValue(createChainable([]));
+    mockCategoryModel.findOne = jest
+      .fn()
+      .mockReturnValue(createChainable(null));
+    mockCategoryModel.exists = jest.fn().mockReturnValue(createChainable(null));
+    mockCategoryModel.countDocuments = jest
+      .fn()
+      .mockReturnValue(createChainable(0));
+    mockCategoryModel.bulkWrite = jest.fn().mockResolvedValue({});
 
     mockHouseholdModel = {
       find: jest.fn().mockReturnValue(createChainable([])),
+      updateOne: jest.fn().mockReturnValue(createChainable({})),
+    };
+
+    mockTransactionModel = {
+      exists: jest.fn().mockReturnValue(createChainable(null)),
+    };
+
+    mockBudgetCategoryModel = {
+      exists: jest.fn().mockReturnValue(createChainable(null)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -77,13 +117,23 @@ describe('CategoriesService', () => {
           provide: getModelToken(Household.name),
           useValue: mockHouseholdModel,
         },
+        {
+          provide: getModelToken(Transaction.name),
+          useValue: mockTransactionModel,
+        },
+        {
+          provide: getModelToken(BudgetCategory.name),
+          useValue: mockBudgetCategoryModel,
+        },
       ],
     }).compile();
 
     module.useLogger(false);
     service = module.get<CategoriesService>(CategoriesService);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    errorLogSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -353,6 +403,518 @@ describe('CategoriesService', () => {
 
       const seeded = await service.backfillDefaultCategories();
       expect(seeded).toBe(0);
+    });
+
+    it('enumerates only households without the seeded stamp', async () => {
+      mockHouseholdModel.find.mockReturnValue(createChainable([]));
+
+      await service.backfillDefaultCategories();
+
+      expect(mockHouseholdModel.find).toHaveBeenCalledWith({
+        defaultCategoriesSeededAt: { $exists: false },
+      });
+    });
+  });
+
+  describe('seeding stamp', () => {
+    it('stamps the household after a fully successful seed', async () => {
+      await service.seedDefaultsForHousehold(HOUSEHOLD_ID);
+
+      expect(mockHouseholdModel.updateOne).toHaveBeenCalledTimes(1);
+      const [filter, update] = mockHouseholdModel.updateOne.mock.calls[0];
+      expect(filter._id.toString()).toBe(HOUSEHOLD_ID);
+      expect(update.$set.defaultCategoriesSeededAt).toBeInstanceOf(Date);
+    });
+
+    it('does not stamp a household whose seed aborts mid-pass', async () => {
+      mockGroupModel.findOneAndUpdate.mockReturnValueOnce(
+        rejectingChainable(new Error('db down')),
+      );
+
+      await expect(
+        service.seedDefaultsForHousehold(HOUSEHOLD_ID),
+      ).rejects.toThrow('db down');
+      expect(mockHouseholdModel.updateOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createCategory', () => {
+    function givenGroupInHousehold(groupId = new Types.ObjectId()) {
+      mockGroupModel.findOne.mockReturnValue(
+        createChainable({ _id: groupId, name: 'Food' }),
+      );
+      return groupId;
+    }
+
+    it('creates a household-scoped category with appended sortOrder', async () => {
+      const groupId = givenGroupInHousehold();
+      // Highest existing sortOrder in the group is 4 → new category gets 5.
+      mockCategoryModel.findOne.mockReturnValue(
+        createChainable({ sortOrder: 4 }),
+      );
+
+      const result = await service.createCategory(HOUSEHOLD_ID, {
+        name: 'Coffee',
+        groupId: groupId.toString(),
+      });
+
+      const groupFilter = mockGroupModel.findOne.mock.calls[0][0];
+      expect(groupFilter._id.toString()).toBe(groupId.toString());
+      expect(groupFilter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      const doc = mockCategoryModel.mock.calls[0][0];
+      expect(doc.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(doc.groupId.toString()).toBe(groupId.toString());
+      expect(doc.name).toBe('Coffee');
+      expect(doc.isIncome).toBe(false);
+      expect(doc.sortOrder).toBe(5);
+      expect(categorySave).toHaveBeenCalledTimes(1);
+      expect(result.name).toBe('Coffee');
+    });
+
+    it('starts sortOrder at 0 in an empty group and honors isIncome', async () => {
+      const groupId = givenGroupInHousehold();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(null));
+
+      await service.createCategory(HOUSEHOLD_ID, {
+        name: 'Bonus',
+        groupId: groupId.toString(),
+        isIncome: true,
+      });
+
+      const doc = mockCategoryModel.mock.calls[0][0];
+      expect(doc.sortOrder).toBe(0);
+      expect(doc.isIncome).toBe(true);
+    });
+
+    it('honors an explicit sortOrder without querying for the max', async () => {
+      const groupId = givenGroupInHousehold();
+
+      await service.createCategory(HOUSEHOLD_ID, {
+        name: 'Coffee',
+        groupId: groupId.toString(),
+        sortOrder: 7,
+      });
+
+      expect(mockCategoryModel.findOne).not.toHaveBeenCalled();
+      expect(mockCategoryModel.mock.calls[0][0].sortOrder).toBe(7);
+    });
+
+    it('rejects a group that is not in the household', async () => {
+      mockGroupModel.findOne.mockReturnValue(createChainable(null));
+
+      await expect(
+        service.createCategory(HOUSEHOLD_ID, {
+          name: 'Coffee',
+          groupId: new Types.ObjectId().toString(),
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockCategoryModel).not.toHaveBeenCalled();
+    });
+
+    it('maps a duplicate name in the group to a conflict', async () => {
+      const groupId = givenGroupInHousehold();
+      categorySave.mockRejectedValue(duplicateKeyError());
+
+      await expect(
+        service.createCategory(HOUSEHOLD_ID, {
+          name: 'Groceries',
+          groupId: groupId.toString(),
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('updateCategory', () => {
+    function mockCategoryDoc(overrides: Record<string, any> = {}) {
+      const doc: any = {
+        _id: new Types.ObjectId(),
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        groupId: new Types.ObjectId(),
+        name: 'Groceries',
+        isIncome: false,
+        sortOrder: 0,
+        isArchived: false,
+        ...overrides,
+      };
+      doc.save = jest.fn().mockResolvedValue(doc);
+      doc.deleteOne = jest.fn().mockResolvedValue({});
+      return doc;
+    }
+
+    it('404s when the category is missing or foreign', async () => {
+      mockCategoryModel.findOne.mockReturnValue(createChainable(null));
+
+      await expect(
+        service.updateCategory(HOUSEHOLD_ID, new Types.ObjectId().toString(), {
+          name: 'New name',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('scopes the lookup to the household', async () => {
+      const doc = mockCategoryDoc();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+
+      await service.updateCategory(HOUSEHOLD_ID, doc._id.toString(), {});
+
+      const filter = mockCategoryModel.findOne.mock.calls[0][0];
+      expect(filter._id.toString()).toBe(doc._id.toString());
+      expect(filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+    });
+
+    it('renames, reorders and archives via save', async () => {
+      const doc = mockCategoryDoc();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+
+      const result = await service.updateCategory(
+        HOUSEHOLD_ID,
+        doc._id.toString(),
+        { name: 'Renamed', sortOrder: 3, isArchived: true },
+      );
+
+      expect(doc.name).toBe('Renamed');
+      expect(doc.sortOrder).toBe(3);
+      expect(doc.isArchived).toBe(true);
+      expect(doc.save).toHaveBeenCalledTimes(1);
+      expect(result).toBe(doc);
+    });
+
+    it('supports un-archiving', async () => {
+      const doc = mockCategoryDoc({ isArchived: true });
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+
+      await service.updateCategory(HOUSEHOLD_ID, doc._id.toString(), {
+        isArchived: false,
+      });
+
+      expect(doc.isArchived).toBe(false);
+      expect(doc.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('validates the target group when moving and rejects a foreign one', async () => {
+      const doc = mockCategoryDoc();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+      mockGroupModel.findOne.mockReturnValue(createChainable(null));
+
+      await expect(
+        service.updateCategory(HOUSEHOLD_ID, doc._id.toString(), {
+          groupId: new Types.ObjectId().toString(),
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('moves to a validated group in the household', async () => {
+      const doc = mockCategoryDoc();
+      const targetGroupId = new Types.ObjectId();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+      mockGroupModel.findOne.mockReturnValue(
+        createChainable({ _id: targetGroupId }),
+      );
+
+      await service.updateCategory(HOUSEHOLD_ID, doc._id.toString(), {
+        groupId: targetGroupId.toString(),
+      });
+
+      expect(doc.groupId.toString()).toBe(targetGroupId.toString());
+      expect(doc.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a rename collision to a conflict', async () => {
+      const doc = mockCategoryDoc();
+      doc.save = jest.fn().mockRejectedValue(duplicateKeyError());
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.updateCategory(HOUSEHOLD_ID, doc._id.toString(), {
+          name: 'Groceries',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('removeCategory', () => {
+    function mockCategoryDoc(overrides: Record<string, any> = {}) {
+      const doc: any = {
+        _id: new Types.ObjectId(),
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        isArchived: false,
+        ...overrides,
+      };
+      doc.save = jest.fn().mockResolvedValue(doc);
+      doc.deleteOne = jest.fn().mockResolvedValue({});
+      return doc;
+    }
+
+    it('404s when the category is missing or foreign', async () => {
+      mockCategoryModel.findOne.mockReturnValue(createChainable(null));
+
+      await expect(
+        service.removeCategory(HOUSEHOLD_ID, new Types.ObjectId().toString()),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('archives a category referenced by a transaction', async () => {
+      const doc = mockCategoryDoc();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+      mockTransactionModel.exists.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId() }),
+      );
+
+      const result = await service.removeCategory(
+        HOUSEHOLD_ID,
+        doc._id.toString(),
+      );
+
+      expect(result).toEqual({ outcome: 'archived' });
+      expect(doc.isArchived).toBe(true);
+      expect(doc.save).toHaveBeenCalledTimes(1);
+      expect(doc.deleteOne).not.toHaveBeenCalled();
+      const txnFilter = mockTransactionModel.exists.mock.calls[0][0];
+      expect(txnFilter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(txnFilter.categoryId.toString()).toBe(doc._id.toString());
+    });
+
+    it('archives a category referenced only by a budget row', async () => {
+      const doc = mockCategoryDoc();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+      mockBudgetCategoryModel.exists.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId() }),
+      );
+
+      const result = await service.removeCategory(
+        HOUSEHOLD_ID,
+        doc._id.toString(),
+      );
+
+      expect(result).toEqual({ outcome: 'archived' });
+      expect(doc.deleteOne).not.toHaveBeenCalled();
+      const filter = mockBudgetCategoryModel.exists.mock.calls[0][0];
+      expect(filter.categoryId.toString()).toBe(doc._id.toString());
+    });
+
+    it('hard-deletes an unreferenced category', async () => {
+      const doc = mockCategoryDoc();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+
+      const result = await service.removeCategory(
+        HOUSEHOLD_ID,
+        doc._id.toString(),
+      );
+
+      expect(result).toEqual({ outcome: 'deleted' });
+      expect(doc.deleteOne).toHaveBeenCalledTimes(1);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reorderCategories', () => {
+    function householdCategories(count: number) {
+      return Array.from({ length: count }, (_, i) => ({
+        _id: new Types.ObjectId(),
+        sortOrder: i,
+      }));
+    }
+
+    it('rejects the whole batch when any id is foreign, writing nothing', async () => {
+      const owned = householdCategories(2);
+      // Only 1 of the 2 submitted ids is owned by the household.
+      mockCategoryModel.countDocuments.mockReturnValue(createChainable(1));
+
+      await expect(
+        service.reorderCategories(HOUSEHOLD_ID, [
+          owned[0]._id.toString(),
+          new Types.ObjectId().toString(),
+        ]),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockCategoryModel.bulkWrite).not.toHaveBeenCalled();
+    });
+
+    it('validates ownership by count, scoped to the household, archived included', async () => {
+      const owned = householdCategories(2);
+      mockCategoryModel.countDocuments.mockReturnValue(createChainable(2));
+
+      await service.reorderCategories(HOUSEHOLD_ID, [
+        owned[1]._id.toString(),
+        owned[0]._id.toString(),
+      ]);
+
+      const filter = mockCategoryModel.countDocuments.mock.calls[0][0];
+      expect(filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(filter._id.$in).toHaveLength(2);
+      // Archived categories must stay reorderable: no isArchived filter.
+      expect(filter.isArchived).toBeUndefined();
+    });
+
+    it('bulk-writes sortOrder = array index with household-scoped filters', async () => {
+      const owned = householdCategories(3);
+      mockCategoryModel.countDocuments.mockReturnValue(createChainable(3));
+      mockCategoryModel.find.mockReturnValue(createChainable(owned));
+
+      const result = await service.reorderCategories(HOUSEHOLD_ID, [
+        owned[2]._id.toString(),
+        owned[0]._id.toString(),
+        owned[1]._id.toString(),
+      ]);
+
+      expect(mockCategoryModel.bulkWrite).toHaveBeenCalledTimes(1);
+      const ops = mockCategoryModel.bulkWrite.mock.calls[0][0];
+      expect(ops).toHaveLength(3);
+      ops.forEach((op: any, index: number) => {
+        expect(op.updateOne.filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+        expect(op.updateOne.update.$set.sortOrder).toBe(index);
+      });
+      expect(ops[0].updateOne.filter._id.toString()).toBe(
+        owned[2]._id.toString(),
+      );
+      // Returns the refreshed list (the household-scoped read after writing).
+      expect(mockCategoryModel.find).toHaveBeenCalledTimes(1);
+      expect(result).toBe(owned);
+    });
+
+    it('logs and rethrows a mid-batch bulkWrite failure', async () => {
+      const owned = householdCategories(1);
+      mockCategoryModel.countDocuments.mockReturnValue(createChainable(1));
+      mockCategoryModel.bulkWrite.mockRejectedValue(new Error('write failed'));
+
+      await expect(
+        service.reorderCategories(HOUSEHOLD_ID, [owned[0]._id.toString()]),
+      ).rejects.toThrow('write failed');
+      expect(errorLogSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('createGroup', () => {
+    it('creates a household-scoped group with appended sortOrder', async () => {
+      // Highest existing group sortOrder is 6 → new group gets 7.
+      mockGroupModel.findOne.mockReturnValue(createChainable({ sortOrder: 6 }));
+
+      const result = await service.createGroup(HOUSEHOLD_ID, { name: 'Pets' });
+
+      const doc = mockGroupModel.mock.calls[0][0];
+      expect(doc.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(doc.name).toBe('Pets');
+      expect(doc.sortOrder).toBe(7);
+      expect(groupSave).toHaveBeenCalledTimes(1);
+      expect(result.name).toBe('Pets');
+    });
+
+    it('honors an explicit sortOrder', async () => {
+      await service.createGroup(HOUSEHOLD_ID, { name: 'Pets', sortOrder: 2 });
+
+      expect(mockGroupModel.findOne).not.toHaveBeenCalled();
+      expect(mockGroupModel.mock.calls[0][0].sortOrder).toBe(2);
+    });
+
+    it('maps a duplicate group name to a conflict', async () => {
+      mockGroupModel.findOne.mockReturnValue(createChainable(null));
+      groupSave.mockRejectedValue(duplicateKeyError());
+
+      await expect(
+        service.createGroup(HOUSEHOLD_ID, { name: 'Housing' }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('updateGroup', () => {
+    function mockGroupDoc(overrides: Record<string, any> = {}) {
+      const doc: any = {
+        _id: new Types.ObjectId(),
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        name: 'Housing',
+        sortOrder: 0,
+        ...overrides,
+      };
+      doc.save = jest.fn().mockResolvedValue(doc);
+      doc.deleteOne = jest.fn().mockResolvedValue({});
+      return doc;
+    }
+
+    it('404s when the group is missing or foreign', async () => {
+      mockGroupModel.findOne.mockReturnValue(createChainable(null));
+
+      await expect(
+        service.updateGroup(HOUSEHOLD_ID, new Types.ObjectId().toString(), {
+          name: 'New',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('renames and reorders via save, scoped to the household', async () => {
+      const doc = mockGroupDoc();
+      mockGroupModel.findOne.mockReturnValue(createChainable(doc));
+
+      const result = await service.updateGroup(
+        HOUSEHOLD_ID,
+        doc._id.toString(),
+        { name: 'Shelter', sortOrder: 4 },
+      );
+
+      const filter = mockGroupModel.findOne.mock.calls[0][0];
+      expect(filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(doc.name).toBe('Shelter');
+      expect(doc.sortOrder).toBe(4);
+      expect(doc.save).toHaveBeenCalledTimes(1);
+      expect(result).toBe(doc);
+    });
+
+    it('maps a rename collision to a conflict', async () => {
+      const doc = mockGroupDoc();
+      doc.save = jest.fn().mockRejectedValue(duplicateKeyError());
+      mockGroupModel.findOne.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.updateGroup(HOUSEHOLD_ID, doc._id.toString(), {
+          name: 'Food',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('removeGroup', () => {
+    function mockGroupDoc() {
+      const doc: any = {
+        _id: new Types.ObjectId(),
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        name: 'Housing',
+      };
+      doc.deleteOne = jest.fn().mockResolvedValue({});
+      return doc;
+    }
+
+    it('404s when the group is missing or foreign', async () => {
+      mockGroupModel.findOne.mockReturnValue(createChainable(null));
+
+      await expect(
+        service.removeGroup(HOUSEHOLD_ID, new Types.ObjectId().toString()),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('blocks deletion while the group contains categories (archived count)', async () => {
+      const doc = mockGroupDoc();
+      mockGroupModel.findOne.mockReturnValue(createChainable(doc));
+      mockCategoryModel.exists.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId() }),
+      );
+
+      await expect(
+        service.removeGroup(HOUSEHOLD_ID, doc._id.toString()),
+      ).rejects.toThrow(ConflictException);
+      expect(doc.deleteOne).not.toHaveBeenCalled();
+      const filter = mockCategoryModel.exists.mock.calls[0][0];
+      expect(filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(filter.groupId.toString()).toBe(doc._id.toString());
+      expect(filter.isArchived).toBeUndefined();
+    });
+
+    it('hard-deletes an empty group', async () => {
+      const doc = mockGroupDoc();
+      mockGroupModel.findOne.mockReturnValue(createChainable(doc));
+      mockCategoryModel.exists.mockReturnValue(createChainable(null));
+
+      await service.removeGroup(HOUSEHOLD_ID, doc._id.toString());
+
+      expect(doc.deleteOne).toHaveBeenCalledTimes(1);
     });
   });
 });

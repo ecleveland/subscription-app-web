@@ -248,10 +248,18 @@ export class BudgetsService {
         'categoryId does not reference a category in this household',
       );
     }
+    // Archived categories keep their historical limits in the view but can't
+    // receive NEW limits — money planned against a category hidden from the
+    // picker would silently skew to-be-budgeted.
+    if (category.isArchived) {
+      throw new BadRequestException(
+        'Cannot set a budget limit on an archived category',
+      );
+    }
   }
 
   // Validate a batch of categoryIds with one query: any id not in the
-  // household's category set fails the whole batch.
+  // household's (non-archived) category set fails the whole batch.
   private async assertCategoriesInHousehold(
     householdId: string,
     categoryIds: string[],
@@ -263,12 +271,19 @@ export class BudgetsService {
       householdId,
       true,
     );
-    const valid = new Set(categories.map((c) => c._id.toString()));
-    const foreign = categoryIds.find((id) => !valid.has(id));
-    if (foreign) {
-      throw new BadRequestException(
-        'categoryId does not reference a category in this household',
-      );
+    const byId = new Map(categories.map((c) => [c._id.toString(), c]));
+    for (const id of categoryIds) {
+      const category = byId.get(id);
+      if (!category) {
+        throw new BadRequestException(
+          'categoryId does not reference a category in this household',
+        );
+      }
+      if (category.isArchived) {
+        throw new BadRequestException(
+          'Cannot set a budget limit on an archived category',
+        );
+      }
     }
   }
 

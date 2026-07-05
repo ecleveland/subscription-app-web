@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
+import { userIdFromToken } from './helpers/jwt';
 import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
 import { SubscriptionsCronService } from '../src/subscriptions/subscriptions-cron.service';
 import { HouseholdsService } from '../src/households/households.service';
@@ -16,13 +17,6 @@ import {
 } from '../src/households/schemas/household-member.schema';
 
 /** Decode the `sub` (userId) claim from a JWT access token. */
-function userIdFromToken(token: string): string {
-  const payload = JSON.parse(
-    Buffer.from(token.split('.')[1], 'base64').toString('utf8'),
-  ) as { sub: string };
-  return payload.sub;
-}
-
 describe('Subscriptions (e2e)', () => {
   let app: INestApplication<App>;
   let tokenA: string;

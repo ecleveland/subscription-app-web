@@ -579,6 +579,13 @@ export class TransactionsService {
           'categoryId does not reference a category in this household',
         );
       }
+      // Mirror the archived-account rule: no new activity against an archived
+      // category, but updates still work so existing entries can be corrected.
+      if (forCreate && category.isArchived) {
+        throw new BadRequestException(
+          'Cannot record a transaction against an archived category',
+        );
+      }
     }
   }
 

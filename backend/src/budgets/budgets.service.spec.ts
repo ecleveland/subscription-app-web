@@ -255,6 +255,17 @@ describe('BudgetsService', () => {
       expect(budgetCategoryModel.updateOne).not.toHaveBeenCalled();
     });
 
+    it('rejects setting a limit on an archived category without writing', async () => {
+      categoriesService.findInHousehold.mockResolvedValue({
+        _id: new Types.ObjectId(CAT_EXP),
+        isArchived: true,
+      });
+      await expect(
+        service.setBudgetCategory(HH, '2026-06', CAT_EXP, 5000),
+      ).rejects.toThrow(/archived category/);
+      expect(budgetCategoryModel.updateOne).not.toHaveBeenCalled();
+    });
+
     it('rejects a malformed month', async () => {
       await expect(
         service.setBudgetCategory(HH, '2026-1', CAT_EXP, 5000),
@@ -308,6 +319,20 @@ describe('BudgetsService', () => {
           { categoryId: CAT_INC, plannedCents: 2000 },
         ]),
       ).rejects.toThrow(BadRequestException);
+      expect(budgetCategoryModel.bulkWrite).not.toHaveBeenCalled();
+    });
+
+    it('rejects the whole batch if any categoryId is archived', async () => {
+      categoriesService.listCategories.mockResolvedValue([
+        cat(CAT_EXP, false),
+        { _id: new Types.ObjectId(CAT_INC), isIncome: true, isArchived: true },
+      ]);
+      await expect(
+        service.bulkSetBudgetCategories(HH, '2026-06', [
+          { categoryId: CAT_EXP, plannedCents: 1000 },
+          { categoryId: CAT_INC, plannedCents: 2000 },
+        ]),
+      ).rejects.toThrow(/archived category/);
       expect(budgetCategoryModel.bulkWrite).not.toHaveBeenCalled();
     });
 

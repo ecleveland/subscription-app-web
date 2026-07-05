@@ -272,6 +272,24 @@ describe('TransactionsService', () => {
       ).rejects.toThrow(/archived account/);
       expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
     });
+
+    it('rejects creating a transaction against an archived category', async () => {
+      categoriesService.findInHousehold.mockResolvedValueOnce({
+        _id: new Types.ObjectId(CAT_ID),
+        isArchived: true,
+      });
+
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          accountId: ACC_A,
+          date: '2026-06-17',
+          amountCents: 4200,
+          type: TransactionType.EXPENSE,
+          categoryId: CAT_ID,
+        }),
+      ).rejects.toThrow(/archived category/);
+      expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
+    });
   });
 
   describe('update — re-points balances', () => {
@@ -669,6 +687,18 @@ describe('TransactionsService', () => {
       mockModel.findById.mockReturnValue(createChainable(txnDoc()));
       accountsService.findOne.mockResolvedValue({
         _id: new Types.ObjectId(ACC_A),
+        isArchived: true,
+      });
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, { amountCents: 5000 }),
+      ).resolves.toBeDefined();
+    });
+
+    it('does not block an update when the category is archived', async () => {
+      mockModel.findById.mockReturnValue(createChainable(txnDoc()));
+      categoriesService.findInHousehold.mockResolvedValue({
+        _id: new Types.ObjectId(CAT_ID),
         isArchived: true,
       });
 
