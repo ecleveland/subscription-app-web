@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react';
 import {
   listCategories,
   listCategoryGroups,
@@ -86,6 +93,10 @@ export default function CategoriesPage() {
   // Serializes reorder requests: concurrent moves would both compute their
   // swap from the same stale order and race each other's responses.
   const [reordering, setReordering] = useState(false);
+  // Bumped by every applied refresh. A reorder response snapshotted before a
+  // newer refresh (e.g. an unarchive completing mid-flight) is stale and must
+  // not overwrite it.
+  const refreshEpoch = useRef(0);
 
   const refresh = useCallback(async () => {
     const [gs, cs] = await Promise.all([
@@ -94,6 +105,7 @@ export default function CategoriesPage() {
     ]);
     setGroups(gs);
     setCategories(cs);
+    refreshEpoch.current += 1;
     // Fresh data on screen: drop any load-error banner from an earlier fetch.
     setError(null);
   }, []);
@@ -224,11 +236,19 @@ export default function CategoriesPage() {
     if (from < 0 || to < 0 || to >= list.length) return;
     const ids = list.map((c) => c._id);
     [ids[from], ids[to]] = [ids[to], ids[from]];
+    const epochAtRequest = refreshEpoch.current;
     setReordering(true);
     try {
       // The endpoint returns the refreshed full list (archived included), so
       // it doubles as the refetch.
-      setCategories(await reorderCategories(ids));
+      const fresh = await reorderCategories(ids);
+      if (refreshEpoch.current === epochAtRequest) {
+        setCategories(fresh);
+      } else {
+        // Another mutation refreshed while this was in flight; its snapshot
+        // predates that refresh. Pull server truth instead of applying it.
+        await refreshOrWarn();
+      }
     } catch (err) {
       showErrorToast(err instanceof Error ? err.message : 'Failed to reorder');
       await resyncAfterError();
@@ -261,11 +281,17 @@ export default function CategoriesPage() {
       const failed = results.find(
         (r): r is PromiseRejectedResult => r.status === 'rejected',
       );
-      if (failed) throw failed.reason;
-      await refresh();
-    } catch (err) {
-      showErrorToast(err instanceof Error ? err.message : 'Failed to reorder');
-      await resyncAfterError();
+      if (failed) {
+        const reason = failed.reason;
+        showErrorToast(
+          reason instanceof Error ? reason.message : 'Failed to reorder',
+        );
+        await resyncAfterError();
+        return;
+      }
+      // The writes succeeded — a refetch failure here must warn, not claim
+      // the reorder failed.
+      await refreshOrWarn();
     } finally {
       setReordering(false);
     }

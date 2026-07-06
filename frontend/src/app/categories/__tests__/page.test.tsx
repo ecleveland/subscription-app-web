@@ -433,6 +433,69 @@ describe('CategoriesPage', () => {
     expect(listCategoryGroups).toHaveBeenCalledTimes(2);
   });
 
+  it('warns (not "failed") when the refresh after a successful group move fails', async () => {
+    vi.mocked(updateCategoryGroup).mockResolvedValue(groups[0]);
+    await renderPage();
+    // Every PATCH succeeds; only the follow-up refetch dies.
+    vi.mocked(listCategoryGroups).mockRejectedValue(new Error('blip'));
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Move group Food down' }),
+    );
+
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith(
+        'Saved, but the category list may be out of date.',
+      ),
+    );
+    expect(showErrorToast).not.toHaveBeenCalledWith('blip');
+  });
+
+  it('discards a stale reorder response when another mutation lands first', async () => {
+    let resolveReorder!: (value: BudgetCategory[]) => void;
+    vi.mocked(reorderCategories).mockReturnValue(
+      new Promise((resolve) => {
+        resolveReorder = resolve;
+      }),
+    );
+    vi.mocked(updateCategory).mockResolvedValue(
+      category({ _id: 'c4', isArchived: false }),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+
+    // Reorder in flight (server snapshots the list with Old Hobby archived)…
+    await user.click(
+      screen.getByRole('button', { name: 'Move Groceries down' }),
+    );
+
+    // …meanwhile the user unarchives Old Hobby, whose refresh applies a list
+    // where it is active.
+    const unarchivedList = categories.map((c) =>
+      c._id === 'c4' ? { ...c, isArchived: false } : c,
+    );
+    vi.mocked(listCategories).mockResolvedValue(unarchivedList);
+    await user.click(
+      screen.getByRole('button', { name: 'Archived categories (1)' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Unarchive' }));
+    await waitFor(() =>
+      expect(
+        within(foodSection()).getByText('Old Hobby'),
+      ).toBeInTheDocument(),
+    );
+
+    // The stale reorder snapshot must not resurrect the archived state.
+    resolveReorder(categories);
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Move Groceries down' }),
+      ).toBeEnabled(),
+    );
+    expect(within(foodSection()).getByText('Old Hobby')).toBeInTheDocument();
+  });
+
   it('toasts and refetches when a group reorder partially fails', async () => {
     vi.mocked(updateCategoryGroup)
       .mockResolvedValueOnce(groups[0])
