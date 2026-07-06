@@ -6,25 +6,23 @@ import {
   IsString,
   MaxLength,
   Min,
-  ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ValidateIfDefined } from '../../common/validation/validate-if-defined';
 
-// Skip validation only when the field is absent; an explicit JSON null must
-// FAIL the field's validators (400), not skip them the way @IsOptional would —
-// a skipped null reaches Mongoose's required-path validation and surfaces as a
-// 500. This is why the class is explicit rather than PartialType(Create…):
-// PartialType applies @IsOptional, which waves null through.
-const defined = ValidateIf((_object, value) => value !== undefined);
-
-// Partial update: rename, move group, reorder, archive/un-archive. `isIncome`
-// is deliberately absent — flipping it on a category with ledger history would
-// silently reclassify historical actuals in every budget view. With the global
-// ValidationPipe's forbidNonWhitelisted, a PATCH sending it is a 400.
+// Partial update: rename, move group, reorder, archive/un-archive. Explicit
+// class rather than PartialType(CreateCategoryDto): the field set differs
+// (no isIncome — flipping it on a category with ledger history would silently
+// reclassify historical actuals in every budget view; adds isArchived), and
+// every field uses ValidateIfDefined so an explicit JSON null fails with 400
+// instead of reaching Mongoose as a required-path violation (a 500).
+// (PartialType could match the null behavior via { skipNullProperties: false },
+// but not the field shape.) With the global ValidationPipe's
+// forbidNonWhitelisted, a PATCH sending isIncome is rejected with 400.
 export class UpdateCategoryDto {
   @ApiPropertyOptional({ description: 'Category name', example: 'Coffee' })
-  @defined
+  @ValidateIfDefined
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim() : (value as unknown),
   )
@@ -36,12 +34,12 @@ export class UpdateCategoryDto {
   @ApiPropertyOptional({
     description: 'Move to this CategoryGroup (in the same household)',
   })
-  @defined
+  @ValidateIfDefined
   @IsMongoId()
   groupId?: string;
 
   @ApiPropertyOptional({ description: 'Display position', minimum: 0 })
-  @defined
+  @ValidateIfDefined
   @IsInt()
   @Min(0)
   sortOrder?: number;
@@ -51,7 +49,11 @@ export class UpdateCategoryDto {
       'Archive (true) or restore (false). Archived categories keep their ' +
       'ledger history and stay visible via includeArchived=true.',
   })
-  @defined
+  @ValidateIfDefined
+  // Restore the raw request value: enableImplicitConversion coerces the string
+  // "false" to boolean true before validation, so validate against the
+  // pre-coercion value from the plain object — a string fails @IsBoolean.
+  @Transform(({ obj }) => (obj as Record<string, unknown>).isArchived)
   @IsBoolean()
   isArchived?: boolean;
 }

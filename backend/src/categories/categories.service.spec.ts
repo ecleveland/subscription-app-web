@@ -38,8 +38,13 @@ function rejectingChainable(error: unknown) {
   return chain;
 }
 
-function duplicateKeyError(): Error {
-  return Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+function duplicateKeyError(
+  keyPattern: Record<string, number> = { householdId: 1, groupId: 1, name: 1 },
+): Error {
+  return Object.assign(new Error('E11000 duplicate key'), {
+    code: 11000,
+    keyPattern,
+  });
 }
 
 describe('CategoriesService', () => {
@@ -522,6 +527,18 @@ describe('CategoriesService', () => {
         }),
       ).rejects.toThrow(ConflictException);
     });
+
+    it('does not mislabel a non-name unique-index violation as a name conflict', async () => {
+      const groupId = givenGroupInHousehold();
+      categorySave.mockRejectedValue(duplicateKeyError({ someFutureField: 1 }));
+
+      await expect(
+        service.createCategory(HOUSEHOLD_ID, {
+          name: 'Groceries',
+          groupId: groupId.toString(),
+        }),
+      ).rejects.toThrow('E11000 duplicate key');
+    });
   });
 
   describe('updateCategory', () => {
@@ -705,6 +722,37 @@ describe('CategoriesService', () => {
       expect(result).toEqual({ outcome: 'deleted' });
       expect(doc.deleteOne).toHaveBeenCalledTimes(1);
       expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('re-archiving an already-archived referenced category is a no-op save', async () => {
+      const doc = mockCategoryDoc({ isArchived: true });
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+      mockTransactionModel.exists.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId() }),
+      );
+
+      const result = await service.removeCategory(
+        HOUSEHOLD_ID,
+        doc._id.toString(),
+      );
+
+      expect(result).toEqual({ outcome: 'archived' });
+      // Already archived: no redundant write.
+      expect(doc.save).not.toHaveBeenCalled();
+      expect(doc.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('hard-deletes an archived category once nothing references it', async () => {
+      const doc = mockCategoryDoc({ isArchived: true });
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+
+      const result = await service.removeCategory(
+        HOUSEHOLD_ID,
+        doc._id.toString(),
+      );
+
+      expect(result).toEqual({ outcome: 'deleted' });
+      expect(doc.deleteOne).toHaveBeenCalledTimes(1);
     });
   });
 

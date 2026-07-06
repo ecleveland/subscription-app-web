@@ -24,6 +24,7 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
 import { CreateCategoryGroupDto } from './dto/create-category-group.dto';
 import { UpdateCategoryGroupDto } from './dto/update-category-group.dto';
+import { RemoveCategoryOutcomeDto } from './dto/remove-category-outcome.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../households/guards/household.guard';
 import { ParseObjectIdPipe } from '../common/pipes/parse-object-id.pipe';
@@ -137,7 +138,8 @@ export class CategoriesController {
     summary: 'Delete an empty category group',
     description:
       'Blocked (409) while the group still contains categories — archived ' +
-      'ones included. Move them (PATCH /categories/:id) or delete them first.',
+      'ones included. Move them out first (PATCH /categories/:id with a new ' +
+      'groupId); deleting only removes categories that nothing references.',
   })
   @ApiResponse({ status: 204, description: 'Group deleted' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -180,7 +182,8 @@ export class CategoriesController {
   })
   @ApiResponse({
     status: 200,
-    description: "{ outcome: 'archived' | 'deleted' }",
+    description: 'Which fate the category met',
+    type: RemoveCategoryOutcomeDto,
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Category not found' })

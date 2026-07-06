@@ -706,6 +706,19 @@ describe('TransactionsService', () => {
         service.update(HOUSEHOLD_ID, TXN_ID, { amountCents: 5000 }),
       ).resolves.toBeDefined();
     });
+
+    it('rejects re-pointing a transaction onto an archived category', async () => {
+      const ARCHIVED_CAT = '507f191e810c19729de860d9';
+      mockModel.findById.mockReturnValue(createChainable(txnDoc()));
+      categoriesService.findInHousehold.mockResolvedValue({
+        _id: new Types.ObjectId(ARCHIVED_CAT),
+        isArchived: true,
+      });
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, { categoryId: ARCHIVED_CAT }),
+      ).rejects.toThrow(/archived category/);
+    });
   });
 
   describe('aggregateMonthlyActualsByCategory', () => {

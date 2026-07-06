@@ -201,6 +201,23 @@ describe('Categories (e2e)', () => {
       const otherGroup = await createGroup('Other Group For Dup');
       await createCategory({ name: 'Dup Target', groupId: otherGroup });
     });
+
+    it('409s on a name held by an archived category (keeps un-archive safe)', async () => {
+      const id = await createCategory({ name: 'Archived Holder', groupId });
+      await auth(request(app.getHttpServer()).patch(`/api/categories/${id}`))
+        .send({ isArchived: true })
+        .expect(200);
+
+      await auth(request(app.getHttpServer()).post('/api/categories'))
+        .send({ name: 'Archived Holder', groupId })
+        .expect(409);
+    });
+
+    it('rejects string booleans (no implicit coercion of "true"/"false")', async () => {
+      await auth(request(app.getHttpServer()).post('/api/categories'))
+        .send({ name: 'Stringly', groupId, isIncome: 'true' })
+        .expect(400);
+    });
   });
 
   describe('PATCH /api/categories/:id', () => {
@@ -261,6 +278,7 @@ describe('Categories (e2e)', () => {
         { name: null },
         { sortOrder: null },
         { isArchived: null },
+        { isArchived: 'false' },
         { groupId: null },
         { name: '   ' },
       ]) {
@@ -356,7 +374,7 @@ describe('Categories (e2e)', () => {
       );
     });
 
-    it('archives a category referenced only by a budget row', async () => {
+    it('archives a category referenced only by a budget row, preserving its planned limit in the budget view', async () => {
       const id = await createCategory({ name: 'Budgeted Only', groupId });
       await auth(
         request(app.getHttpServer()).put(
@@ -370,6 +388,17 @@ describe('Categories (e2e)', () => {
         request(app.getHttpServer()).delete(`/api/categories/${id}`),
       ).expect(200);
       expect(res.body).toEqual({ outcome: 'archived' });
+
+      // The archive-not-delete design exists exactly so this survives: the
+      // planned limit must still appear in budget-vs-actual after archiving.
+      const view = await auth(
+        request(app.getHttpServer()).get('/api/budgets/2026-07'),
+      ).expect(200);
+      const row = view.body.categories.find(
+        (c: { categoryId: string }) => c.categoryId === id,
+      );
+      expect(row).toMatchObject({ plannedCents: 12300 });
+      expect(view.body.totalPlannedCents).toBeGreaterThanOrEqual(12300);
     });
 
     it('404s a missing id and 400s a malformed id', async () => {
@@ -597,6 +626,44 @@ describe('Categories (e2e)', () => {
         })
         .expect(400);
       expect(res.body.message).toMatch(/archived category/);
+    });
+
+    it('rejects re-pointing an existing transaction onto an archived category', async () => {
+      const account = await auth(
+        request(app.getHttpServer()).post('/api/accounts'),
+      )
+        .send({ name: 'Repoint Checking', type: 'checking' })
+        .expect(201);
+      const liveGroup = await createGroup('Repoint Group');
+      const liveCategory = await createCategory({
+        name: 'Live Target',
+        groupId: liveGroup,
+      });
+      const txn = await auth(
+        request(app.getHttpServer()).post('/api/transactions'),
+      )
+        .send({
+          accountId: account.body._id,
+          type: 'expense',
+          amountCents: 700,
+          date: '2026-07-02',
+          categoryId: liveCategory,
+        })
+        .expect(201);
+
+      const res = await auth(
+        request(app.getHttpServer()).patch(`/api/transactions/${txn.body._id}`),
+      )
+        .send({ categoryId: archivedId })
+        .expect(400);
+      expect(res.body.message).toMatch(/archived category/);
+
+      // Corrections that keep the category are still allowed.
+      await auth(
+        request(app.getHttpServer()).patch(`/api/transactions/${txn.body._id}`),
+      )
+        .send({ amountCents: 800 })
+        .expect(200);
     });
 
     it('rejects setting budget limits on an archived category (single and bulk)', async () => {

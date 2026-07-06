@@ -36,6 +36,10 @@ export class CreateCategoryDto {
     default: false,
   })
   @IsOptional()
+  // Restore the raw request value: enableImplicitConversion coerces the string
+  // "false" to boolean true before validation, so validate against the
+  // pre-coercion value from the plain object — a string fails @IsBoolean.
+  @Transform(({ obj }) => (obj as Record<string, unknown>).isIncome)
   @IsBoolean()
   isIncome?: boolean;
 

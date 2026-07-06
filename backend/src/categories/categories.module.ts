@@ -22,11 +22,11 @@ import {
 // The category data model, default-set seeding (Phase 2), and household
 // category management (Phase 3, VEG-437). CategoriesService is exported so
 // HouseholdsService can seed defaults at household creation and the bootstrap
-// can backfill existing households. Foreign models are registered schema-only
-// and used read-only: Household for the backfill enumeration + seeded stamp,
-// Transaction and BudgetCategory for the archive-vs-hard-delete reference
-// check (importing their owning modules would be circular — both import this
-// module).
+// can backfill existing households. Foreign models are registered schema-only:
+// Household for the backfill enumeration and for writing the seeded stamp
+// (its only write here); Transaction and BudgetCategory strictly read-only for
+// the archive-vs-hard-delete reference check. Importing their owning modules
+// instead would be circular — both import this module.
 @Module({
   imports: [
     MongooseModule.forFeature([

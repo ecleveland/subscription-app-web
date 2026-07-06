@@ -28,6 +28,7 @@ import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CreateCategoryGroupDto } from './dto/create-category-group.dto';
 import { UpdateCategoryGroupDto } from './dto/update-category-group.dto';
+import { RemoveCategoryOutcomeDto } from './dto/remove-category-outcome.dto';
 import { DEFAULT_CATEGORY_GROUPS } from './default-categories';
 
 // MongoDB duplicate-key error code. A concurrent seed (two boots/replicas, or a
@@ -389,12 +390,16 @@ export class CategoriesService {
    * Delete a category, archiving instead when it is referenced by any
    * transaction or budget row (hard-deleting would orphan ledger history and
    * silently drop planned limits from the budget view). The outcome tells the
-   * client which happened. Idempotent for already-archived categories.
+   * client which happened. Idempotent for already-archived categories. The
+   * reference check and the delete are not atomic (no multi-doc transactions
+   * in this codebase): a transaction created in the window can end up with a
+   * dangling categoryId, which the budget view tolerates by dropping orphaned
+   * actuals.
    */
   async removeCategory(
     householdId: string,
     categoryId: string,
-  ): Promise<{ outcome: 'archived' | 'deleted' }> {
+  ): Promise<RemoveCategoryOutcomeDto> {
     const householdObjectId = new Types.ObjectId(householdId);
     const category = await this.findOwnedCategory(
       householdObjectId,
@@ -609,22 +614,26 @@ export class CategoriesService {
   // Append-to-end default: one past the highest sortOrder matching the filter
   // (0 for the first document). Ties under concurrency are tolerated — display
   // order breaks them arbitrarily and reorder is the repair.
-  private async nextSortOrder(
-    model: Model<CategoryDocument> | Model<CategoryGroupDocument>,
+  private async nextSortOrder<T extends { sortOrder: number }>(
+    model: Model<T>,
     filter: Record<string, unknown>,
   ): Promise<number> {
-    const top = await (model as Model<CategoryDocument>)
-      .findOne(filter)
-      .sort({ sortOrder: -1 })
-      .exec();
+    const top = await model.findOne(filter).sort({ sortOrder: -1 }).exec();
     return top ? top.sortOrder + 1 : 0;
   }
 
-  // Map a unique-index violation (duplicate name) to a client-facing 409;
-  // anything else is rethrown untouched. Returns the error for `throw` clarity.
+  // Map a duplicate-name unique-index violation to a client-facing 409. Keyed
+  // on the violated index actually covering `name` (when the driver reports
+  // one), so a future non-name unique index isn't mislabeled as a name
+  // conflict. Anything else is returned unchanged when it's an Error, else
+  // wrapped in one. Returns rather than throws for `throw`-site clarity.
   private asConflictIfDuplicate(error: unknown, message: string): Error {
     if (isDuplicateKeyError(error)) {
-      return new ConflictException(message);
+      const keyPattern = (error as { keyPattern?: Record<string, unknown> })
+        .keyPattern;
+      if (!keyPattern || 'name' in keyPattern) {
+        return new ConflictException(message);
+      }
     }
     return error instanceof Error ? error : new Error(String(error));
   }
