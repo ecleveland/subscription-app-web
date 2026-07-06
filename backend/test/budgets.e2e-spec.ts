@@ -4,16 +4,10 @@ import { Model } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
+import { userIdFromToken } from './helpers/jwt';
 import { HouseholdsService } from '../src/households/households.service';
 import { Category } from '../src/categories/schemas/category.schema';
 import { Budget } from '../src/budgets/schemas/budget.schema';
-
-function userIdFromToken(token: string): string {
-  const payload = JSON.parse(
-    Buffer.from(token.split('.')[1], 'base64').toString('utf8'),
-  ) as { sub: string };
-  return payload.sub;
-}
 
 describe('Budgets (e2e)', () => {
   let app: INestApplication<App>;

@@ -93,10 +93,11 @@ async function bootstrap() {
     await householdsMigration.backfillPersonalHouseholds();
     await householdsMigration.stampExistingData();
 
-    // 3. Seed default budgeting categories into any household that lacks them
-    //    (Phase 2). Runs after the household backfill so every legacy user's
-    //    new household is included. Idempotent: a no-op once every household has
-    //    categories.
+    // 3. Seed default budgeting categories into any household that hasn't
+    //    completed a seed (marked by defaultCategoriesSeededAt). Runs after the
+    //    household backfill so every legacy user's new household is included.
+    //    Idempotent: a no-op once every household is stamped; stamped
+    //    households are never re-seeded, so user edits to defaults survive.
     const categoriesService = app.get(CategoriesService);
     await categoriesService.backfillDefaultCategories();
   } catch (error: unknown) {

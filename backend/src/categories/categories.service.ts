@@ -1,6 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { AnyBulkWriteOperation, Model, Types } from 'mongoose';
 import {
   CategoryGroup,
   CategoryGroupDocument,
@@ -10,6 +16,19 @@ import {
   Household,
   HouseholdDocument,
 } from '../households/schemas/household.schema';
+import {
+  Transaction,
+  TransactionDocument,
+} from '../transactions/schemas/transaction.schema';
+import {
+  BudgetCategory,
+  BudgetCategoryDocument,
+} from '../budgets/schemas/budget-category.schema';
+import { CreateCategoryDto } from './dto/create-category.dto';
+import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CreateCategoryGroupDto } from './dto/create-category-group.dto';
+import { UpdateCategoryGroupDto } from './dto/update-category-group.dto';
+import { RemoveCategoryOutcomeDto } from './dto/remove-category-outcome.dto';
 import { DEFAULT_CATEGORY_GROUPS } from './default-categories';
 
 // MongoDB duplicate-key error code. A concurrent seed (two boots/replicas, or a
@@ -37,6 +56,12 @@ export class CategoriesService {
     private readonly categoryModel: Model<CategoryDocument>,
     @InjectModel(Household.name)
     private readonly householdModel: Model<HouseholdDocument>,
+    // Read-only here: consulted to decide archive-vs-hard-delete (a category
+    // referenced by ledger or budget data must survive as archived).
+    @InjectModel(Transaction.name)
+    private readonly transactionModel: Model<TransactionDocument>,
+    @InjectModel(BudgetCategory.name)
+    private readonly budgetCategoryModel: Model<BudgetCategoryDocument>,
   ) {}
 
   /**
@@ -71,6 +96,17 @@ export class CategoriesService {
         }
       }
     }
+
+    // Stamp only after every upsert above succeeded: a crash mid-seed leaves
+    // the household unstamped, so the next backfill still repairs it. Once
+    // stamped, the backfill skips this household forever — user edits to the
+    // defaults (rename, hard-delete) are never resurrected by the
+    // upsert-by-name seeder.
+    await this.householdModel
+      .updateOne({ _id: householdObjectId } as Record<string, unknown>, {
+        $set: { defaultCategoriesSeededAt: new Date() },
+      })
+      .exec();
 
     if (created > 0) {
       this.logger.log({ householdId }, `Seeded ${created} default categories`);
@@ -229,7 +265,20 @@ export class CategoriesService {
    * received at least one new category.
    */
   async backfillDefaultCategories(): Promise<number> {
-    const households = await this.householdModel.find().select('_id').exec();
+    // Only unstamped households: a stamp marks a fully-completed seed, after
+    // which re-seeding would resurrect any default the household renamed or
+    // deleted via the write API. Deliberate tradeoff: stamped households are
+    // frozen at the default set they seeded with — a future addition to
+    // DEFAULT_CATEGORY_GROUPS will NOT propagate to them and must ship with
+    // its own migration (e.g. a seed-version field) rather than relying on
+    // this backfill.
+    const households = await this.householdModel
+      .find({ defaultCategoriesSeededAt: { $exists: false } } as Record<
+        string,
+        unknown
+      >)
+      .select('_id')
+      .exec();
 
     let seeded = 0;
     let failed = 0;
@@ -256,5 +305,336 @@ export class CategoriesService {
       );
     }
     return seeded;
+  }
+
+  // --- household category management (write side, VEG-437) ------------------
+
+  /**
+   * Create a category in one of the household's groups. sortOrder defaults to
+   * the end of the target group. Duplicate (group, name) → 409 via the unique
+   * index — no racy pre-check.
+   */
+  async createCategory(
+    householdId: string,
+    dto: CreateCategoryDto,
+  ): Promise<CategoryDocument> {
+    const householdObjectId = new Types.ObjectId(householdId);
+    const groupObjectId = await this.assertGroupInHousehold(
+      householdObjectId,
+      dto.groupId,
+    );
+    const sortOrder =
+      dto.sortOrder ??
+      (await this.nextSortOrder(this.categoryModel, {
+        householdId: householdObjectId,
+        groupId: groupObjectId,
+      }));
+    try {
+      return await new this.categoryModel({
+        householdId: householdObjectId,
+        groupId: groupObjectId,
+        name: dto.name,
+        isIncome: dto.isIncome ?? false,
+        sortOrder,
+      }).save();
+    } catch (error: unknown) {
+      throw this.asConflictIfDuplicate(
+        error,
+        'A category with this name already exists in this group (possibly archived)',
+      );
+    }
+  }
+
+  /**
+   * Partial update: rename, move group, reorder, archive/un-archive. Foreign or
+   * missing category → 404 (indistinguishable, no existence leak); foreign
+   * target group → 400; name collision in the (new) group → 409.
+   */
+  async updateCategory(
+    householdId: string,
+    categoryId: string,
+    dto: UpdateCategoryDto,
+  ): Promise<CategoryDocument> {
+    const householdObjectId = new Types.ObjectId(householdId);
+    const category = await this.findOwnedCategory(
+      householdObjectId,
+      categoryId,
+    );
+    if (dto.groupId !== undefined) {
+      const groupObjectId = await this.assertGroupInHousehold(
+        householdObjectId,
+        dto.groupId,
+      );
+      category.groupId = groupObjectId as unknown as typeof category.groupId;
+    }
+    if (dto.name !== undefined) {
+      category.name = dto.name;
+    }
+    if (dto.sortOrder !== undefined) {
+      category.sortOrder = dto.sortOrder;
+    }
+    if (dto.isArchived !== undefined) {
+      category.isArchived = dto.isArchived;
+    }
+    try {
+      return await category.save();
+    } catch (error: unknown) {
+      throw this.asConflictIfDuplicate(
+        error,
+        'A category with this name already exists in this group (possibly archived)',
+      );
+    }
+  }
+
+  /**
+   * Delete a category, archiving instead when it is referenced by any
+   * transaction or budget row (hard-deleting would orphan ledger history and
+   * silently drop planned limits from the budget view). The outcome tells the
+   * client which happened. Idempotent for already-archived categories. The
+   * reference check and the delete are not atomic (no multi-doc transactions
+   * in this codebase): a transaction created in the window can end up with a
+   * dangling categoryId, which the budget view tolerates by dropping orphaned
+   * actuals.
+   */
+  async removeCategory(
+    householdId: string,
+    categoryId: string,
+  ): Promise<RemoveCategoryOutcomeDto> {
+    const householdObjectId = new Types.ObjectId(householdId);
+    const category = await this.findOwnedCategory(
+      householdObjectId,
+      categoryId,
+    );
+
+    // BudgetCategory carries no householdId; the globally-unique category id
+    // makes the unscoped filter exact.
+    const [transactionRef, budgetRef] = await Promise.all([
+      this.transactionModel
+        .exists({
+          householdId: householdObjectId,
+          categoryId: category._id,
+        } as Record<string, unknown>)
+        .exec(),
+      this.budgetCategoryModel
+        .exists({ categoryId: category._id } as Record<string, unknown>)
+        .exec(),
+    ]);
+
+    if (transactionRef || budgetRef) {
+      if (!category.isArchived) {
+        category.isArchived = true;
+        await category.save();
+      }
+      return { outcome: 'archived' };
+    }
+    await category.deleteOne();
+    return { outcome: 'deleted' };
+  }
+
+  /**
+   * Batch-set display order: each listed category gets sortOrder = its array
+   * index. Partial lists are allowed (ordering is meaningful within a group, so
+   * clients send one group's ids at a time); unlisted categories keep their
+   * sortOrder. Any id outside the household fails the whole batch before any
+   * write. No multi-document transaction (consistent with the codebase): the
+   * writes are idempotent, so a retried batch converges; a mid-batch failure is
+   * logged with context and rethrown. Returns the refreshed list.
+   */
+  async reorderCategories(
+    householdId: string,
+    categoryIds: string[],
+  ): Promise<CategoryDocument[]> {
+    const householdObjectId = new Types.ObjectId(householdId);
+    // Ownership check by count: the DTO enforces unique ids, so every id is
+    // household-owned (archived included) iff the scoped count matches. Avoids
+    // hydrating every category document just to build an id set.
+    const ownedCount = await this.categoryModel
+      .countDocuments({
+        householdId: householdObjectId,
+        _id: { $in: categoryIds.map((id) => new Types.ObjectId(id)) },
+      } as Record<string, unknown>)
+      .exec();
+    if (ownedCount !== categoryIds.length) {
+      throw new BadRequestException(
+        'categoryId does not reference a category in this household',
+      );
+    }
+
+    const operations = categoryIds.map((id, index) => ({
+      updateOne: {
+        filter: {
+          _id: new Types.ObjectId(id),
+          householdId: householdObjectId,
+        },
+        update: { $set: { sortOrder: index } },
+      },
+    })) as unknown as AnyBulkWriteOperation<CategoryDocument>[];
+    try {
+      await this.categoryModel.bulkWrite(operations);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { householdId, attempted: operations.length },
+        `Category reorder bulk write failed; sort order may be partially ` +
+          `applied: ${message}`,
+      );
+      throw error;
+    }
+    return this.listCategories(householdId, true);
+  }
+
+  /** Create a category group. Duplicate name in the household → 409. */
+  async createGroup(
+    householdId: string,
+    dto: CreateCategoryGroupDto,
+  ): Promise<CategoryGroupDocument> {
+    const householdObjectId = new Types.ObjectId(householdId);
+    const sortOrder =
+      dto.sortOrder ??
+      (await this.nextSortOrder(this.groupModel, {
+        householdId: householdObjectId,
+      }));
+    try {
+      return await new this.groupModel({
+        householdId: householdObjectId,
+        name: dto.name,
+        sortOrder,
+      }).save();
+    } catch (error: unknown) {
+      throw this.asConflictIfDuplicate(
+        error,
+        'A group with this name already exists in this household',
+      );
+    }
+  }
+
+  /** Rename and/or reorder a group. Missing/foreign → 404; name dup → 409. */
+  async updateGroup(
+    householdId: string,
+    groupId: string,
+    dto: UpdateCategoryGroupDto,
+  ): Promise<CategoryGroupDocument> {
+    const group = await this.findOwnedGroup(
+      new Types.ObjectId(householdId),
+      groupId,
+    );
+    if (dto.name !== undefined) {
+      group.name = dto.name;
+    }
+    if (dto.sortOrder !== undefined) {
+      group.sortOrder = dto.sortOrder;
+    }
+    try {
+      return await group.save();
+    } catch (error: unknown) {
+      throw this.asConflictIfDuplicate(
+        error,
+        'A group with this name already exists in this household',
+      );
+    }
+  }
+
+  /**
+   * Delete a group, blocked (409) while it still contains categories —
+   * archived ones included, since they still reference the group. Reparenting
+   * is the client's move: PATCH each category's groupId first.
+   */
+  async removeGroup(householdId: string, groupId: string): Promise<void> {
+    const householdObjectId = new Types.ObjectId(householdId);
+    const group = await this.findOwnedGroup(householdObjectId, groupId);
+    const occupied = await this.categoryModel
+      .exists({
+        householdId: householdObjectId,
+        groupId: group._id,
+      } as Record<string, unknown>)
+      .exec();
+    if (occupied) {
+      throw new ConflictException(
+        'Group still contains categories; move or delete them first',
+      );
+    }
+    await group.deleteOne();
+  }
+
+  // Resolve a client-supplied groupId to a group in the household, or 400.
+  // Foreign and nonexistent are indistinguishable — no existence leak.
+  private async assertGroupInHousehold(
+    householdObjectId: Types.ObjectId,
+    groupId: string,
+  ): Promise<Types.ObjectId> {
+    const groupObjectId = new Types.ObjectId(groupId);
+    const group = await this.groupModel
+      .findOne({
+        _id: groupObjectId,
+        householdId: householdObjectId,
+      } as Record<string, unknown>)
+      .exec();
+    if (!group) {
+      throw new BadRequestException(
+        'groupId does not reference a group in this household',
+      );
+    }
+    return groupObjectId;
+  }
+
+  // Household-scoped group lookup for the write paths → 404 when absent.
+  private async findOwnedGroup(
+    householdObjectId: Types.ObjectId,
+    groupId: string,
+  ): Promise<CategoryGroupDocument> {
+    const group = await this.groupModel
+      .findOne({
+        _id: new Types.ObjectId(groupId),
+        householdId: householdObjectId,
+      } as Record<string, unknown>)
+      .exec();
+    if (!group) {
+      throw new NotFoundException('Category group not found');
+    }
+    return group;
+  }
+
+  // Household-scoped category lookup for the write paths → 404 when absent.
+  private async findOwnedCategory(
+    householdObjectId: Types.ObjectId,
+    categoryId: string,
+  ): Promise<CategoryDocument> {
+    const category = await this.categoryModel
+      .findOne({
+        _id: new Types.ObjectId(categoryId),
+        householdId: householdObjectId,
+      } as Record<string, unknown>)
+      .exec();
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+    return category;
+  }
+
+  // Append-to-end default: one past the highest sortOrder matching the filter
+  // (0 for the first document). Ties under concurrency are tolerated — display
+  // order breaks them arbitrarily and reorder is the repair.
+  private async nextSortOrder<T extends { sortOrder: number }>(
+    model: Model<T>,
+    filter: Record<string, unknown>,
+  ): Promise<number> {
+    const top = await model.findOne(filter).sort({ sortOrder: -1 }).exec();
+    return top ? top.sortOrder + 1 : 0;
+  }
+
+  // Map a duplicate-name unique-index violation to a client-facing 409. Keyed
+  // on the violated index actually covering `name` (when the driver reports
+  // one), so a future non-name unique index isn't mislabeled as a name
+  // conflict. Anything else is returned unchanged when it's an Error, else
+  // wrapped in one. Returns rather than throws for `throw`-site clarity.
+  private asConflictIfDuplicate(error: unknown, message: string): Error {
+    if (isDuplicateKeyError(error)) {
+      const keyPattern = (error as { keyPattern?: Record<string, unknown> })
+        .keyPattern;
+      if (!keyPattern || 'name' in keyPattern) {
+        return new ConflictException(message);
+      }
+    }
+    return error instanceof Error ? error : new Error(String(error));
   }
 }

@@ -4,9 +4,9 @@ import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
 export type CategoryGroupDocument = HydratedDocument<CategoryGroup>;
 
 // A named grouping of categories (e.g. "Housing", "Food") for display ordering.
-// Household-scoped like every other budgeting entity. Full management (rename,
-// reorder, add/remove) lands with the Phase 3 budgeting epic; Phase 2 only
-// seeds a sensible default set and reads them.
+// Household-scoped like every other budgeting entity. A default set is seeded
+// at household creation; households manage their own groups via the categories
+// API (create/rename/reorder/delete-when-empty).
 @Schema({ timestamps: true })
 export class CategoryGroup {
   @Prop({

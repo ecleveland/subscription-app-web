@@ -261,7 +261,16 @@ export class TransactionsService {
       categoryId: dto.categoryId ?? before.categoryId,
       transferAccountId: dto.transferAccountId ?? before.transferAccountId,
     });
-    await this.validateReferences(householdId, merged);
+    // A category change is "new activity" for the archived-category rule:
+    // corrections to a transaction already on an archived category stay
+    // allowed, but re-pointing onto one is blocked like a create.
+    await this.validateReferences(
+      householdId,
+      merged,
+      false,
+      merged.categoryId !== undefined &&
+        merged.categoryId !== before.categoryId,
+    );
 
     existing.type = merged.type;
     existing.accountId = new Types.ObjectId(
@@ -533,6 +542,9 @@ export class TransactionsService {
     householdId: string,
     t: ResolvedTransaction,
     forCreate = false,
+    // Whether t.categoryId represents NEW activity for the archived-category
+    // rule: always on create; on update only when the category is changing.
+    categoryIsNew = forCreate,
   ): Promise<void> {
     const account = await this.assertAccountInHousehold(
       householdId,
@@ -577,6 +589,14 @@ export class TransactionsService {
       if (!category) {
         throw new BadRequestException(
           'categoryId does not reference a category in this household',
+        );
+      }
+      // Mirror the archived-account rule: no new activity against an archived
+      // category. Corrections to a transaction that already sits on an
+      // archived category stay allowed; creating or re-pointing does not.
+      if (categoryIsNew && category.isArchived) {
+        throw new BadRequestException(
+          'Cannot record a transaction against an archived category',
         );
       }
     }

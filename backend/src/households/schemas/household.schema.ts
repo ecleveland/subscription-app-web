@@ -18,6 +18,14 @@ export class Household {
 
   @Prop({ required: true, default: 'USD', trim: true, uppercase: true })
   currency: string;
+
+  // Set once the default category/group set has fully seeded. The startup
+  // backfill only enumerates households missing this stamp, so user edits to
+  // defaults (rename, hard-delete) are never resurrected by the upsert-by-name
+  // seeder. A crash mid-seed leaves it unset → the household is repaired on the
+  // next backfill.
+  @Prop()
+  defaultCategoriesSeededAt?: Date;
 }
 
 export const HouseholdSchema = SchemaFactory.createForClass(Household);
