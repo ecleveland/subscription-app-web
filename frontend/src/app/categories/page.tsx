@@ -48,6 +48,8 @@ export default function CategoriesPage() {
     ]);
     setGroups(gs);
     setCategories(cs);
+    // Fresh data on screen: drop any load-error banner from an earlier fetch.
+    setError(null);
   }, []);
 
   const load = useCallback(async () => {
@@ -93,7 +95,8 @@ export default function CategoriesPage() {
   async function refreshOrWarn() {
     try {
       await refresh();
-    } catch {
+    } catch (err) {
+      console.error('Category refresh after save failed', err);
       showErrorToast('Saved, but the category list may be out of date.');
     }
   }
@@ -153,13 +156,14 @@ export default function CategoriesPage() {
   }
 
   // Failure path for reorders: the error toast has already fired; pull the
-  // server's actual order back so the UI doesn't show an order that was never
-  // persisted. A refetch failure here changes nothing the toast didn't say.
+  // server's actual order back — a group move's per-group PATCHes can
+  // partially succeed, leaving the server ahead of the UI's pre-move order.
   async function resyncAfterError() {
     try {
       await refresh();
-    } catch {
-      // Ignored: the reorder toast already flagged the failure.
+    } catch (err) {
+      // Only logged: the reorder toast already flagged the failure.
+      console.error('Resync after failed reorder also failed', err);
     }
   }
 
@@ -202,9 +206,16 @@ export default function CategoriesPage() {
     [order[from], order[to]] = [order[to], order[from]];
     setReordering(true);
     try {
-      await Promise.all(
+      // allSettled, not all: a rejection must not leave sibling PATCHes in
+      // flight, or the resync below could read (and render) an order a
+      // straggler write then overwrites.
+      const results = await Promise.allSettled(
         order.map((g, i) => updateCategoryGroup(g._id, { sortOrder: i })),
       );
+      const failed = results.find(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+      if (failed) throw failed.reason;
       await refresh();
     } catch (err) {
       showErrorToast(err instanceof Error ? err.message : 'Failed to reorder');

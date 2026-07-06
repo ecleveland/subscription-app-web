@@ -184,6 +184,33 @@ describe('TransactionsPage', () => {
     );
   });
 
+  it('does not offer archived categories when editing an active-category transaction', async () => {
+    const archivedCategory: BudgetCategory = {
+      _id: 'c2',
+      householdId: 'h',
+      groupId: 'g',
+      name: 'Old Hobby',
+      isIncome: false,
+      sortOrder: 1,
+      isArchived: true,
+      createdAt: '',
+      updatedAt: '',
+    };
+    vi.mocked(listCategories).mockResolvedValue([
+      ...categories,
+      archivedCategory,
+    ]);
+    mockList([txn]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText('-$42.00');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const stub = screen.getByText(/TransactionFormStub:/);
+    expect(stub).toHaveTextContent('Groceries');
+    expect(stub).not.toHaveTextContent('Old Hobby');
+  });
+
   it('toasts when categories fail to load', async () => {
     mockList([]);
     vi.mocked(listCategories).mockRejectedValue(new Error('no cats'));

@@ -61,8 +61,9 @@ export default function TransactionsPage() {
     [categories],
   );
   // When editing a transaction whose category has since been archived, keep
-  // that one category selectable so the controlled select doesn't render
-  // blank and silently drop the assignment (the backend allows keeping it).
+  // that one category selectable so the select doesn't render blank and
+  // misrepresent the saved assignment (the backend allows keeping it — only
+  // re-pointing a transaction at an archived category is rejected).
   const formCategories = useMemo(() => {
     if (!editing?.categoryId) return activeCategories;
     const current = categories.find((c) => c._id === editing.categoryId);

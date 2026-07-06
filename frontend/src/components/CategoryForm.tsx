@@ -25,8 +25,7 @@ export default function CategoryForm({
   const [groupId, setGroupId] = useState(
     category?.groupId ?? defaultGroupId ?? groups[0]?._id ?? '',
   );
-  // Income flag is create-only: the update endpoint rejects isIncome because
-  // flipping it would reclassify historical actuals.
+  // Income flag is create-only — see updateCategory in lib/categories.ts.
   const [isIncome, setIsIncome] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

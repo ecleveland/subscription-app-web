@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 vi.mock('@/lib/categories', () => ({
   listCategories: vi.fn(),
   listCategoryGroups: vi.fn(),
+  createCategory: vi.fn(),
   createCategoryGroup: vi.fn(),
   updateCategoryGroup: vi.fn(),
   updateCategory: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('@/lib/toast', () => ({
 import {
   listCategories,
   listCategoryGroups,
+  createCategory,
   createCategoryGroup,
   updateCategoryGroup,
   updateCategory,
@@ -337,7 +339,81 @@ describe('CategoriesPage', () => {
     ).toBeDisabled();
   });
 
-  it('swaps sortOrder values to reorder groups', async () => {
+  it('creates a category through the form and refreshes the list', async () => {
+    vi.mocked(createCategory).mockResolvedValue(
+      category({ _id: 'c9', name: 'Coffee' }),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+
+    await user.click(
+      within(foodSection()).getByRole('button', { name: '+ Add category' }),
+    );
+    await user.type(screen.getByLabelText('Name'), 'Coffee');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(createCategory).toHaveBeenCalledWith({
+        name: 'Coffee',
+        groupId: 'g1',
+        isIncome: false,
+      }),
+    );
+    // The inline form closes and the list refetches.
+    expect(
+      screen.queryByRole('heading', { name: 'New category' }),
+    ).not.toBeInTheDocument();
+    expect(listCategories).toHaveBeenCalledTimes(2);
+  });
+
+  it('warns when the refresh after a save fails', async () => {
+    vi.mocked(createCategoryGroup).mockResolvedValue(
+      group({ _id: 'g3', name: 'Pets', sortOrder: 2 }),
+    );
+    await renderPage();
+    vi.mocked(listCategoryGroups).mockRejectedValue(new Error('down'));
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: '+ Add group' }));
+    await user.type(screen.getByLabelText('New group name'), 'Pets');
+    await user.click(screen.getByRole('button', { name: 'Add', exact: true }));
+
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith(
+        'Saved, but the category list may be out of date.',
+      ),
+    );
+  });
+
+  it('clears the load-error banner once a refresh succeeds', async () => {
+    vi.mocked(listCategories).mockRejectedValueOnce(
+      new Error('Failed to load categories'),
+    );
+    vi.mocked(createCategoryGroup).mockResolvedValue(
+      group({ _id: 'g3', name: 'Pets', sortOrder: 2 }),
+    );
+    render(<CategoriesPage />);
+    expect(
+      await screen.findByText(/Failed to load categories/),
+    ).toBeInTheDocument();
+
+    // A later successful mutation refresh replaces the stale banner.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '+ Add group' }));
+    await user.type(screen.getByLabelText('New group name'), 'Pets');
+    await user.click(screen.getByRole('button', { name: 'Add', exact: true }));
+
+    await screen.findByRole('region', { name: 'Food' });
+    expect(
+      screen.queryByText(/Failed to load categories/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reindexes all groups by display order to reorder them', async () => {
+    vi.mocked(listCategoryGroups).mockResolvedValue([
+      ...groups,
+      group({ _id: 'g3', name: 'Savings', sortOrder: 2 }),
+    ]);
     vi.mocked(updateCategoryGroup).mockResolvedValue(groups[0]);
     await renderPage();
     const user = userEvent.setup();
@@ -346,10 +422,30 @@ describe('CategoriesPage', () => {
       screen.getByRole('button', { name: 'Move group Food down' }),
     );
 
-    await waitFor(() => expect(updateCategoryGroup).toHaveBeenCalledTimes(2));
-    expect(updateCategoryGroup).toHaveBeenCalledWith('g1', { sortOrder: 1 });
+    // Display order was [Food, Income, Savings]; the move swaps the pair and
+    // persists every group's display index (self-healing duplicates), not
+    // just the two swapped values.
+    await waitFor(() => expect(updateCategoryGroup).toHaveBeenCalledTimes(3));
     expect(updateCategoryGroup).toHaveBeenCalledWith('g2', { sortOrder: 0 });
-    // Refreshes after the swap.
+    expect(updateCategoryGroup).toHaveBeenCalledWith('g1', { sortOrder: 1 });
+    expect(updateCategoryGroup).toHaveBeenCalledWith('g3', { sortOrder: 2 });
+    // Refreshes after the reindex.
+    expect(listCategoryGroups).toHaveBeenCalledTimes(2);
+  });
+
+  it('toasts and refetches when a group reorder partially fails', async () => {
+    vi.mocked(updateCategoryGroup)
+      .mockResolvedValueOnce(groups[0])
+      .mockRejectedValueOnce(new Error('flaky'));
+    await renderPage();
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Move group Food down' }),
+    );
+
+    await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('flaky'));
+    // Initial load + resync against whatever the server actually persisted.
     expect(listCategoryGroups).toHaveBeenCalledTimes(2);
   });
 
