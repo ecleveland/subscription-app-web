@@ -146,6 +146,17 @@ export interface Transaction {
   updatedAt: string;
 }
 
+// A named grouping of budgeting categories (e.g. "Housing", "Food") used for
+// display ordering on the category management page.
+export interface CategoryGroup {
+  _id: string;
+  householdId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // The seeded budgeting category the ledger references (distinct from the
 // subscription `Category` string union above).
 export interface BudgetCategory {

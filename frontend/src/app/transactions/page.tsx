@@ -54,9 +54,25 @@ export default function TransactionsPage() {
     () => new Map(categories.map((c) => [c._id, c.name])),
     [categories],
   );
+  // Archived categories keep labeling their historical rows (the name map
+  // above uses the full list) but are not offered for new activity.
+  const activeCategories = useMemo(
+    () => categories.filter((c) => !c.isArchived),
+    [categories],
+  );
+  // When editing a transaction whose category has since been archived, keep
+  // that one category selectable so the controlled select doesn't render
+  // blank and silently drop the assignment (the backend allows keeping it).
+  const formCategories = useMemo(() => {
+    if (!editing?.categoryId) return activeCategories;
+    const current = categories.find((c) => c._id === editing.categoryId);
+    return current?.isArchived
+      ? [...activeCategories, current]
+      : activeCategories;
+  }, [activeCategories, categories, editing]);
 
   useEffect(() => {
-    listCategories()
+    listCategories(true)
       .then(setCategories)
       .catch((err) =>
         showErrorToast(
@@ -169,7 +185,7 @@ export default function TransactionsPage() {
           <TransactionForm
             transaction={editing ?? undefined}
             accounts={accounts}
-            categories={categories}
+            categories={formCategories}
             onSaved={afterMutation}
             onCancel={() => {
               setShowCreate(false);
@@ -217,7 +233,7 @@ export default function TransactionsPage() {
           className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-sm"
         >
           <option value="">All categories</option>
-          {categories.map((c) => (
+          {activeCategories.map((c) => (
             <option key={c._id} value={c._id}>
               {c.name}
             </option>
