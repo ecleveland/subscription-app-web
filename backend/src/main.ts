@@ -3,6 +3,8 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { getConnectionToken } from '@nestjs/mongoose';
+import type { Connection } from 'mongoose';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -70,6 +72,29 @@ async function bootstrap() {
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('api/docs', app, document);
   }
+
+  // Build every schema index before running migrations or accepting traffic.
+  // Mongoose's default background autoIndex has two failure modes this closes:
+  // a write that lands before its unique index exists succeeds instead of
+  // conflicting, and a build that fails (e.g. pre-existing data violating a
+  // unique constraint) dies silently, leaving the invariant unenforced with no
+  // operator signal. Failures are logged loudly per model but don't abort the
+  // boot: the app can serve traffic, and the log says what data to fix.
+  const connection = app.get<Connection>(getConnectionToken());
+  const indexLogger = new Logger('Indexes');
+  await Promise.all(
+    Object.values(connection.models).map(async (model) => {
+      try {
+        await model.init();
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        indexLogger.error(
+          `Index build failed for ${model.modelName} — a unique constraint ` +
+            `may be unenforced until the conflicting data is fixed: ${message}`,
+        );
+      }
+    }),
+  );
 
   // Idempotent startup tasks, run on every boot of every replica. seedAdmin
   // already swallows its own benign concurrent-boot duplicate; this outer guard

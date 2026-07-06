@@ -158,6 +158,14 @@ export class HouseholdsService {
         'code' in error &&
         (error as { code: number }).code === 11000
       ) {
+        // Two unique indexes can fire here: (householdId, userId) — already a
+        // member of THIS household — and the userId-only partial index, which
+        // means the user's active membership lives in ANOTHER household.
+        const keyPattern =
+          (error as { keyPattern?: Record<string, number> }).keyPattern ?? {};
+        if (keyPattern.userId === 1 && !('householdId' in keyPattern)) {
+          throw new ConflictException('User already has an active household');
+        }
         throw new ConflictException(
           'User is already a member of this household',
         );

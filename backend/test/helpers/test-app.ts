@@ -5,6 +5,8 @@ import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { getConnectionToken } from '@nestjs/mongoose';
+import type { Connection } from 'mongoose';
 import { AppModule } from '../../src/app.module';
 import { startInMemoryMongo } from './mongo-server';
 
@@ -110,6 +112,23 @@ export async function createTestApp(
   SwaggerModule.setup('api/docs', app, document);
 
   await app.init();
+  // Unique-index builds race the first requests on a fresh database: a
+  // duplicate-key insert that lands before its index exists succeeds instead
+  // of conflicting (409 tests then flake). Model.init() resolves when each
+  // model's autoIndex build completes. On failure, tear everything down —
+  // leaking the app/mongod here turns a clear index error into a suite hang.
+  try {
+    const connection = app.get<Connection>(getConnectionToken());
+    await Promise.all(
+      Object.values(connection.models).map((model) => model.init()),
+    );
+  } catch (error) {
+    await app.close();
+    if (mongod) {
+      await mongod.stop();
+    }
+    throw error;
+  }
   if (mongod) {
     mongodInstances.set(app, mongod);
   }

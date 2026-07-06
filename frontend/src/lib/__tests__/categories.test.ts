@@ -9,6 +9,7 @@ import {
   listCategoryGroups,
   createCategoryGroup,
   updateCategoryGroup,
+  reorderCategoryGroups,
 } from '../categories';
 
 describe('categories api wrappers', () => {
@@ -60,6 +61,14 @@ describe('categories api wrappers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/categories/groups', {
       method: 'POST',
       body: JSON.stringify({ name: 'Pets' }),
+    });
+  });
+
+  it('reorderCategoryGroups POSTs the id list', async () => {
+    await reorderCategoryGroups(['g2', 'g1']);
+    expect(apiFetch).toHaveBeenCalledWith('/categories/groups/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ groupIds: ['g2', 'g1'] }),
     });
   });
 

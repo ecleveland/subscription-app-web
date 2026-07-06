@@ -9,6 +9,7 @@ vi.mock('@/lib/categories', () => ({
   updateCategoryGroup: vi.fn(),
   updateCategory: vi.fn(),
   reorderCategories: vi.fn(),
+  reorderCategoryGroups: vi.fn(),
 }));
 vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
@@ -25,6 +26,7 @@ import {
   updateCategoryGroup,
   updateCategory,
   reorderCategories,
+  reorderCategoryGroups,
 } from '@/lib/categories';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import CategoriesPage from '@/app/categories/page';
@@ -409,12 +411,16 @@ describe('CategoriesPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('reindexes all groups by display order to reorder them', async () => {
+  it('reorders groups through the bulk endpoint and re-renders from the response', async () => {
     vi.mocked(listCategoryGroups).mockResolvedValue([
       ...groups,
       group({ _id: 'g3', name: 'Savings', sortOrder: 2 }),
     ]);
-    vi.mocked(updateCategoryGroup).mockResolvedValue(groups[0]);
+    vi.mocked(reorderCategoryGroups).mockResolvedValue([
+      group({ _id: 'g2', name: 'Income', sortOrder: 0 }),
+      group({ _id: 'g1', name: 'Food', sortOrder: 1 }),
+      group({ _id: 'g3', name: 'Savings', sortOrder: 2 }),
+    ]);
     await renderPage();
     const user = userEvent.setup();
 
@@ -422,34 +428,17 @@ describe('CategoriesPage', () => {
       screen.getByRole('button', { name: 'Move group Food down' }),
     );
 
-    // Display order was [Food, Income, Savings]; the move swaps the pair and
-    // persists every group's display index (self-healing duplicates), not
-    // just the two swapped values.
-    await waitFor(() => expect(updateCategoryGroup).toHaveBeenCalledTimes(3));
-    expect(updateCategoryGroup).toHaveBeenCalledWith('g2', { sortOrder: 0 });
-    expect(updateCategoryGroup).toHaveBeenCalledWith('g1', { sortOrder: 1 });
-    expect(updateCategoryGroup).toHaveBeenCalledWith('g3', { sortOrder: 2 });
-    // Refreshes after the reindex.
-    expect(listCategoryGroups).toHaveBeenCalledTimes(2);
-  });
-
-  it('warns (not "failed") when the refresh after a successful group move fails', async () => {
-    vi.mocked(updateCategoryGroup).mockResolvedValue(groups[0]);
-    await renderPage();
-    // Every PATCH succeeds; only the follow-up refetch dies.
-    vi.mocked(listCategoryGroups).mockRejectedValue(new Error('blip'));
-    const user = userEvent.setup();
-
-    await user.click(
-      screen.getByRole('button', { name: 'Move group Food down' }),
-    );
-
+    // Display order was [Food, Income, Savings]; the move sends the full id
+    // list with the pair swapped — one request.
     await waitFor(() =>
-      expect(showErrorToast).toHaveBeenCalledWith(
-        'Saved, but the category list may be out of date.',
-      ),
+      expect(reorderCategoryGroups).toHaveBeenCalledWith(['g2', 'g1', 'g3']),
     );
-    expect(showErrorToast).not.toHaveBeenCalledWith('blip');
+    // The response is the refreshed list: no per-group PATCHes, no extra GET.
+    const sections = screen.getAllByRole('region');
+    expect(sections[0]).toHaveAccessibleName('Income');
+    expect(sections[1]).toHaveAccessibleName('Food');
+    expect(updateCategoryGroup).not.toHaveBeenCalled();
+    expect(listCategoryGroups).toHaveBeenCalledTimes(1);
   });
 
   it('discards a stale reorder response when another mutation lands first', async () => {
@@ -496,10 +485,55 @@ describe('CategoriesPage', () => {
     expect(within(foodSection()).getByText('Old Hobby')).toBeInTheDocument();
   });
 
-  it('toasts and refetches when a group reorder partially fails', async () => {
-    vi.mocked(updateCategoryGroup)
-      .mockResolvedValueOnce(groups[0])
-      .mockRejectedValueOnce(new Error('flaky'));
+  it('discards a stale group-reorder response when another mutation lands first', async () => {
+    let resolveReorder!: (value: CategoryGroup[]) => void;
+    vi.mocked(reorderCategoryGroups).mockReturnValue(
+      new Promise((resolve) => {
+        resolveReorder = resolve;
+      }),
+    );
+    vi.mocked(updateCategoryGroup).mockResolvedValue(
+      group({ _id: 'g1', name: 'Home', sortOrder: 0 }),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+
+    // Group reorder in flight (server snapshots groups named Food/Income)…
+    await user.click(
+      screen.getByRole('button', { name: 'Move group Food down' }),
+    );
+
+    // …meanwhile the user renames Food to Home, whose refresh applies it.
+    vi.mocked(listCategoryGroups).mockResolvedValue([
+      group({ _id: 'g2', name: 'Income', sortOrder: 1 }),
+      group({ _id: 'g1', name: 'Home', sortOrder: 0 }),
+    ]);
+    await user.click(
+      within(screen.getByRole('region', { name: 'Food' })).getByRole(
+        'button',
+        { name: 'Rename' },
+      ),
+    );
+    await user.clear(screen.getByLabelText('Group name'));
+    await user.type(screen.getByLabelText('Group name'), 'Home');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('region', { name: 'Home' });
+
+    // The stale reorder snapshot must not resurrect the old name.
+    resolveReorder(groups);
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Move group Home down' }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByRole('region', { name: 'Home' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Food' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('toasts and refetches when a group reorder fails', async () => {
+    vi.mocked(reorderCategoryGroups).mockRejectedValue(new Error('flaky'));
     await renderPage();
     const user = userEvent.setup();
 
@@ -508,7 +542,8 @@ describe('CategoriesPage', () => {
     );
 
     await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('flaky'));
-    // Initial load + resync against whatever the server actually persisted.
+    // Initial load + resync: a failed bulkWrite can partially apply, so pull
+    // whatever the server actually persisted.
     expect(listCategoryGroups).toHaveBeenCalledTimes(2);
   });
 

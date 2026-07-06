@@ -1,7 +1,15 @@
 import { INestApplication } from '@nestjs/common';
+import { getModelToken } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
+import {
+  HouseholdMember,
+  HouseholdMemberDocument,
+  HouseholdRole,
+  MembershipStatus,
+} from '../src/households/schemas/household-member.schema';
 
 /**
  * Register a user (each gets their own personal household) and return a Bearer
@@ -51,6 +59,45 @@ describe('Households (e2e)', () => {
     const inviteUrl = res.body.inviteUrl as string;
     return new URL(inviteUrl).searchParams.get('token') as string;
   }
+
+  describe('one-active-household-per-user index', () => {
+    // Regression for the userId_active_unique index: its auto-generated name
+    // used to collide with the plain userId index, so it was silently never
+    // created and the invariant went unenforced.
+    it('rejects a second ACTIVE membership for the same user at the index level', async () => {
+      const memberModel = app.get<Model<HouseholdMemberDocument>>(
+        getModelToken(HouseholdMember.name),
+      );
+      const userId = new Types.ObjectId();
+      const membership = {
+        userId,
+        role: HouseholdRole.ADULT,
+        status: MembershipStatus.ACTIVE,
+        joinedAt: new Date(),
+      };
+
+      await memberModel.create({
+        ...membership,
+        householdId: new Types.ObjectId(),
+      });
+      await expect(
+        memberModel.create({
+          ...membership,
+          householdId: new Types.ObjectId(),
+        }),
+      ).rejects.toMatchObject({ code: 11000 });
+
+      // INVITED rows stay outside the partial constraint.
+      await expect(
+        memberModel.create({
+          userId,
+          householdId: new Types.ObjectId(),
+          role: HouseholdRole.ADULT,
+          status: MembershipStatus.INVITED,
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
 
   describe('GET /households/me', () => {
     it('returns the active household and the owner member', async () => {

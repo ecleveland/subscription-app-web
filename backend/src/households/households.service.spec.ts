@@ -37,8 +37,13 @@ function createChainable(resolvedValue: any = null) {
   return chain;
 }
 
-function duplicateKeyError(): Error {
-  return Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+function duplicateKeyError(
+  keyPattern: Record<string, number> = { householdId: 1, userId: 1 },
+): Error {
+  return Object.assign(new Error('E11000 duplicate key'), {
+    code: 11000,
+    keyPattern,
+  });
 }
 
 function ctx(role: HouseholdRole, householdId: string = HOUSEHOLD_ID) {
@@ -276,7 +281,21 @@ describe('HouseholdsService', () => {
           userId: OTHER_USER_ID,
           role: HouseholdRole.ADULT,
         }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).rejects.toThrow('User is already a member of this household');
+    });
+
+    it("names the right conflict when the user's active membership is in another household", async () => {
+      // The userId-only partial unique index ("one active household per user")
+      // fired — not the (householdId, userId) same-household index.
+      memberSave.mockRejectedValueOnce(duplicateKeyError({ userId: 1 }));
+
+      await expect(
+        service.addMember({
+          householdId: HOUSEHOLD_ID,
+          userId: OTHER_USER_ID,
+          role: HouseholdRole.ADULT,
+        }),
+      ).rejects.toThrow('User already has an active household');
     });
 
     it('rethrows non-duplicate errors', async () => {
