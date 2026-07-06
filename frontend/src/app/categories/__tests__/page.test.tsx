@@ -560,4 +560,24 @@ describe('CategoriesPage', () => {
     // Initial load + resync refetch.
     expect(listCategories).toHaveBeenCalledTimes(2);
   });
+
+  it('asks for a reload when both the reorder and the resync fail', async () => {
+    vi.mocked(reorderCategories).mockRejectedValue(new Error('nope'));
+    await renderPage();
+    // The resync refetch dies too — the on-screen order can no longer be
+    // trusted (the failed bulk write may have partially applied).
+    vi.mocked(listCategories).mockRejectedValue(new Error('still down'));
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Move Groceries down' }),
+    );
+
+    await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('nope'));
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith(
+        'Couldn’t confirm the current order — reload the page.',
+      ),
+    );
+  });
 });

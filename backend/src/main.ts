@@ -9,6 +9,7 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { buildAllIndexes } from './database/build-all-indexes';
 import { UsersService } from './users/users.service';
 import { HouseholdsMigrationService } from './households/households-migration.service';
 import { CategoriesService } from './categories/categories.service';
@@ -73,28 +74,20 @@ async function bootstrap() {
     SwaggerModule.setup('api/docs', app, document);
   }
 
-  // Build every schema index before running migrations or accepting traffic.
-  // Mongoose's default background autoIndex has two failure modes this closes:
-  // a write that lands before its unique index exists succeeds instead of
-  // conflicting, and a build that fails (e.g. pre-existing data violating a
-  // unique constraint) dies silently, leaving the invariant unenforced with no
-  // operator signal. Failures are logged loudly per model but don't abort the
-  // boot: the app can serve traffic, and the log says what data to fix.
-  const connection = app.get<Connection>(getConnectionToken());
-  const indexLogger = new Logger('Indexes');
-  await Promise.all(
-    Object.values(connection.models).map(async (model) => {
-      try {
-        await model.init();
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        indexLogger.error(
-          `Index build failed for ${model.modelName} — a unique constraint ` +
-            `may be unenforced until the conflicting data is fixed: ${message}`,
-        );
-      }
-    }),
-  );
+  // Build every schema index before running migrations or accepting traffic
+  // (see buildAllIndexes for the background-autoIndex failure modes this
+  // closes). A failed build is FATAL: serving writes without a uniqueness
+  // invariant silently corrupts data that only gets harder to fix (e.g. a
+  // second ACTIVE membership per user disables addMember's 409 entirely),
+  // whereas refusing to boot surfaces the named model in the deploy log.
+  try {
+    await buildAllIndexes(app.get<Connection>(getConnectionToken()));
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? (error.stack ?? error.message) : String(error);
+    new Logger('Indexes').error(`Aborting startup: ${message}`);
+    throw error;
+  }
 
   // Idempotent startup tasks, run on every boot of every replica. seedAdmin
   // already swallows its own benign concurrent-boot duplicate; this outer guard

@@ -458,7 +458,8 @@ export class CategoriesService {
    * Shared reorder write for categories and groups: validates every id is
    * household-owned (by count — the DTOs enforce unique ids, so a matching
    * scoped count proves ownership without hydrating documents; archived rows
-   * included), then bulk-writes sortOrder = array index with household-scoped
+   * included for models that have them), then bulk-writes sortOrder = array
+   * index with household-scoped
    * filters. No multi-document transaction (consistent with the codebase):
    * the writes are idempotent, so a retried batch converges; a mid-batch
    * failure is logged with context and rethrown.

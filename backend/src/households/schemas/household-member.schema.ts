@@ -60,8 +60,8 @@ HouseholdMemberSchema.index({ householdId: 1, userId: 1 }, { unique: true });
 // Partial so that invited/inactive rows don't count toward the constraint.
 // Explicitly named: the auto-generated name (userId_1) collides with the
 // plain index from the @Prop({ index: true }) on userId — same name,
-// different spec — and Mongo then rejects (or autoIndex silently skips)
-// creating this one, leaving the invariant unenforced.
+// different spec — and Mongo rejects creating this one (an error background
+// autoIndex swallows silently), leaving the invariant unenforced.
 HouseholdMemberSchema.index(
   { userId: 1 },
   {

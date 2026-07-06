@@ -543,6 +543,31 @@ describe('Categories (e2e)', () => {
 
       expect(await groupOrder()).toEqual(before);
     });
+
+    it('leaves unlisted groups untouched by a partial reorder', async () => {
+      const res = await auth(
+        request(app.getHttpServer()).get('/api/categories/groups'),
+      ).expect(200);
+      const third = (
+        res.body as Array<{ _id: string; sortOrder: number }>
+      ).find((g) => g._id === ids[2])!;
+
+      await auth(
+        request(app.getHttpServer()).post('/api/categories/groups/reorder'),
+      )
+        .send({ groupIds: [ids[1], ids[0]] })
+        .expect(200);
+
+      const after = await auth(
+        request(app.getHttpServer()).get('/api/categories/groups'),
+      ).expect(200);
+      const thirdAfter = (
+        after.body as Array<{ _id: string; sortOrder: number }>
+      ).find((g) => g._id === ids[2])!;
+      // The unlisted group keeps its exact sortOrder — the partial batch only
+      // rewrites the listed ids.
+      expect(thirdAfter.sortOrder).toBe(third.sortOrder);
+    });
   });
 
   describe('category groups (write)', () => {

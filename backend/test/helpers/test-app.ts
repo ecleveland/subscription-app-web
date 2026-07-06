@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import { getConnectionToken } from '@nestjs/mongoose';
 import type { Connection } from 'mongoose';
 import { AppModule } from '../../src/app.module';
+import { buildAllIndexes } from '../../src/database/build-all-indexes';
 import { startInMemoryMongo } from './mongo-server';
 
 // Per-app fallback servers, only used when E2E_MONGO_URI is absent (see below).
@@ -114,18 +115,15 @@ export async function createTestApp(
   await app.init();
   // Unique-index builds race the first requests on a fresh database: a
   // duplicate-key insert that lands before its index exists succeeds instead
-  // of conflicting (409 tests then flake). Model.init() resolves when each
-  // model's autoIndex build completes. On failure, tear everything down —
+  // of conflicting (409 tests then flake). On failure, tear everything down —
   // leaking the app/mongod here turns a clear index error into a suite hang.
+  // Cleanup errors are swallowed so they can't mask the root cause.
   try {
-    const connection = app.get<Connection>(getConnectionToken());
-    await Promise.all(
-      Object.values(connection.models).map((model) => model.init()),
-    );
+    await buildAllIndexes(app.get<Connection>(getConnectionToken()));
   } catch (error) {
-    await app.close();
+    await app.close().catch(() => undefined);
     if (mongod) {
-      await mongod.stop();
+      await mongod.stop().catch(() => undefined);
     }
     throw error;
   }

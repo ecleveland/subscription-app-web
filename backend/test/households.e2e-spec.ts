@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
+import { HouseholdsService } from '../src/households/households.service';
 import {
   HouseholdMember,
   HouseholdMemberDocument,
@@ -96,6 +97,25 @@ describe('Households (e2e)', () => {
           status: MembershipStatus.INVITED,
         }),
       ).resolves.toBeDefined();
+    });
+
+    it('routes the real duplicate error through addMember with the right 409 message', async () => {
+      // Not a hand-crafted error shape: a registered user already holds an
+      // ACTIVE membership, so this insert trips the real index and proves the
+      // driver's keyPattern matches what addMember's branching expects.
+      const { token } = await register(app, 'dupactive');
+      const me = await request(app.getHttpServer())
+        .get('/api/users/me')
+        .set(auth(token))
+        .expect(200);
+
+      await expect(
+        app.get(HouseholdsService).addMember({
+          householdId: new Types.ObjectId().toString(),
+          userId: me.body._id as string,
+          role: HouseholdRole.ADULT,
+        }),
+      ).rejects.toThrow('User already has an active household');
     });
   });
 

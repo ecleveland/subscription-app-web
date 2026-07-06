@@ -298,6 +298,27 @@ describe('HouseholdsService', () => {
       ).rejects.toThrow('User already has an active household');
     });
 
+    it.each([
+      ['an unrecognized keyPattern', duplicateKeyError({ email: 1 })],
+      [
+        'no keyPattern at all',
+        Object.assign(new Error('E11000 duplicate key'), { code: 11000 }),
+      ],
+    ])(
+      'falls back to a generic conflict for %s instead of guessing a specific one',
+      async (_label, error) => {
+        memberSave.mockRejectedValueOnce(error);
+
+        await expect(
+          service.addMember({
+            householdId: HOUSEHOLD_ID,
+            userId: OTHER_USER_ID,
+            role: HouseholdRole.ADULT,
+          }),
+        ).rejects.toThrow('Membership conflicts with an existing membership');
+      },
+    );
+
     it('rethrows non-duplicate errors', async () => {
       memberSave.mockRejectedValueOnce(new Error('db down'));
 

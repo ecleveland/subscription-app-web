@@ -221,8 +221,10 @@ export default function CategoriesPage() {
     try {
       await refresh();
     } catch (err) {
-      // Only logged: the reorder toast already flagged the failure.
       console.error('Resync after failed reorder also failed', err);
+      // Double failure: the displayed order can no longer be trusted (the
+      // failed write may have partially applied server-side).
+      showErrorToast('Couldn’t confirm the current order — reload the page.');
     }
   }
 
@@ -245,6 +247,7 @@ export default function CategoriesPage() {
         await refreshOrWarn();
       }
     } catch (err) {
+      console.error('Reorder failed', err);
       showErrorToast(err instanceof Error ? err.message : 'Failed to reorder');
       await resyncAfterError();
     } finally {
