@@ -138,4 +138,13 @@ async function bootstrap() {
   const port = configService.get<number>('port') ?? 3001;
   await app.listen(port);
 }
-void bootstrap();
+// Explicit exit rather than relying on Node's default unhandled-rejection
+// crash: under --unhandled-rejections=warn (or a wrapper that installs a
+// handler) a rethrown boot failure would otherwise leave a zombie process
+// that neither serves traffic nor crash-loops for the orchestrator.
+bootstrap().catch((error: unknown) => {
+  const message =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  new Logger('Bootstrap').error(`Startup failed: ${message}`);
+  process.exit(1);
+});
