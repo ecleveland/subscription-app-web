@@ -1,23 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { uniqueName } from './helpers';
-
-/** Create an account through the accounts page (mirrors ledger.spec.ts). */
-async function createAccount(
-  page: Page,
-  name: string,
-  type: string,
-  opening?: string,
-): Promise<void> {
-  await page.goto('/accounts');
-  await page.getByRole('button', { name: '+ Add account' }).click();
-  await page.getByLabel('Name', { exact: true }).fill(name);
-  await page.getByLabel('Type', { exact: true }).selectOption(type);
-  if (opening) {
-    await page.getByLabel('Opening balance ($)').fill(opening);
-  }
-  await page.getByRole('button', { name: 'Create', exact: true }).click();
-  await expect(accountRow(page, name)).toBeVisible();
-}
+import { createAccount } from './actions';
 
 function accountRow(page: Page, name: string) {
   return page.getByRole('listitem').filter({ hasText: name });

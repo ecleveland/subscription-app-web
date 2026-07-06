@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { uniqueName } from './helpers';
+import { createAccount } from './actions';
 
 function groupSection(page: Page, name: string) {
   return page.getByRole('region', { name });
@@ -80,14 +81,7 @@ test.describe('Category management', () => {
 
     // The transaction form's picker offers the active category but not the
     // archived one.
-    await page.goto('/accounts');
-    await page.getByRole('button', { name: '+ Add account' }).click();
-    await page.getByLabel('Name', { exact: true }).fill(account);
-    await page.getByRole('button', { name: 'Create', exact: true }).click();
-    // Wait for the row so navigation doesn't abort the in-flight POST.
-    await expect(
-      page.getByRole('listitem').filter({ hasText: account }),
-    ).toBeVisible();
+    await createAccount(page, account, 'checking');
     await page.goto('/transactions');
     await page.getByRole('button', { name: '+ Add transaction' }).click();
     const picker = page.getByLabel('Category', { exact: true });

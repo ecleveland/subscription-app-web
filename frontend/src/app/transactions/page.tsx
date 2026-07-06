@@ -184,6 +184,9 @@ export default function TransactionsPage() {
       {(showCreate || editing) && (
         <div className="mb-6">
           <TransactionForm
+            // Remount when the target changes: the form's field state
+            // initializes from the transaction prop only on mount.
+            key={editing?._id ?? 'new'}
             transaction={editing ?? undefined}
             accounts={accounts}
             categories={formCategories}
@@ -234,9 +237,11 @@ export default function TransactionsPage() {
           className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-sm"
         >
           <option value="">All categories</option>
-          {activeCategories.map((c) => (
+          {/* Rows can display archived categories, so the filter must offer
+              them too — flagged to distinguish them from active ones. */}
+          {categories.map((c) => (
             <option key={c._id} value={c._id}>
-              {c.name}
+              {c.isArchived ? `${c.name} (archived)` : c.name}
             </option>
           ))}
         </select>

@@ -16,13 +16,24 @@ vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
 }));
-vi.mock('@/components/TransactionForm', () => ({
-  default: (props: { categories: { name: string }[] }) => (
-    <div>
-      TransactionFormStub:{props.categories.map((c) => c.name).join(',')}
-    </div>
-  ),
-}));
+vi.mock('@/components/TransactionForm', async () => {
+  const { useState } = await import('react');
+  function TransactionFormStub(props: {
+    transaction?: { _id: string };
+    categories: { name: string }[];
+  }) {
+    // Captured on mount only, like the real form's useState initializers —
+    // lets tests assert the page remounts the form when the target changes.
+    const [mountedFor] = useState(props.transaction?._id ?? 'new');
+    return (
+      <div>
+        TransactionFormStub:mounted-for={mountedFor};
+        {props.categories.map((c) => c.name).join(',')}
+      </div>
+    );
+  }
+  return { default: TransactionFormStub };
+});
 vi.mock('@/components/CsvImportWizard', () => ({
   default: (props: { onImported: () => void }) => (
     <div>
@@ -44,6 +55,17 @@ const accounts: Account[] = [
 const categories: BudgetCategory[] = [
   { _id: 'c1', householdId: 'h', groupId: 'g', name: 'Groceries', isIncome: false, sortOrder: 0, isArchived: false, createdAt: '', updatedAt: '' },
 ];
+const archivedCategory: BudgetCategory = {
+  _id: 'c2',
+  householdId: 'h',
+  groupId: 'g',
+  name: 'Old Hobby',
+  isIncome: false,
+  sortOrder: 1,
+  isArchived: true,
+  createdAt: '',
+  updatedAt: '',
+};
 const txn: Transaction = {
   _id: 't1',
   householdId: 'h',
@@ -115,18 +137,7 @@ describe('TransactionsPage', () => {
     expect(screen.queryByText('No transactions found.')).toBeNull();
   });
 
-  it('shows archived category names on historical rows but hides them from the filter', async () => {
-    const archivedCategory: BudgetCategory = {
-      _id: 'c2',
-      householdId: 'h',
-      groupId: 'g',
-      name: 'Old Hobby',
-      isIncome: false,
-      sortOrder: 1,
-      isArchived: true,
-      createdAt: '',
-      updatedAt: '',
-    };
+  it('labels historical rows with archived category names and marks them in the filter', async () => {
     vi.mocked(listCategories).mockResolvedValue([
       ...categories,
       archivedCategory,
@@ -138,28 +149,37 @@ describe('TransactionsPage', () => {
     expect(await screen.findByText('Old Hobby')).toBeInTheDocument();
     expect(listCategories).toHaveBeenCalledWith(true);
 
-    // …but it is not offered in the category filter.
+    // …and stays filterable (rows show it, so the filter must offer it),
+    // flagged so it isn't mistaken for an active category.
     const filter = screen.getByLabelText('Filter by category');
     expect(
-      within(filter).queryByRole('option', { name: 'Old Hobby' }),
-    ).toBeNull();
+      within(filter).getByRole('option', { name: 'Old Hobby (archived)' }),
+    ).toBeInTheDocument();
     expect(
       within(filter).getByRole('option', { name: 'Groceries' }),
     ).toBeInTheDocument();
   });
 
+  it('remounts the form when switching Edit between transactions', async () => {
+    mockList([txn, { ...txn, _id: 't2', payee: 'Cafe' }]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText(/Store/);
+
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    expect(screen.getByText(/TransactionFormStub:/)).toHaveTextContent(
+      'mounted-for=t1',
+    );
+
+    // Switching targets must remount, or the form keeps t1's field state and
+    // Update would overwrite t2 with it.
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1]);
+    expect(screen.getByText(/TransactionFormStub:/)).toHaveTextContent(
+      'mounted-for=t2',
+    );
+  });
+
   it('offers an archived category to the form only when editing its own transaction', async () => {
-    const archivedCategory: BudgetCategory = {
-      _id: 'c2',
-      householdId: 'h',
-      groupId: 'g',
-      name: 'Old Hobby',
-      isIncome: false,
-      sortOrder: 1,
-      isArchived: true,
-      createdAt: '',
-      updatedAt: '',
-    };
     vi.mocked(listCategories).mockResolvedValue([
       ...categories,
       archivedCategory,
@@ -185,17 +205,6 @@ describe('TransactionsPage', () => {
   });
 
   it('does not offer archived categories when editing an active-category transaction', async () => {
-    const archivedCategory: BudgetCategory = {
-      _id: 'c2',
-      householdId: 'h',
-      groupId: 'g',
-      name: 'Old Hobby',
-      isIncome: false,
-      sortOrder: 1,
-      isArchived: true,
-      createdAt: '',
-      updatedAt: '',
-    };
     vi.mocked(listCategories).mockResolvedValue([
       ...categories,
       archivedCategory,

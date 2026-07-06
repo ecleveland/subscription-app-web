@@ -19,6 +19,52 @@ const bySortOrder = <T extends { sortOrder: number; name: string }>(
   b: T,
 ) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name);
 
+// Shared by group create and rename: one copy of the input + submit/cancel
+// markup and validation so the two flows can't drift.
+function GroupNameForm({
+  inputLabel,
+  value,
+  submitLabel,
+  onChange,
+  onSubmit,
+  onCancel,
+  className = '',
+}: {
+  inputLabel: string;
+  value: string;
+  submitLabel: string;
+  onChange: (value: string) => void;
+  onSubmit: (e: FormEvent) => void;
+  onCancel: () => void;
+  className?: string;
+}) {
+  return (
+    <form onSubmit={onSubmit} className={`flex gap-2 ${className}`}>
+      <input
+        aria-label={inputLabel}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required
+        placeholder="Group name"
+        className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
+      />
+      <button
+        type="submit"
+        className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+      >
+        {submitLabel}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg"
+      >
+        Cancel
+      </button>
+    </form>
+  );
+}
+
 export default function CategoriesPage() {
   const [groups, setGroups] = useState<CategoryGroup[]>([]);
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
@@ -250,32 +296,18 @@ export default function CategoriesPage() {
       {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
 
       {creatingGroup && (
-        <form onSubmit={handleCreateGroup} className="flex gap-3 mb-6">
-          <input
-            aria-label="New group name"
-            value={newGroupName}
-            onChange={(e) => setNewGroupName(e.target.value)}
-            required
-            placeholder="Group name"
-            className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Add
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCreatingGroup(false);
-              setNewGroupName('');
-            }}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
-          >
-            Cancel
-          </button>
-        </form>
+        <GroupNameForm
+          inputLabel="New group name"
+          value={newGroupName}
+          submitLabel="Add"
+          onChange={setNewGroupName}
+          onSubmit={handleCreateGroup}
+          onCancel={() => {
+            setCreatingGroup(false);
+            setNewGroupName('');
+          }}
+          className="mb-6"
+        />
       )}
 
       {sortedGroups.length === 0 && !error && (
@@ -291,28 +323,15 @@ export default function CategoriesPage() {
             <section key={group._id} aria-label={group.name}>
               <div className="flex items-center justify-between mb-2">
                 {editingGroupId === group._id ? (
-                  <form onSubmit={handleRenameGroup} className="flex gap-2 flex-1">
-                    <input
-                      aria-label="Group name"
-                      value={groupName}
-                      onChange={(e) => setGroupName(e.target.value)}
-                      required
-                      className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1 bg-white dark:bg-gray-700"
-                    />
-                    <button
-                      type="submit"
-                      className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingGroupId(null)}
-                      className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg"
-                    >
-                      Cancel
-                    </button>
-                  </form>
+                  <GroupNameForm
+                    inputLabel="Group name"
+                    value={groupName}
+                    submitLabel="Save"
+                    onChange={setGroupName}
+                    onSubmit={handleRenameGroup}
+                    onCancel={() => setEditingGroupId(null)}
+                    className="flex-1"
+                  />
                 ) : (
                   <>
                     <h2 className="text-lg font-semibold">{group.name}</h2>
