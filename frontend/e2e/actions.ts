@@ -37,6 +37,28 @@ export async function createSubscription(page: Page, sub: NewSub): Promise<void>
   await expect(page).toHaveURL(/\/$/);
 }
 
+/** Create an account through the /accounts form and wait for its row. */
+export async function createAccount(
+  page: Page,
+  name: string,
+  type: string,
+  opening?: string,
+): Promise<void> {
+  await page.goto('/accounts');
+  await page.getByRole('button', { name: '+ Add account' }).click();
+  await page.getByLabel('Name', { exact: true }).fill(name);
+  await page.getByLabel('Type', { exact: true }).selectOption(type);
+  if (opening) {
+    await page.getByLabel('Opening balance ($)').fill(opening);
+  }
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  // Waiting for the row also keeps a following navigation from aborting the
+  // in-flight POST.
+  await expect(
+    page.getByRole('listitem').filter({ hasText: name }),
+  ).toBeVisible();
+}
+
 /**
  * Go to the dashboard, search for a subscription by name (search filters across
  * all subscriptions client-side, so this is robust to pagination), and return

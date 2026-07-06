@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 let accountsState: {
@@ -16,9 +16,24 @@ vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
 }));
-vi.mock('@/components/TransactionForm', () => ({
-  default: () => <div>TransactionFormStub</div>,
-}));
+vi.mock('@/components/TransactionForm', async () => {
+  const { useState } = await import('react');
+  function TransactionFormStub(props: {
+    transaction?: { _id: string };
+    categories: { name: string }[];
+  }) {
+    // Captured on mount only, like the real form's useState initializers —
+    // lets tests assert the page remounts the form when the target changes.
+    const [mountedFor] = useState(props.transaction?._id ?? 'new');
+    return (
+      <div>
+        TransactionFormStub:mounted-for={mountedFor};
+        {props.categories.map((c) => c.name).join(',')}
+      </div>
+    );
+  }
+  return { default: TransactionFormStub };
+});
 vi.mock('@/components/CsvImportWizard', () => ({
   default: (props: { onImported: () => void }) => (
     <div>
@@ -40,6 +55,17 @@ const accounts: Account[] = [
 const categories: BudgetCategory[] = [
   { _id: 'c1', householdId: 'h', groupId: 'g', name: 'Groceries', isIncome: false, sortOrder: 0, isArchived: false, createdAt: '', updatedAt: '' },
 ];
+const archivedCategory: BudgetCategory = {
+  _id: 'c2',
+  householdId: 'h',
+  groupId: 'g',
+  name: 'Old Hobby',
+  isIncome: false,
+  sortOrder: 1,
+  isArchived: true,
+  createdAt: '',
+  updatedAt: '',
+};
 const txn: Transaction = {
   _id: 't1',
   householdId: 'h',
@@ -109,6 +135,89 @@ describe('TransactionsPage', () => {
       await screen.findByText(/Couldn.t load transactions: list fail/),
     ).toBeInTheDocument();
     expect(screen.queryByText('No transactions found.')).toBeNull();
+  });
+
+  it('labels historical rows with archived category names and marks them in the filter', async () => {
+    vi.mocked(listCategories).mockResolvedValue([
+      ...categories,
+      archivedCategory,
+    ]);
+    mockList([{ ...txn, _id: 't2', categoryId: 'c2', payee: undefined }]);
+    render(<TransactionsPage />);
+
+    // The archived category's name still labels its historical transaction…
+    expect(await screen.findByText('Old Hobby')).toBeInTheDocument();
+    expect(listCategories).toHaveBeenCalledWith(true);
+
+    // …and stays filterable (rows show it, so the filter must offer it),
+    // flagged so it isn't mistaken for an active category.
+    const filter = screen.getByLabelText('Filter by category');
+    expect(
+      within(filter).getByRole('option', { name: 'Old Hobby (archived)' }),
+    ).toBeInTheDocument();
+    expect(
+      within(filter).getByRole('option', { name: 'Groceries' }),
+    ).toBeInTheDocument();
+  });
+
+  it('remounts the form when switching Edit between transactions', async () => {
+    mockList([txn, { ...txn, _id: 't2', payee: 'Cafe' }]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText(/Store/);
+
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    expect(screen.getByText(/TransactionFormStub:/)).toHaveTextContent(
+      'mounted-for=t1',
+    );
+
+    // Switching targets must remount, or the form keeps t1's field state and
+    // Update would overwrite t2 with it.
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1]);
+    expect(screen.getByText(/TransactionFormStub:/)).toHaveTextContent(
+      'mounted-for=t2',
+    );
+  });
+
+  it('offers an archived category to the form only when editing its own transaction', async () => {
+    vi.mocked(listCategories).mockResolvedValue([
+      ...categories,
+      archivedCategory,
+    ]);
+    mockList([{ ...txn, _id: 't2', categoryId: 'c2', payee: undefined }]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText('Old Hobby');
+
+    // Creating a new transaction: archived categories are not offered.
+    await user.click(
+      screen.getByRole('button', { name: '+ Add transaction' }),
+    );
+    expect(screen.getByText(/TransactionFormStub:/)).not.toHaveTextContent(
+      'Old Hobby',
+    );
+
+    // Editing the archived-category transaction: its category stays selectable.
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByText(/TransactionFormStub:/)).toHaveTextContent(
+      'Old Hobby',
+    );
+  });
+
+  it('does not offer archived categories when editing an active-category transaction', async () => {
+    vi.mocked(listCategories).mockResolvedValue([
+      ...categories,
+      archivedCategory,
+    ]);
+    mockList([txn]);
+    const user = userEvent.setup();
+    render(<TransactionsPage />);
+    await screen.findByText('-$42.00');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const stub = screen.getByText(/TransactionFormStub:/);
+    expect(stub).toHaveTextContent('Groceries');
+    expect(stub).not.toHaveTextContent('Old Hobby');
   });
 
   it('toasts when categories fail to load', async () => {

@@ -1,22 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { uniqueName } from './helpers';
-
-async function createAccount(
-  page: Page,
-  name: string,
-  type: string,
-  opening?: string,
-): Promise<void> {
-  await page.goto('/accounts');
-  await page.getByRole('button', { name: '+ Add account' }).click();
-  await page.getByLabel('Name', { exact: true }).fill(name);
-  await page.getByLabel('Type', { exact: true }).selectOption(type);
-  if (opening) {
-    await page.getByLabel('Opening balance ($)').fill(opening);
-  }
-  await page.getByRole('button', { name: 'Create', exact: true }).click();
-  await expect(accountRow(page, name)).toBeVisible();
-}
+import { createAccount } from './actions';
 
 /** The accounts-list row for a given account name. */
 function accountRow(page: Page, name: string) {
