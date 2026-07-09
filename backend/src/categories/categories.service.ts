@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { AnyBulkWriteOperation, Model, Types } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   CategoryGroup,
   CategoryGroupDocument,
@@ -444,23 +444,45 @@ export class CategoriesService {
     householdId: string,
     categoryIds: string[],
   ): Promise<CategoryDocument[]> {
+    await this.applyReorder(
+      this.categoryModel,
+      householdId,
+      categoryIds,
+      'categoryId does not reference a category in this household',
+      'Category',
+    );
+    return this.listCategories(householdId, true);
+  }
+
+  /**
+   * Shared reorder write for categories and groups: validates every id is
+   * household-owned (by count — the DTOs enforce unique ids, so a matching
+   * scoped count proves ownership without hydrating documents; archived rows
+   * included for models that have them), then bulk-writes sortOrder = array
+   * index with household-scoped
+   * filters. No multi-document transaction (consistent with the codebase):
+   * the writes are idempotent, so a retried batch converges; a mid-batch
+   * failure is logged with context and rethrown.
+   */
+  private async applyReorder<TDoc>(
+    model: Model<TDoc>,
+    householdId: string,
+    ids: string[],
+    notOwnedMessage: string,
+    logLabel: string,
+  ): Promise<void> {
     const householdObjectId = new Types.ObjectId(householdId);
-    // Ownership check by count: the DTO enforces unique ids, so every id is
-    // household-owned (archived included) iff the scoped count matches. Avoids
-    // hydrating every category document just to build an id set.
-    const ownedCount = await this.categoryModel
+    const ownedCount = await model
       .countDocuments({
         householdId: householdObjectId,
-        _id: { $in: categoryIds.map((id) => new Types.ObjectId(id)) },
+        _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
       } as Record<string, unknown>)
       .exec();
-    if (ownedCount !== categoryIds.length) {
-      throw new BadRequestException(
-        'categoryId does not reference a category in this household',
-      );
+    if (ownedCount !== ids.length) {
+      throw new BadRequestException(notOwnedMessage);
     }
 
-    const operations = categoryIds.map((id, index) => ({
+    const operations = ids.map((id, index) => ({
       updateOne: {
         filter: {
           _id: new Types.ObjectId(id),
@@ -468,19 +490,39 @@ export class CategoriesService {
         },
         update: { $set: { sortOrder: index } },
       },
-    })) as unknown as AnyBulkWriteOperation<CategoryDocument>[];
+    })) as unknown as Parameters<Model<TDoc>['bulkWrite']>[0];
     try {
-      await this.categoryModel.bulkWrite(operations);
+      await model.bulkWrite(operations);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         { householdId, attempted: operations.length },
-        `Category reorder bulk write failed; sort order may be partially ` +
+        `${logLabel} reorder bulk write failed; sort order may be partially ` +
           `applied: ${message}`,
       );
       throw error;
     }
-    return this.listCategories(householdId, true);
+  }
+
+  /**
+   * Batch-set group display order: each listed group gets sortOrder = its
+   * array index. Partial lists are allowed; unlisted groups keep their
+   * sortOrder. Any id outside the household fails the whole batch before any
+   * write. Mirrors reorderCategories (same idempotent-bulkWrite trade-off).
+   * Returns the refreshed group list.
+   */
+  async reorderGroups(
+    householdId: string,
+    groupIds: string[],
+  ): Promise<CategoryGroupDocument[]> {
+    await this.applyReorder(
+      this.groupModel,
+      householdId,
+      groupIds,
+      'groupId does not reference a category group in this household',
+      'Category-group',
+    );
+    return this.listGroups(householdId);
   }
 
   /** Create a category group. Duplicate name in the household → 409. */

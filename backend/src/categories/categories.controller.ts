@@ -22,6 +22,7 @@ import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
+import { ReorderCategoryGroupsDto } from './dto/reorder-category-groups.dto';
 import { CreateCategoryGroupDto } from './dto/create-category-group.dto';
 import { UpdateCategoryGroupDto } from './dto/update-category-group.dto';
 import { RemoveCategoryOutcomeDto } from './dto/remove-category-outcome.dto';
@@ -111,6 +112,28 @@ export class CategoriesController {
     @Body() dto: CreateCategoryGroupDto,
   ) {
     return this.categoriesService.createGroup(req.household.householdId, dto);
+  }
+
+  @Post('groups/reorder')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Batch-set category-group display order',
+    description:
+      'Each listed group gets sortOrder = its array index. Partial lists ' +
+      'are allowed; unlisted groups keep their order. Returns the refreshed ' +
+      'group list.',
+  })
+  @ApiResponse({ status: 200, description: 'Reordered group list' })
+  @ApiResponse({ status: 400, description: 'Validation error / foreign group' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  reorderGroups(
+    @Req() req: HouseholdRequest,
+    @Body() dto: ReorderCategoryGroupsDto,
+  ) {
+    return this.categoriesService.reorderGroups(
+      req.household.householdId,
+      dto.groupIds,
+    );
   }
 
   @Patch('groups/:id')

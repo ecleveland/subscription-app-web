@@ -79,6 +79,10 @@ describe('CategoriesService', () => {
       );
     mockGroupModel.findOne = jest.fn().mockReturnValue(createChainable(null));
     mockGroupModel.find = jest.fn().mockReturnValue(createChainable([]));
+    mockGroupModel.countDocuments = jest
+      .fn()
+      .mockReturnValue(createChainable(0));
+    mockGroupModel.bulkWrite = jest.fn().mockResolvedValue({});
 
     mockCategoryModel = jest
       .fn()
@@ -827,6 +831,90 @@ describe('CategoriesService', () => {
 
       await expect(
         service.reorderCategories(HOUSEHOLD_ID, [owned[0]._id.toString()]),
+      ).rejects.toThrow('write failed');
+      expect(errorLogSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('reorderGroups', () => {
+    function householdGroups(count: number) {
+      return Array.from({ length: count }, (_, i) => ({
+        _id: new Types.ObjectId(),
+        sortOrder: i,
+      }));
+    }
+
+    it('rejects the whole batch when any id is foreign, writing nothing', async () => {
+      const owned = householdGroups(2);
+      // Only 1 of the 2 submitted ids is owned by the household.
+      mockGroupModel.countDocuments.mockReturnValue(createChainable(1));
+
+      await expect(
+        service.reorderGroups(HOUSEHOLD_ID, [
+          owned[0]._id.toString(),
+          new Types.ObjectId().toString(),
+        ]),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockGroupModel.bulkWrite).not.toHaveBeenCalled();
+    });
+
+    it('validates ownership by count, scoped to the household', async () => {
+      const owned = householdGroups(2);
+      mockGroupModel.countDocuments.mockReturnValue(createChainable(2));
+
+      await service.reorderGroups(HOUSEHOLD_ID, [
+        owned[1]._id.toString(),
+        owned[0]._id.toString(),
+      ]);
+
+      const filter = mockGroupModel.countDocuments.mock.calls[0][0];
+      expect(filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(filter._id.$in).toHaveLength(2);
+    });
+
+    it('bulk-writes sortOrder = array index with household-scoped filters', async () => {
+      const owned = householdGroups(3);
+      mockGroupModel.countDocuments.mockReturnValue(createChainable(3));
+      mockGroupModel.find.mockReturnValue(createChainable(owned));
+
+      const result = await service.reorderGroups(HOUSEHOLD_ID, [
+        owned[2]._id.toString(),
+        owned[0]._id.toString(),
+        owned[1]._id.toString(),
+      ]);
+
+      expect(mockGroupModel.bulkWrite).toHaveBeenCalledTimes(1);
+      const ops = mockGroupModel.bulkWrite.mock.calls[0][0];
+      expect(ops).toHaveLength(3);
+      ops.forEach((op: any, index: number) => {
+        expect(op.updateOne.filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+        expect(op.updateOne.update.$set.sortOrder).toBe(index);
+      });
+      expect(ops[0].updateOne.filter._id.toString()).toBe(
+        owned[2]._id.toString(),
+      );
+      // Returns the refreshed group list (household-scoped read after writing).
+      expect(mockGroupModel.find).toHaveBeenCalledTimes(1);
+      expect(result).toBe(owned);
+    });
+
+    it('allows a partial list (unlisted groups keep their sortOrder)', async () => {
+      const owned = householdGroups(1);
+      mockGroupModel.countDocuments.mockReturnValue(createChainable(1));
+
+      await service.reorderGroups(HOUSEHOLD_ID, [owned[0]._id.toString()]);
+
+      expect(mockGroupModel.bulkWrite).toHaveBeenCalledTimes(1);
+      expect(mockGroupModel.bulkWrite.mock.calls[0][0]).toHaveLength(1);
+    });
+
+    it('logs and rethrows a mid-batch bulkWrite failure', async () => {
+      const owned = householdGroups(1);
+      mockGroupModel.countDocuments.mockReturnValue(createChainable(1));
+      mockGroupModel.bulkWrite.mockRejectedValue(new Error('write failed'));
+
+      await expect(
+        service.reorderGroups(HOUSEHOLD_ID, [owned[0]._id.toString()]),
       ).rejects.toThrow('write failed');
       expect(errorLogSpy).toHaveBeenCalled();
     });

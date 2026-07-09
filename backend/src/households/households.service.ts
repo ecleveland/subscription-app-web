@@ -138,7 +138,8 @@ export class HouseholdsService {
   /**
    * Add a member to a household. Active memberships are stamped with a
    * `joinedAt`; invited ones are not (they join on acceptance). Throws
-   * ConflictException if the user is already a member of the household.
+   * ConflictException if the user is already a member of the household, or
+   * already has an active membership in another household.
    */
   async addMember(params: AddMemberParams): Promise<HouseholdMemberDocument> {
     const status = params.status ?? MembershipStatus.ACTIVE;
@@ -158,8 +159,28 @@ export class HouseholdsService {
         'code' in error &&
         (error as { code: number }).code === 11000
       ) {
+        // Two unique indexes can fire here: (householdId, userId) — already a
+        // member of THIS household — and the userId-only partial index, which
+        // fires when the user already has an ACTIVE membership (in the
+        // non-overlapping case, one in another household). Match both known
+        // shapes explicitly; anything else gets a generic conflict rather
+        // than a specific claim that may be false.
+        const keyPattern =
+          (error as { keyPattern?: Record<string, number> }).keyPattern ?? {};
+        if (keyPattern.userId === 1 && !('householdId' in keyPattern)) {
+          throw new ConflictException('User already has an active household');
+        }
+        if (keyPattern.householdId === 1 && keyPattern.userId === 1) {
+          throw new ConflictException(
+            'User is already a member of this household',
+          );
+        }
+        this.logger.error(
+          `addMember duplicate-key error with unrecognized keyPattern ` +
+            `${JSON.stringify(keyPattern)}: ${error.message}`,
+        );
         throw new ConflictException(
-          'User is already a member of this household',
+          'Membership conflicts with an existing membership',
         );
       }
       throw error;

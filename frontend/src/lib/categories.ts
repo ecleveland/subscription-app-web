@@ -56,6 +56,17 @@ export function createCategoryGroup(data: {
   });
 }
 
+// Each listed group gets sortOrder = its array index; partial lists are fine.
+// Returns the refreshed group list.
+export function reorderCategoryGroups(
+  groupIds: string[],
+): Promise<CategoryGroup[]> {
+  return apiFetch<CategoryGroup[]>('/categories/groups/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ groupIds }),
+  });
+}
+
 export function updateCategoryGroup(
   id: string,
   data: { name?: string; sortOrder?: number },

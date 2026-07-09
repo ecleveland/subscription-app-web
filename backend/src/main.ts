@@ -3,10 +3,13 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { getConnectionToken } from '@nestjs/mongoose';
+import type { Connection } from 'mongoose';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { buildAllIndexes } from './database/build-all-indexes';
 import { UsersService } from './users/users.service';
 import { HouseholdsMigrationService } from './households/households-migration.service';
 import { CategoriesService } from './categories/categories.service';
@@ -71,6 +74,21 @@ async function bootstrap() {
     SwaggerModule.setup('api/docs', app, document);
   }
 
+  // Build every schema index before running migrations or accepting traffic
+  // (see buildAllIndexes for the background-autoIndex failure modes this
+  // closes). A failed build is FATAL: serving writes without a uniqueness
+  // invariant silently corrupts data that only gets harder to fix (e.g. a
+  // second ACTIVE membership per user disables addMember's 409 entirely),
+  // whereas refusing to boot surfaces the named model in the deploy log.
+  try {
+    await buildAllIndexes(app.get<Connection>(getConnectionToken()));
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? (error.stack ?? error.message) : String(error);
+    new Logger('Indexes').error(`Aborting startup: ${message}`);
+    throw error;
+  }
+
   // Idempotent startup tasks, run on every boot of every replica. seedAdmin
   // already swallows its own benign concurrent-boot duplicate; this outer guard
   // keeps any *other* failure in these non-critical tasks from crashing startup
@@ -120,4 +138,13 @@ async function bootstrap() {
   const port = configService.get<number>('port') ?? 3001;
   await app.listen(port);
 }
-void bootstrap();
+// Explicit exit rather than relying on Node's default unhandled-rejection
+// crash: under --unhandled-rejections=warn (or a wrapper that installs a
+// handler) a rethrown boot failure would otherwise leave a zombie process
+// that neither serves traffic nor crash-loops for the orchestrator.
+bootstrap().catch((error: unknown) => {
+  const message =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  new Logger('Bootstrap').error(`Startup failed: ${message}`);
+  process.exit(1);
+});

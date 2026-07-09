@@ -15,6 +15,7 @@ import {
   updateCategoryGroup,
   updateCategory,
   reorderCategories,
+  reorderCategoryGroups,
 } from '@/lib/categories';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import CategoryForm from '@/components/CategoryForm';
@@ -214,14 +215,43 @@ export default function CategoriesPage() {
   }
 
   // Failure path for reorders: the error toast has already fired; pull the
-  // server's actual order back — a group move's per-group PATCHes can
-  // partially succeed, leaving the server ahead of the UI's pre-move order.
+  // server's actual order back — a failed reorder bulkWrite can partially
+  // apply, leaving the server ahead of the UI's pre-move order.
   async function resyncAfterError() {
     try {
       await refresh();
     } catch (err) {
-      // Only logged: the reorder toast already flagged the failure.
       console.error('Resync after failed reorder also failed', err);
+      // Double failure: the displayed order can no longer be trusted (the
+      // failed write may have partially applied server-side).
+      showErrorToast('Couldn’t confirm the current order — reload the page.');
+    }
+  }
+
+  // One copy of the reorder protocol for categories and groups. The bulk
+  // endpoints return the refreshed list, so the response doubles as the
+  // refetch — unless another mutation's refresh landed while the request was
+  // in flight (epoch mismatch), in which case the response is a stale
+  // snapshot and server truth is pulled instead.
+  async function runReorder<T>(
+    request: () => Promise<T>,
+    apply: (fresh: T) => void,
+  ) {
+    const epochAtRequest = refreshEpoch.current;
+    setReordering(true);
+    try {
+      const fresh = await request();
+      if (refreshEpoch.current === epochAtRequest) {
+        apply(fresh);
+      } else {
+        await refreshOrWarn();
+      }
+    } catch (err) {
+      console.error('Reorder failed', err);
+      showErrorToast(err instanceof Error ? err.message : 'Failed to reorder');
+      await resyncAfterError();
+    } finally {
+      setReordering(false);
     }
   }
 
@@ -236,25 +266,7 @@ export default function CategoriesPage() {
     if (from < 0 || to < 0 || to >= list.length) return;
     const ids = list.map((c) => c._id);
     [ids[from], ids[to]] = [ids[to], ids[from]];
-    const epochAtRequest = refreshEpoch.current;
-    setReordering(true);
-    try {
-      // The endpoint returns the refreshed full list (archived included), so
-      // it doubles as the refetch.
-      const fresh = await reorderCategories(ids);
-      if (refreshEpoch.current === epochAtRequest) {
-        setCategories(fresh);
-      } else {
-        // Another mutation refreshed while this was in flight; its snapshot
-        // predates that refresh. Pull server truth instead of applying it.
-        await refreshOrWarn();
-      }
-    } catch (err) {
-      showErrorToast(err instanceof Error ? err.message : 'Failed to reorder');
-      await resyncAfterError();
-    } finally {
-      setReordering(false);
-    }
+    await runReorder(() => reorderCategories(ids), setCategories);
   }
 
   async function handleMoveGroup(
@@ -265,36 +277,11 @@ export default function CategoriesPage() {
     const from = sortedGroups.findIndex((g) => g._id === group._id);
     const to = direction === 'up' ? from - 1 : from + 1;
     if (from < 0 || to < 0 || to >= sortedGroups.length) return;
-    // Reindex every group by display order with the pair swapped. Writing
-    // indexes each time (rather than swapping the two values) self-heals
-    // duplicate sortOrders, including ones left by a partially failed move.
-    const order = [...sortedGroups];
-    [order[from], order[to]] = [order[to], order[from]];
-    setReordering(true);
-    try {
-      // allSettled, not all: a rejection must not leave sibling PATCHes in
-      // flight, or the resync below could read (and render) an order a
-      // straggler write then overwrites.
-      const results = await Promise.allSettled(
-        order.map((g, i) => updateCategoryGroup(g._id, { sortOrder: i })),
-      );
-      const failed = results.find(
-        (r): r is PromiseRejectedResult => r.status === 'rejected',
-      );
-      if (failed) {
-        const reason = failed.reason;
-        showErrorToast(
-          reason instanceof Error ? reason.message : 'Failed to reorder',
-        );
-        await resyncAfterError();
-        return;
-      }
-      // The writes succeeded — a refetch failure here must warn, not claim
-      // the reorder failed.
-      await refreshOrWarn();
-    } finally {
-      setReordering(false);
-    }
+    // Full id list with the pair swapped: the bulk endpoint writes sortOrder
+    // = index for every group in one request, self-healing any duplicates.
+    const ids = sortedGroups.map((g) => g._id);
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    await runReorder(() => reorderCategoryGroups(ids), setGroups);
   }
 
   if (loading) {

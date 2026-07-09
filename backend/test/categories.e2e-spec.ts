@@ -107,6 +107,7 @@ describe('Categories (e2e)', () => {
       ['post', '/api/categories/reorder'],
       ['get', '/api/categories/groups'],
       ['post', '/api/categories/groups'],
+      ['post', '/api/categories/groups/reorder'],
       ['patch', '/api/categories/groups/507f191e810c19729de860ea'],
       ['delete', '/api/categories/groups/507f191e810c19729de860ea'],
       ['patch', '/api/categories/507f191e810c19729de860ea'],
@@ -472,6 +473,100 @@ describe('Categories (e2e)', () => {
 
       const after = orderOf((await listCategories(true)).body);
       expect(after).toEqual(before);
+    });
+  });
+
+  describe('POST /api/categories/groups/reorder', () => {
+    let ids: string[];
+
+    beforeAll(async () => {
+      ids = [];
+      for (const name of ['GR One', 'GR Two', 'GR Three']) {
+        ids.push(await createGroup(name));
+      }
+    });
+
+    async function groupOrder(): Promise<string[]> {
+      const res = await auth(
+        request(app.getHttpServer()).get('/api/categories/groups'),
+      ).expect(200);
+      return (res.body as Array<{ _id: string; sortOrder: number }>)
+        .filter((g) => ids.includes(g._id))
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((g) => g._id);
+    }
+
+    it('applies the submitted order and returns the refreshed group list', async () => {
+      const reversed = [...ids].reverse();
+
+      const res = await auth(
+        request(app.getHttpServer()).post('/api/categories/groups/reorder'),
+      )
+        .send({ groupIds: reversed })
+        .expect(200);
+
+      const returned = (res.body as Array<{ _id: string; sortOrder: number }>)
+        .filter((g) => ids.includes(g._id))
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((g) => g._id);
+      expect(returned).toEqual(reversed);
+      expect(await groupOrder()).toEqual(reversed);
+    });
+
+    it('rejects empty, duplicate-laden and malformed payloads', async () => {
+      await auth(
+        request(app.getHttpServer()).post('/api/categories/groups/reorder'),
+      )
+        .send({ groupIds: [] })
+        .expect(400);
+      await auth(
+        request(app.getHttpServer()).post('/api/categories/groups/reorder'),
+      )
+        .send({ groupIds: [ids[0], ids[0]] })
+        .expect(400);
+      await auth(
+        request(app.getHttpServer()).post('/api/categories/groups/reorder'),
+      )
+        .send({ groupIds: ['not-an-id'] })
+        .expect(400);
+    });
+
+    it("rejects the whole batch when it contains another household's id, changing nothing", async () => {
+      const foreignId = await createGroup('B Group Reorder', tokenB);
+      const before = await groupOrder();
+
+      await auth(
+        request(app.getHttpServer()).post('/api/categories/groups/reorder'),
+      )
+        .send({ groupIds: [ids[0], foreignId, ids[1]] })
+        .expect(400);
+
+      expect(await groupOrder()).toEqual(before);
+    });
+
+    it('leaves unlisted groups untouched by a partial reorder', async () => {
+      const res = await auth(
+        request(app.getHttpServer()).get('/api/categories/groups'),
+      ).expect(200);
+      const third = (
+        res.body as Array<{ _id: string; sortOrder: number }>
+      ).find((g) => g._id === ids[2])!;
+
+      await auth(
+        request(app.getHttpServer()).post('/api/categories/groups/reorder'),
+      )
+        .send({ groupIds: [ids[1], ids[0]] })
+        .expect(200);
+
+      const after = await auth(
+        request(app.getHttpServer()).get('/api/categories/groups'),
+      ).expect(200);
+      const thirdAfter = (
+        after.body as Array<{ _id: string; sortOrder: number }>
+      ).find((g) => g._id === ids[2])!;
+      // The unlisted group keeps its exact sortOrder — the partial batch only
+      // rewrites the listed ids.
+      expect(thirdAfter.sortOrder).toBe(third.sortOrder);
     });
   });
 
