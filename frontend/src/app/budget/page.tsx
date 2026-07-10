@@ -101,6 +101,11 @@ export default function BudgetPage() {
   // or rejects.
   const saveEpoch = useRef(0);
 
+  // True once the catalog has loaded at least once: from then on a failed
+  // refetch is a transient toast (the loaded catalog keeps serving), not a
+  // permanent banner nothing would ever clear.
+  const catalogLoaded = useRef(false);
+
   // The category catalog is month-independent — fetched once, and again only
   // on an explicit retry.
   useEffect(() => {
@@ -108,15 +113,19 @@ export default function BudgetPage() {
     Promise.all([listCategories(true), listCategoryGroups()])
       .then(([cs, gs]) => {
         if (cancelled) return;
+        catalogLoaded.current = true;
         setCategories(cs);
         setGroups(gs);
         setCatalogError(null);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setCatalogError(
-            err instanceof Error ? err.message : 'Failed to load categories',
-          );
+        if (cancelled) return;
+        const message =
+          err instanceof Error ? err.message : 'Failed to load categories';
+        if (catalogLoaded.current) {
+          showErrorToast(message);
+        } else {
+          setCatalogError(message);
         }
       });
     return () => {
@@ -174,46 +183,69 @@ export default function BudgetPage() {
     );
   };
 
-  const handleSave = async (e: FormEvent, categoryId: string) => {
+  // Delete the month's limit entry for a category. Used by the empty-save
+  // path and by the Clear affordance on income rows with stale limits.
+  const clearLimit = async (categoryId: string) => {
+    setSaving(true);
+    try {
+      await clearCategoryLimit(monthRef.current, categoryId);
+      saveEpoch.current += 1;
+      // DELETE returns no view — refetch the month.
+      setBudgetReloadKey((k) => k + 1);
+      showSuccessToast('Limit cleared');
+      setEditingId((prev) => (prev === categoryId ? null : prev));
+    } catch (err) {
+      showErrorToast(
+        err instanceof Error ? err.message : 'Failed to clear limit',
+      );
+      // The write may still have applied — resync the budget.
+      setBudgetReloadKey((k) => k + 1);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSave = async (e: FormEvent, row: BudgetRow) => {
     e.preventDefault();
     // An empty field means "no limit": delete the entry rather than upserting
     // a zero limit, which would pin a BudgetCategory document to the category
     // (blocking its hard-delete) for no reason. An explicit "0" is kept as a
-    // deliberate zero limit.
-    const clearing = editValue.trim() === '';
-    const cents = clearing ? 0 : dollarsToCents(editValue);
+    // deliberate zero limit. The view can't distinguish "no limit" from a
+    // zero limit (both read plannedCents 0), so an empty save on a $0 row is
+    // a no-op — never a destructive delete of a deliberate zero limit.
+    if (editValue.trim() === '') {
+      if (row.plannedCents === 0) {
+        setEditingId((prev) => (prev === row.categoryId ? null : prev));
+        return;
+      }
+      await clearLimit(row.categoryId);
+      return;
+    }
+    const cents = dollarsToCents(editValue);
     if (cents === null) {
       showErrorToast('Enter a valid non-negative amount, e.g. 250.00');
       return;
     }
     setSaving(true);
     try {
-      if (clearing) {
-        await clearCategoryLimit(monthRef.current, categoryId);
-        saveEpoch.current += 1;
-        // DELETE returns no view — refetch the month.
-        setBudgetReloadKey((k) => k + 1);
-        showSuccessToast('Limit cleared');
+      const res = await setCategoryLimit(
+        monthRef.current,
+        row.categoryId,
+        cents,
+      );
+      saveEpoch.current += 1;
+      // Apply the recomputed view the save returned; if the user has since
+      // switched months it's stale — refetch the current month instead.
+      if (res.month === monthRef.current) {
+        setView(res);
+        setBudgetError(null);
       } else {
-        const res = await setCategoryLimit(
-          monthRef.current,
-          categoryId,
-          cents,
-        );
-        saveEpoch.current += 1;
-        // Apply the recomputed view the save returned; if the user has since
-        // switched months it's stale — refetch the current month instead.
-        if (res.month === monthRef.current) {
-          setView(res);
-          setBudgetError(null);
-        } else {
-          setBudgetReloadKey((k) => k + 1);
-        }
-        showSuccessToast('Limit saved');
+        setBudgetReloadKey((k) => k + 1);
       }
+      showSuccessToast('Limit saved');
       // Close only this row's editor — the user may have moved on to another
       // row while the save was in flight.
-      setEditingId((prev) => (prev === categoryId ? null : prev));
+      setEditingId((prev) => (prev === row.categoryId ? null : prev));
     } catch (err) {
       showErrorToast(
         err instanceof Error ? err.message : 'Failed to save limit',
@@ -340,7 +372,10 @@ export default function BudgetPage() {
                         )}
                       </span>
                       <span className="text-sm text-gray-600 dark:text-gray-300 w-24 text-right">
-                        {editingId === row.categoryId ? null : (
+                        {editingId === row.categoryId ? null : row.isIncome &&
+                          row.plannedCents === 0 ? (
+                          '—'
+                        ) : (
                           <>{formatCents(row.plannedCents)}</>
                         )}
                       </span>
@@ -354,11 +389,15 @@ export default function BudgetPage() {
                             : 'text-gray-600 dark:text-gray-300'
                         }`}
                       >
-                        {formatCents(row.remainingCents)}
+                        {/* Income "remaining" is informational noise — the
+                            backend excludes income from every rollup. */}
+                        {row.isIncome ? '—' : formatCents(row.remainingCents)}
                       </span>
                       {/* No editor on income rows: the backend excludes
                           income "limits" from every rollup, so a saved one
-                          would silently disagree with the summary. */}
+                          would silently disagree with the summary. A stale
+                          income limit (set via API or an older UI) gets a
+                          Clear affordance so it isn't pinned forever. */}
                       {!row.isArchived &&
                         !row.isIncome &&
                         editingId !== row.categoryId && (
@@ -370,10 +409,22 @@ export default function BudgetPage() {
                             Edit
                           </button>
                         )}
+                      {!row.isArchived &&
+                        row.isIncome &&
+                        row.plannedCents > 0 && (
+                          <button
+                            onClick={() => clearLimit(row.categoryId)}
+                            disabled={saving}
+                            aria-label={`Clear limit for ${row.name}`}
+                            className="text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                          >
+                            Clear
+                          </button>
+                        )}
                     </div>
                     {editingId === row.categoryId && (
                       <form
-                        onSubmit={(e) => handleSave(e, row.categoryId)}
+                        onSubmit={(e) => handleSave(e, row)}
                         className="flex gap-2"
                       >
                         <input

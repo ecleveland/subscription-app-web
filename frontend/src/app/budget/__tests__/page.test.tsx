@@ -390,22 +390,96 @@ describe('BudgetPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('clears the limit (DELETE) when the field is left empty', async () => {
+  it('clears an existing limit (DELETE) when the field is emptied', async () => {
     vi.mocked(clearCategoryLimit).mockResolvedValue(undefined);
     await renderPage();
     const user = userEvent.setup();
 
-    // Dining out has no budget entry, so the editor prefills empty.
+    // Groceries holds a $500 limit; clearing the prefilled value means
+    // "remove the limit".
+    await user.click(
+      screen.getByRole('button', { name: 'Edit limit for Groceries' }),
+    );
+    await user.clear(
+      screen.getByRole('textbox', { name: 'Monthly limit for Groceries' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(clearCategoryLimit).toHaveBeenCalledWith(CURRENT_MONTH, 'c1');
+    expect(setCategoryLimit).not.toHaveBeenCalled();
+    expect(showSuccessToast).toHaveBeenCalled();
+    // DELETE returns no view — the month is refetched.
+    await waitFor(() => expect(getBudget).toHaveBeenCalledTimes(2));
+  });
+
+  it('treats an empty save on a row with no visible limit as a no-op', async () => {
+    await renderPage();
+    const user = userEvent.setup();
+
+    // Dining out reads $0.00 — the view can't distinguish "no limit" from a
+    // deliberate zero limit, so an empty save must not DELETE anything.
     await user.click(
       screen.getByRole('button', { name: 'Edit limit for Dining out' }),
     );
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(clearCategoryLimit).toHaveBeenCalledWith(CURRENT_MONTH, 'c2');
+    expect(clearCategoryLimit).not.toHaveBeenCalled();
     expect(setCategoryLimit).not.toHaveBeenCalled();
-    expect(showSuccessToast).toHaveBeenCalled();
-    // DELETE returns no view — the month is refetched.
-    await waitFor(() => expect(getBudget).toHaveBeenCalledTimes(2));
+    expect(showSuccessToast).not.toHaveBeenCalled();
+    // The editor just closes.
+    expect(
+      screen.queryByRole('textbox', { name: 'Monthly limit for Dining out' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('lets a stale income limit be cleared, but not edited', async () => {
+    vi.mocked(clearCategoryLimit).mockResolvedValue(undefined);
+    vi.mocked(getBudget).mockResolvedValue(
+      budgetView({
+        categories: [
+          {
+            categoryId: 'c3',
+            plannedCents: 400000,
+            actualCents: 0,
+            remainingCents: 400000,
+            isIncome: true,
+          },
+        ],
+      }),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+
+    const income = within(
+      screen.getByRole('region', { name: 'Income' }),
+    ).getByRole('listitem');
+    expect(within(income).getByText('$4,000.00')).toBeInTheDocument();
+    // Income "remaining" is informational noise — rendered as a dash.
+    expect(within(income).getByText('—')).toBeInTheDocument();
+    expect(
+      within(income).queryByRole('button', {
+        name: 'Edit limit for Paycheck',
+      }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(income).getByRole('button', { name: 'Clear limit for Paycheck' }),
+    );
+    expect(clearCategoryLimit).toHaveBeenCalledWith(CURRENT_MONTH, 'c3');
+  });
+
+  it('offers no Clear button on income rows without a limit', async () => {
+    await renderPage();
+    const income = within(
+      screen.getByRole('region', { name: 'Income' }),
+    ).getByRole('listitem');
+    expect(
+      within(income).queryByRole('button', {
+        name: 'Clear limit for Paycheck',
+      }),
+    ).not.toBeInTheDocument();
+    // Planned renders as a dash, not a misleading $0.00.
+    expect(within(income).getAllByText('—').length).toBeGreaterThan(0);
   });
 
   it('saves an explicit 0 as a deliberate zero limit, not a clear', async () => {

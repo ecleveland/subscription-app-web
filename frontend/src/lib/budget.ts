@@ -1,4 +1,5 @@
 import { apiFetch } from './api';
+import { bySortOrder } from './utils';
 import type { BudgetCategory, CategoryGroup } from './types';
 
 // Mirrors backend/src/budgets/dto/budget-view.interface.ts. All money is
@@ -108,11 +109,6 @@ export interface BudgetGroupRows {
   // Never empty: buildBudgetGroups omits groups with no rows.
   rows: BudgetRow[];
 }
-
-const bySortOrder = <T extends { sortOrder: number; name: string }>(
-  a: T,
-  b: T,
-) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name);
 
 /**
  * Join the month's BudgetView (which carries only categoryIds) against the

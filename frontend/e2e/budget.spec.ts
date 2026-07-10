@@ -74,10 +74,15 @@ test.describe('Budget page', () => {
     await expect(row).toContainText('Over budget');
     await expect(row).toContainText('-$20.00');
 
-    // The previous month is untouched: the row exists but is zeroed.
+    // The previous month is untouched: the row exists but is zeroed. Wait for
+    // the row to re-render first — the group sections unmount while the new
+    // month loads, and negative assertions against an absent row pass
+    // vacuously.
     await page.getByRole('button', { name: 'Previous month' }).click();
-    await expect(row).not.toContainText('Over budget');
+    await expect(row).toBeVisible();
+    // A leaked limit would render planned $100.00 here.
     await expect(row).not.toContainText('$100.00');
+    await expect(row).not.toContainText('Over budget');
     await expect(row).toContainText('$0.00');
   });
 });
