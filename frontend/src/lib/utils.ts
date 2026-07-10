@@ -22,6 +22,13 @@ export function dollarsToCents(value: string): number | null {
   return Math.round(parseFloat(trimmed) * 100);
 }
 
+/** Sort by sortOrder ascending, breaking ties by name — the display order for
+ *  category groups and categories (shared by the categories & budget pages). */
+export const bySortOrder = <T extends { sortOrder: number; name: string }>(
+  a: T,
+  b: T,
+): number => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name);
+
 export function formatDate(date: Date | string): string {
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',

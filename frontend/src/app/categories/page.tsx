@@ -18,14 +18,10 @@ import {
   reorderCategoryGroups,
 } from '@/lib/categories';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
+import { bySortOrder } from '@/lib/utils';
 import CategoryForm from '@/components/CategoryForm';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import type { BudgetCategory, CategoryGroup } from '@/lib/types';
-
-const bySortOrder = <T extends { sortOrder: number; name: string }>(
-  a: T,
-  b: T,
-) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name);
 
 // Shared by group create and rename: one copy of the input + submit/cancel
 // markup and validation so the two flows can't drift.

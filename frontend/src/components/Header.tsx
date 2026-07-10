@@ -73,6 +73,13 @@ export default function Header() {
             Transactions
           </Link>
           <Link
+            href="/budget"
+            onClick={closeMenu}
+            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
+          >
+            Budget
+          </Link>
+          <Link
             href="/categories"
             onClick={closeMenu}
             className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"

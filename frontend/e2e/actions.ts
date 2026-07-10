@@ -59,6 +59,33 @@ export async function createAccount(
   ).toBeVisible();
 }
 
+/** Record an expense through the /transactions form and wait for its row
+ *  (which also keeps a following navigation from aborting the POST). The
+ *  form's date defaults to today, so the expense lands in the current month. */
+export async function addExpense(
+  page: Page,
+  tx: { account: string; category: string; amount: string; payee: string },
+): Promise<void> {
+  await page.goto('/transactions');
+  await page.getByRole('button', { name: '+ Add transaction' }).click();
+  await page.getByLabel('Type', { exact: true }).selectOption('expense');
+  await page
+    .getByLabel('Account', { exact: true })
+    .selectOption({ label: tx.account });
+  await page
+    .getByLabel('Category', { exact: true })
+    .selectOption({ label: tx.category });
+  await page.getByLabel('Amount ($)').fill(tx.amount);
+  await page.getByLabel('Payee').fill(tx.payee);
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  // .first(): payees aren't necessarily unique (a CI retry re-adds the same
+  // payee into the not-yet-dropped e2e DB), and a strict-mode violation here
+  // would turn a transient flake into a deterministic failure.
+  await expect(
+    page.getByRole('listitem').filter({ hasText: tx.payee }).first(),
+  ).toBeVisible();
+}
+
 /**
  * Go to the dashboard, search for a subscription by name (search filters across
  * all subscriptions client-side, so this is robust to pagination), and return

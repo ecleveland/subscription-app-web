@@ -63,7 +63,7 @@ describe('Header', () => {
     expect(screen.getByText('Logout')).toBeInTheDocument();
   });
 
-  it('links to the accounts, transactions, and categories pages', () => {
+  it('links to the accounts, transactions, budget, and categories pages', () => {
     authState = {
       isAuthenticated: true,
       user: { userId: '1', username: 'test', role: 'user' },
@@ -80,6 +80,10 @@ describe('Header', () => {
     expect(screen.getByRole('link', { name: 'Transactions' })).toHaveAttribute(
       'href',
       '/transactions',
+    );
+    expect(screen.getByRole('link', { name: 'Budget' })).toHaveAttribute(
+      'href',
+      '/budget',
     );
     expect(screen.getByRole('link', { name: 'Categories' })).toHaveAttribute(
       'href',
