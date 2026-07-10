@@ -5,6 +5,7 @@ import {
   getBudget,
   bulkSetBudget,
   setCategoryLimit,
+  clearCategoryLimit,
   buildBudgetGroups,
   shiftMonth,
   formatMonth,
@@ -76,6 +77,13 @@ describe('budget api wrappers', () => {
       body: JSON.stringify({
         categories: [{ categoryId: 'c1', plannedCents: 25000 }],
       }),
+    });
+  });
+
+  it('clearCategoryLimit DELETEs the per-category entry', async () => {
+    await clearCategoryLimit('2026-07', 'c1');
+    expect(apiFetch).toHaveBeenCalledWith('/budgets/2026-07/categories/c1', {
+      method: 'DELETE',
     });
   });
 });
@@ -212,6 +220,11 @@ describe('shiftMonth', () => {
   it('rolls over year boundaries', () => {
     expect(shiftMonth('2026-01', -1)).toBe('2025-12');
     expect(shiftMonth('2026-12', 1)).toBe('2027-01');
+  });
+
+  it('handles multi-year deltas', () => {
+    expect(shiftMonth('2026-01', -13)).toBe('2024-12');
+    expect(shiftMonth('2025-06', 18)).toBe('2026-12');
   });
 });
 

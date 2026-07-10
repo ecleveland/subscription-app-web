@@ -5,7 +5,12 @@ vi.mock('@/lib/budget', async (importOriginal) => {
   // Pure helpers (buildBudgetGroups, shiftMonth, formatMonth) run for real —
   // only the network wrappers are mocked.
   const actual = await importOriginal<typeof import('@/lib/budget')>();
-  return { ...actual, getBudget: vi.fn(), setCategoryLimit: vi.fn() };
+  return {
+    ...actual,
+    getBudget: vi.fn(),
+    setCategoryLimit: vi.fn(),
+    clearCategoryLimit: vi.fn(),
+  };
 });
 vi.mock('@/lib/categories', () => ({
   listCategories: vi.fn(),
@@ -19,6 +24,7 @@ vi.mock('@/lib/toast', () => ({
 import {
   getBudget,
   setCategoryLimit,
+  clearCategoryLimit,
   shiftMonth,
   type BudgetView,
 } from '@/lib/budget';
@@ -117,6 +123,8 @@ describe('BudgetPage', () => {
 
   it('shows the loading state', () => {
     vi.mocked(getBudget).mockReturnValue(new Promise(() => {}));
+    vi.mocked(listCategories).mockReturnValue(new Promise(() => {}));
+    vi.mocked(listCategoryGroups).mockReturnValue(new Promise(() => {}));
     render(<BudgetPage />);
     expect(screen.getByText('Loading budget…')).toBeInTheDocument();
   });
@@ -150,6 +158,10 @@ describe('BudgetPage', () => {
     ).getAllByRole('listitem');
     const dining = rows.find((r) => r.textContent?.includes('Dining out'))!;
     expect(within(dining).getAllByText('$0.00')).toHaveLength(3);
+    expect(within(dining).getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '0',
+    );
   });
 
   it('marks archived categories with spend and offers no edit affordance', async () => {
@@ -182,6 +194,11 @@ describe('BudgetPage', () => {
         name: 'Edit limit for Old Hobby',
       }),
     ).not.toBeInTheDocument();
+    // Unbudgeted spend (planned 0, actual > 0) fills the bar.
+    expect(within(archived).getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '100',
+    );
   });
 
   it('flags over-budget expense rows', async () => {
@@ -332,6 +349,12 @@ describe('BudgetPage', () => {
     expect(showErrorToast).toHaveBeenCalled();
     // Initial load + resync.
     expect(getBudget).toHaveBeenCalledTimes(2);
+    // The catalog is month-independent — a save resync leaves it alone.
+    expect(listCategories).toHaveBeenCalledTimes(1);
+    // The editor stays open with the user's input.
+    expect(
+      screen.getByRole('textbox', { name: 'Monthly limit for Groceries' }),
+    ).toBeInTheDocument();
   });
 
   it('switches months with prev/next and refetches only the budget', async () => {
@@ -367,8 +390,8 @@ describe('BudgetPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('saves an empty edit field as a zero limit', async () => {
-    vi.mocked(setCategoryLimit).mockResolvedValue(defaultView);
+  it('clears the limit (DELETE) when the field is left empty', async () => {
+    vi.mocked(clearCategoryLimit).mockResolvedValue(undefined);
     await renderPage();
     const user = userEvent.setup();
 
@@ -378,7 +401,135 @@ describe('BudgetPage', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
+    expect(clearCategoryLimit).toHaveBeenCalledWith(CURRENT_MONTH, 'c2');
+    expect(setCategoryLimit).not.toHaveBeenCalled();
+    expect(showSuccessToast).toHaveBeenCalled();
+    // DELETE returns no view — the month is refetched.
+    await waitFor(() => expect(getBudget).toHaveBeenCalledTimes(2));
+  });
+
+  it('saves an explicit 0 as a deliberate zero limit, not a clear', async () => {
+    vi.mocked(setCategoryLimit).mockResolvedValue(defaultView);
+    await renderPage();
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Edit limit for Dining out' }),
+    );
+    await user.type(
+      screen.getByRole('textbox', { name: 'Monthly limit for Dining out' }),
+      '0',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
     expect(setCategoryLimit).toHaveBeenCalledWith(CURRENT_MONTH, 'c2', 0);
+    expect(clearCategoryLimit).not.toHaveBeenCalled();
+  });
+
+  it('discards a save that resolves after a month switch and resyncs', async () => {
+    let resolveSave!: (v: BudgetView) => void;
+    vi.mocked(setCategoryLimit).mockImplementation(
+      () => new Promise((res) => (resolveSave = res)),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Edit limit for Groceries' }),
+    );
+    const input = screen.getByRole('textbox', {
+      name: 'Monthly limit for Groceries',
+    });
+    await user.clear(input);
+    await user.type(input, '600');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    // Switch months while the save is in flight.
+    await user.click(screen.getByRole('button', { name: 'Previous month' }));
+    expect(getBudget).toHaveBeenCalledTimes(2);
+
+    const updated = budgetView({
+      ...defaultView,
+      categories: [
+        {
+          categoryId: 'c1',
+          plannedCents: 60000,
+          actualCents: 12000,
+          remainingCents: 48000,
+          isIncome: false,
+        },
+      ],
+    });
+    await act(async () => resolveSave(updated));
+
+    // The returned view is for a month no longer on screen: not rendered,
+    // and the selected month is refetched instead.
+    expect(screen.queryByText('$600.00')).not.toBeInTheDocument();
+    await waitFor(() => expect(getBudget).toHaveBeenCalledTimes(3));
+    expect(getBudget).toHaveBeenLastCalledWith(shiftMonth(CURRENT_MONTH, -1));
+  });
+
+  it('recovers via the Retry button after a load failure', async () => {
+    vi.mocked(getBudget).mockRejectedValueOnce(new Error('down'));
+    render(<BudgetPage />);
+    expect(await screen.findByText('down')).toBeInTheDocument();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(
+      await screen.findByRole('region', { name: 'Food' }),
+    ).toBeInTheDocument();
+    // Retry refetches the catalog too.
+    expect(listCategories).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces a catalog load error even when the budget loads', async () => {
+    vi.mocked(listCategories).mockRejectedValue(
+      new Error('Failed to load categories'),
+    );
+    render(<BudgetPage />);
+    expect(
+      await screen.findByText('Failed to load categories'),
+    ).toBeInTheDocument();
+  });
+
+  it('cancels an edit without saving', async () => {
+    await renderPage();
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Edit limit for Groceries' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(
+      screen.queryByRole('textbox', { name: 'Monthly limit for Groceries' }),
+    ).not.toBeInTheDocument();
+    expect(setCategoryLimit).not.toHaveBeenCalled();
+    expect(clearCategoryLimit).not.toHaveBeenCalled();
+  });
+
+  it('closes an open editor when the month changes', async () => {
+    await renderPage();
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Edit limit for Groceries' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Previous month' }));
+    await user.click(screen.getByRole('button', { name: 'Next month' }));
+
+    await screen.findByRole('region', { name: 'Food' });
+    expect(
+      screen.queryByRole('textbox', { name: 'Monthly limit for Groceries' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('offers no limit editor on income rows', async () => {
+    await renderPage();
+    expect(
+      screen.queryByRole('button', { name: 'Edit limit for Paycheck' }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps a newly opened editor when an earlier save resolves', async () => {

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   getBudget,
   setCategoryLimit,
+  clearCategoryLimit,
   buildBudgetGroups,
   shiftMonth,
   formatMonth,
@@ -78,7 +79,10 @@ export default function BudgetPage() {
   const [categories, setCategories] = useState<BudgetCategory[] | null>(null);
   const [budgetError, setBudgetError] = useState<string | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  // Separate keys so a budget-only resync (e.g. after a failed save) doesn't
+  // refetch the month-independent catalog; Retry bumps both.
+  const [catalogReloadKey, setCatalogReloadKey] = useState(0);
+  const [budgetReloadKey, setBudgetReloadKey] = useState(0);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -86,14 +90,19 @@ export default function BudgetPage() {
 
   // The month a save response must match to be applied — a save resolving
   // after the user switched months is stale for the screen now showing.
+  // Written in an effect (not during render) so a discarded concurrent render
+  // can't leave it pointing at a month that never committed.
   const monthRef = useRef(month);
-  monthRef.current = month;
-  // Bumped when a save response is applied: a budget refetch that started
-  // before the latest applied save carries pre-save data and must be dropped.
+  useEffect(() => {
+    monthRef.current = month;
+  }, [month]);
+  // Bumped whenever a save succeeds: any budget refetch that started before
+  // the save carries pre-save data and must be dropped, whether it resolves
+  // or rejects.
   const saveEpoch = useRef(0);
 
   // The category catalog is month-independent — fetched once, and again only
-  // on an explicit resync (reloadKey).
+  // on an explicit retry.
   useEffect(() => {
     let cancelled = false;
     Promise.all([listCategories(true), listCategoryGroups()])
@@ -113,7 +122,7 @@ export default function BudgetPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [catalogReloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,16 +134,17 @@ export default function BudgetPage() {
         setBudgetError(null);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setBudgetError(
-            err instanceof Error ? err.message : 'Failed to load budget',
-          );
-        }
+        // A pre-save fetch's failure is as stale as its data — don't paint an
+        // error over the freshly saved view.
+        if (cancelled || saveEpoch.current !== epoch) return;
+        setBudgetError(
+          err instanceof Error ? err.message : 'Failed to load budget',
+        );
       });
     return () => {
       cancelled = true;
     };
-  }, [month, reloadKey]);
+  }, [month, budgetReloadKey]);
 
   // Only data for the selected month may render — after a month switch the
   // previous month's view is stale until the new fetch lands.
@@ -151,6 +161,9 @@ export default function BudgetPage() {
 
   const switchMonth = (delta: number) => {
     setEditingId(null);
+    // The old month's failure isn't the new month's — show loading, not a
+    // stale error, while the new fetch is in flight.
+    setBudgetError(null);
     setMonth((m) => shiftMonth(m, delta));
   };
 
@@ -163,34 +176,50 @@ export default function BudgetPage() {
 
   const handleSave = async (e: FormEvent, categoryId: string) => {
     e.preventDefault();
-    // An empty field means "no limit" — save it as zero.
-    const cents =
-      editValue.trim() === '' ? 0 : dollarsToCents(editValue);
+    // An empty field means "no limit": delete the entry rather than upserting
+    // a zero limit, which would pin a BudgetCategory document to the category
+    // (blocking its hard-delete) for no reason. An explicit "0" is kept as a
+    // deliberate zero limit.
+    const clearing = editValue.trim() === '';
+    const cents = clearing ? 0 : dollarsToCents(editValue);
     if (cents === null) {
       showErrorToast('Enter a valid non-negative amount, e.g. 250.00');
       return;
     }
     setSaving(true);
     try {
-      const res = await setCategoryLimit(monthRef.current, categoryId, cents);
-      saveEpoch.current += 1;
-      // Apply the recomputed view the save returned; if the user has since
-      // switched months it's stale — refetch the current month instead.
-      if (res.month === monthRef.current) {
-        setView(res);
+      if (clearing) {
+        await clearCategoryLimit(monthRef.current, categoryId);
+        saveEpoch.current += 1;
+        // DELETE returns no view — refetch the month.
+        setBudgetReloadKey((k) => k + 1);
+        showSuccessToast('Limit cleared');
       } else {
-        setReloadKey((k) => k + 1);
+        const res = await setCategoryLimit(
+          monthRef.current,
+          categoryId,
+          cents,
+        );
+        saveEpoch.current += 1;
+        // Apply the recomputed view the save returned; if the user has since
+        // switched months it's stale — refetch the current month instead.
+        if (res.month === monthRef.current) {
+          setView(res);
+          setBudgetError(null);
+        } else {
+          setBudgetReloadKey((k) => k + 1);
+        }
+        showSuccessToast('Limit saved');
       }
       // Close only this row's editor — the user may have moved on to another
       // row while the save was in flight.
       setEditingId((prev) => (prev === categoryId ? null : prev));
-      showSuccessToast('Limit saved');
     } catch (err) {
       showErrorToast(
         err instanceof Error ? err.message : 'Failed to save limit',
       );
-      // The write may still have applied — resync.
-      setReloadKey((k) => k + 1);
+      // The write may still have applied — resync the budget.
+      setBudgetReloadKey((k) => k + 1);
     } finally {
       setSaving(false);
     }
@@ -230,7 +259,10 @@ export default function BudgetPage() {
           <div>
             <p className="text-red-600 dark:text-red-400">{error}</p>
             <button
-              onClick={() => setReloadKey((k) => k + 1)}
+              onClick={() => {
+                setCatalogReloadKey((k) => k + 1);
+                setBudgetReloadKey((k) => k + 1);
+              }}
               className="mt-3 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg"
             >
               Retry
@@ -324,15 +356,20 @@ export default function BudgetPage() {
                       >
                         {formatCents(row.remainingCents)}
                       </span>
-                      {!row.isArchived && editingId !== row.categoryId && (
-                        <button
-                          onClick={() => startEditing(row)}
-                          aria-label={`Edit limit for ${row.name}`}
-                          className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                        >
-                          Edit
-                        </button>
-                      )}
+                      {/* No editor on income rows: the backend excludes
+                          income "limits" from every rollup, so a saved one
+                          would silently disagree with the summary. */}
+                      {!row.isArchived &&
+                        !row.isIncome &&
+                        editingId !== row.categoryId && (
+                          <button
+                            onClick={() => startEditing(row)}
+                            aria-label={`Edit limit for ${row.name}`}
+                            className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            Edit
+                          </button>
+                        )}
                     </div>
                     {editingId === row.categoryId && (
                       <form

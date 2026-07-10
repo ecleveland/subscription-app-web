@@ -13,6 +13,8 @@ export interface BudgetCategoryView {
 }
 
 export interface BudgetView {
+  // "YYYY-MM" — echoed verbatim from the request, which is what makes the
+  // page's staleness checks (view.month === selected month) sound.
   month: string;
   // Union of {categories with a planned limit} ∪ {categories with spend this
   // month} — NOT the full category catalog (see buildBudgetGroups).
@@ -25,6 +27,8 @@ export interface BudgetView {
   toBeBudgetedCents: number;
 }
 
+// Mirrors the backend's BulkBudgetCategoryLimitDto: plannedCents must be an
+// integer ≥ 0, and a bulk call accepts at most 500 entries.
 export interface BudgetEntry {
   categoryId: string;
   plannedCents: number;
@@ -32,6 +36,19 @@ export interface BudgetEntry {
 
 export function getBudget(month: string): Promise<BudgetView> {
   return apiFetch<BudgetView>(`/budgets/${month}`);
+}
+
+// Remove a category's limit for the month entirely (idempotent 204). Distinct
+// from upserting plannedCents 0: a zero limit keeps a BudgetCategory document
+// alive, which blocks hard-deleting the category and pins it in the month's
+// view union.
+export function clearCategoryLimit(
+  month: string,
+  categoryId: string,
+): Promise<void> {
+  return apiFetch<void>(`/budgets/${month}/categories/${categoryId}`, {
+    method: 'DELETE',
+  });
 }
 
 // Additive upsert of the listed limits; returns the recomputed view.
@@ -77,19 +94,18 @@ export function formatMonth(month: string): string {
   }).format(new Date(`${month}-01T00:00:00Z`));
 }
 
-export interface BudgetRow {
-  categoryId: string;
+// A view row joined with its catalog identity (name/archived state). isIncome
+// is taken from the catalog, which the backend guarantees agrees with the view
+// (a category's isIncome cannot be changed after creation).
+export interface BudgetRow extends BudgetCategoryView {
   name: string;
-  isIncome: boolean;
   isArchived: boolean;
-  plannedCents: number;
-  actualCents: number;
-  remainingCents: number;
 }
 
 export interface BudgetGroupRows {
   groupId: string;
   name: string;
+  // Never empty: buildBudgetGroups omits groups with no rows.
   rows: BudgetRow[];
 }
 
@@ -103,8 +119,8 @@ const bySortOrder = <T extends { sortOrder: number; name: string }>(
  * category catalog, grouped for display. Every active category gets a row —
  * zeroed when it has no limit or spend yet, so there's always a row to type a
  * first limit into. Archived categories appear only when the view has data for
- * them (historical spend); view rows for unknown categories are dropped and
- * empty groups omitted.
+ * them (historical spend or a previously set limit); view rows for unknown
+ * categories are dropped and empty groups omitted.
  */
 export function buildBudgetGroups(
   view: BudgetView,
@@ -115,33 +131,36 @@ export function buildBudgetGroups(
     view.categories.map((v) => [v.categoryId, v]),
   );
 
-  const rows = categories
-    .filter((c) => !c.isArchived || viewByCategoryId.has(c._id))
-    .map((c) => {
-      const v = viewByCategoryId.get(c._id);
-      return {
-        groupId: c.groupId,
-        sortOrder: c.sortOrder,
+  const rowsByGroupId = new Map<
+    string,
+    Array<{ sortOrder: number; name: string; row: BudgetRow }>
+  >();
+  for (const c of categories) {
+    const v = viewByCategoryId.get(c._id);
+    if (c.isArchived && !v) continue;
+    const bucket = rowsByGroupId.get(c.groupId) ?? [];
+    bucket.push({
+      sortOrder: c.sortOrder,
+      name: c.name,
+      row: {
+        categoryId: c._id,
         name: c.name,
-        row: {
-          categoryId: c._id,
-          name: c.name,
-          isIncome: c.isIncome,
-          isArchived: c.isArchived,
-          plannedCents: v?.plannedCents ?? 0,
-          actualCents: v?.actualCents ?? 0,
-          remainingCents: v?.remainingCents ?? 0,
-        },
-      };
+        isIncome: c.isIncome,
+        isArchived: c.isArchived,
+        plannedCents: v?.plannedCents ?? 0,
+        actualCents: v?.actualCents ?? 0,
+        remainingCents: v?.remainingCents ?? 0,
+      },
     });
+    rowsByGroupId.set(c.groupId, bucket);
+  }
 
   return [...groups]
     .sort(bySortOrder)
     .map((g) => ({
       groupId: g._id,
       name: g.name,
-      rows: rows
-        .filter((r) => r.groupId === g._id)
+      rows: (rowsByGroupId.get(g._id) ?? [])
         .sort(bySortOrder)
         .map((r) => r.row),
     }))
