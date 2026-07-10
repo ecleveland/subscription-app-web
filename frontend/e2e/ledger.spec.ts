@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { uniqueName } from './helpers';
-import { createAccount } from './actions';
+import { addExpense, createAccount } from './actions';
 
 /** The accounts-list row for a given account name. */
 function accountRow(page: Page, name: string) {
@@ -20,15 +20,12 @@ test.describe('Accounts & transaction ledger', () => {
     await expect(accountRow(page, checking)).toContainText('$1,000.00');
 
     // Record a $42 expense against checking.
-    await page.goto('/transactions');
-    await page.getByRole('button', { name: '+ Add transaction' }).click();
-    await page.getByLabel('Type', { exact: true }).selectOption('expense');
-    await page.getByLabel('Account', { exact: true }).selectOption({ label: checking });
-    await page.getByLabel('Category', { exact: true }).selectOption({ label: 'Groceries' });
-    await page.getByLabel('Amount ($)').fill('42.00');
-    await page.getByLabel('Payee').fill('Whole Foods');
-    await page.getByRole('button', { name: 'Add', exact: true }).click();
-
+    await addExpense(page, {
+      account: checking,
+      category: 'Groceries',
+      amount: '42.00',
+      payee: 'Whole Foods',
+    });
     await expect(
       page.getByRole('listitem').filter({ hasText: 'Whole Foods' }),
     ).toContainText('-$42.00');
