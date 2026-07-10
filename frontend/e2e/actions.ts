@@ -78,8 +78,11 @@ export async function addExpense(
   await page.getByLabel('Amount ($)').fill(tx.amount);
   await page.getByLabel('Payee').fill(tx.payee);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
+  // .first(): payees aren't necessarily unique (a CI retry re-adds the same
+  // payee into the not-yet-dropped e2e DB), and a strict-mode violation here
+  // would turn a transient flake into a deterministic failure.
   await expect(
-    page.getByRole('listitem').filter({ hasText: tx.payee }),
+    page.getByRole('listitem').filter({ hasText: tx.payee }).first(),
   ).toBeVisible();
 }
 

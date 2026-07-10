@@ -292,7 +292,12 @@ export default function BudgetPage() {
             <p className="text-red-600 dark:text-red-400">{error}</p>
             <button
               onClick={() => {
-                setCatalogReloadKey((k) => k + 1);
+                // Refetch only what failed: a healthy catalog doesn't need
+                // another round trip, and a transient failure on that needless
+                // refetch would toast an error over a working page.
+                if (!catalogLoaded.current) {
+                  setCatalogReloadKey((k) => k + 1);
+                }
                 setBudgetReloadKey((k) => k + 1);
               }}
               className="mt-3 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg"
@@ -409,18 +414,19 @@ export default function BudgetPage() {
                             Edit
                           </button>
                         )}
-                      {!row.isArchived &&
-                        row.isIncome &&
-                        row.plannedCents > 0 && (
-                          <button
-                            onClick={() => clearLimit(row.categoryId)}
-                            disabled={saving}
-                            aria-label={`Clear limit for ${row.name}`}
-                            className="text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
-                          >
-                            Clear
-                          </button>
-                        )}
+                      {/* Offered on archived income rows too — a stale limit
+                          is what pins an archived category into the view, so
+                          Clear must stay reachable there. */}
+                      {row.isIncome && row.plannedCents > 0 && (
+                        <button
+                          onClick={() => clearLimit(row.categoryId)}
+                          disabled={saving}
+                          aria-label={`Clear limit for ${row.name}`}
+                          className="text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                        >
+                          Clear
+                        </button>
+                      )}
                     </div>
                     {editingId === row.categoryId && (
                       <form

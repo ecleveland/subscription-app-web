@@ -434,6 +434,17 @@ describe('BudgetPage', () => {
 
   it('lets a stale income limit be cleared, but not edited', async () => {
     vi.mocked(clearCategoryLimit).mockResolvedValue(undefined);
+    vi.mocked(listCategories).mockResolvedValue([
+      ...categories,
+      category({
+        _id: 'c5',
+        name: 'Old Salary',
+        groupId: 'g2',
+        isIncome: true,
+        isArchived: true,
+        sortOrder: 1,
+      }),
+    ]);
     vi.mocked(getBudget).mockResolvedValue(
       budgetView({
         categories: [
@@ -444,15 +455,28 @@ describe('BudgetPage', () => {
             remainingCents: 400000,
             isIncome: true,
           },
+          {
+            categoryId: 'c5',
+            plannedCents: 100000,
+            actualCents: 0,
+            remainingCents: 100000,
+            isIncome: true,
+          },
         ],
       }),
     );
     await renderPage();
     const user = userEvent.setup();
 
-    const income = within(
-      screen.getByRole('region', { name: 'Income' }),
-    ).getByRole('listitem');
+    // An archived income row's stale limit must stay clearable — the limit is
+    // exactly what pins the archived category into the view.
+    expect(
+      screen.getByRole('button', { name: 'Clear limit for Old Salary' }),
+    ).toBeInTheDocument();
+
+    const income = within(screen.getByRole('region', { name: 'Income' }))
+      .getAllByRole('listitem')
+      .find((li) => li.textContent?.includes('Paycheck'))!;
     expect(within(income).getByText('$4,000.00')).toBeInTheDocument();
     // Income "remaining" is informational noise — rendered as a dash.
     expect(within(income).getByText('—')).toBeInTheDocument();
@@ -553,18 +577,26 @@ describe('BudgetPage', () => {
     expect(
       await screen.findByRole('region', { name: 'Food' }),
     ).toBeInTheDocument();
-    // Retry refetches the catalog too.
-    expect(listCategories).toHaveBeenCalledTimes(2);
+    // The catalog loaded fine — a budget-only Retry leaves it alone.
+    expect(listCategories).toHaveBeenCalledTimes(1);
   });
 
-  it('surfaces a catalog load error even when the budget loads', async () => {
-    vi.mocked(listCategories).mockRejectedValue(
-      new Error('Failed to load categories'),
-    );
+  it('surfaces a catalog load error and Retry refetches it', async () => {
+    vi.mocked(listCategories)
+      .mockRejectedValueOnce(new Error('Failed to load categories'))
+      .mockResolvedValue(categories);
     render(<BudgetPage />);
     expect(
       await screen.findByText('Failed to load categories'),
     ).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(
+      await screen.findByRole('region', { name: 'Food' }),
+    ).toBeInTheDocument();
+    expect(listCategories).toHaveBeenCalledTimes(2);
   });
 
   it('cancels an edit without saving', async () => {
