@@ -1,0 +1,123 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
+
+export type RecurringTransactionDocument =
+  HydratedDocument<RecurringTransaction>;
+
+// income | expense only — recurring transfers are out of scope for Phase 4, so
+// this deliberately does not reuse TransactionType (which includes transfer).
+export enum RecurringType {
+  INCOME = 'income',
+  EXPENSE = 'expense',
+}
+
+// Values intentionally identical to Subscription.BillingCycle so the VEG-469
+// fold-in maps billingCycle → cadence 1:1.
+export enum RecurringCadence {
+  WEEKLY = 'weekly',
+  MONTHLY = 'monthly',
+  YEARLY = 'yearly',
+}
+
+// A recurring schedule (per budgeting.md § RecurringTransaction): the template
+// the Phase 4 scheduler materializes into ledger Transactions when nextDate
+// comes due. Bills are type: expense; scheduled income (paychecks) is type:
+// income. A subscription is just a schedule with isSubscription: true — the
+// Subscriptions page becomes a filtered view of this collection (VEG-469).
+@Schema({ timestamps: true })
+export class RecurringTransaction {
+  // Ownership/visibility scope, resolved server-side by HouseholdGuard — never
+  // trusted from the client. No standalone index: the compound
+  // { householdId: 1, nextDate: 1 } below has householdId as its prefix.
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Household',
+    required: true,
+  })
+  householdId: MongooseSchema.Types.ObjectId;
+
+  // The account materialized Transactions post to. Optional: legacy
+  // subscriptions migrate without one (VEG-469), and the scheduler skips
+  // account-less schedules until an account is assigned. New schedules created
+  // via the API require it at the DTO layer (VEG-466).
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Account' })
+  accountId?: MongooseSchema.Types.ObjectId;
+
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Category',
+    required: true,
+  })
+  categoryId: MongooseSchema.Types.ObjectId;
+
+  // Attribution: the HouseholdMember who created the schedule. Optional —
+  // mirrors Transaction.memberId / Subscription.memberId.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'HouseholdMember' })
+  memberId?: MongooseSchema.Types.ObjectId;
+
+  @Prop({ required: true, enum: RecurringType })
+  type: RecurringType;
+
+  // Positive integer magnitude in minor units (cents); sign comes from `type`.
+  // Enforced at the schema layer (not just DTOs) because the scheduler and the
+  // VEG-469 migration write outside the DTO pipeline — same rationale as
+  // Transaction.amountCents.
+  @Prop({
+    required: true,
+    min: 1,
+    validate: {
+      validator: Number.isInteger,
+      message: 'amountCents must be a positive integer (minor units)',
+    },
+  })
+  amountCents: number;
+
+  // The schedule's display identity (Subscription.name maps here in VEG-469) —
+  // required, unlike the optional payee on one-off Transactions.
+  @Prop({ required: true, trim: true })
+  payee: string;
+
+  @Prop({ trim: true })
+  notes?: string;
+
+  @Prop({ type: [String], default: [] })
+  tags: string[];
+
+  @Prop({ required: true, enum: RecurringCadence })
+  cadence: RecurringCadence;
+
+  // The next occurrence: the date the scheduler materializes a Transaction for
+  // and then advances by `cadence`.
+  @Prop({ required: true })
+  nextDate: Date;
+
+  @Prop({ default: 3, min: 0, max: 30 })
+  reminderDaysBefore: number;
+
+  // Last date the schedule may materialize; absent means it runs indefinitely.
+  @Prop({ required: false })
+  endDate?: Date;
+
+  // Pause/resume without deleting history (mirrors Subscription.isActive).
+  // Also the equality prefix of the cron-scan index below.
+  @Prop({ default: true })
+  isActive: boolean;
+
+  // Marks schedules that surface on the Subscriptions page — a filtered view
+  // of this collection, not a separate silo (VEG-469).
+  @Prop({ default: false })
+  isSubscription: boolean;
+
+  // Number of people splitting the cost (mirrors Subscription.sharedWith).
+  @Prop({ required: false, min: 2 })
+  sharedWith?: number;
+}
+
+export const RecurringTransactionSchema =
+  SchemaFactory.createForClass(RecurringTransaction);
+
+// Household-scoped lists sorted by next occurrence (upcoming-bills view).
+RecurringTransactionSchema.index({ householdId: 1, nextDate: 1 });
+// Daily scheduler/reminder crons: scan active schedules by due date across all
+// households (mirrors { isActive, nextBillingDate } on Subscription).
+RecurringTransactionSchema.index({ isActive: 1, nextDate: 1 });
