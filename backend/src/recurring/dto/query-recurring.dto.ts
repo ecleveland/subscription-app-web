@@ -1,19 +1,7 @@
 import { IsBoolean, IsEnum, IsMongoId, IsOptional } from 'class-validator';
-import { Transform, TransformFnParams } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { RecurringType } from '../schemas/recurring-transaction.schema';
-
-// Map a boolean-ish query-param literal to a boolean; return anything else
-// unchanged so @IsBoolean rejects it with a 400. Reads the RAW value off the
-// plain object (class-transformer supplies the property key) because
-// enableImplicitConversion coerces the string "false" to boolean true before
-// a value-based transform would run.
-function coerceBooleanParam({ obj, key }: TransformFnParams): unknown {
-  const raw = (obj as Record<string, unknown>)[key];
-  if (raw === true || raw === 'true') return true;
-  if (raw === false || raw === 'false') return false;
-  return raw;
-}
+import { TransformBooleanParam } from '../../common/validation/transform-raw-value';
 
 export class QueryRecurringDto {
   @ApiPropertyOptional({ enum: RecurringType })
@@ -35,7 +23,7 @@ export class QueryRecurringDto {
     description: 'Only subscriptions (true) or only non-subscriptions (false)',
   })
   @IsOptional()
-  @Transform(coerceBooleanParam)
+  @TransformBooleanParam
   @IsBoolean()
   isSubscription?: boolean;
 
@@ -43,7 +31,7 @@ export class QueryRecurringDto {
     description: 'Only active (true) or only paused (false) schedules',
   })
   @IsOptional()
-  @Transform(coerceBooleanParam)
+  @TransformBooleanParam
   @IsBoolean()
   isActive?: boolean;
 }

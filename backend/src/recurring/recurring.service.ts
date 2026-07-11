@@ -30,8 +30,9 @@ interface ScheduleState {
 
 // Household-scoped CRUD for recurring schedules (VEG-466). The materialization
 // scheduler (VEG-467) and reminders (VEG-468) build on the model and the
-// { isActive, nextDate } index; the subscriptions fold-in (VEG-469) reuses
-// validateScheduleState for its non-DTO write path.
+// { isActive, nextDate } index; the subscriptions fold-in (VEG-469) writes
+// outside the ValidationPipe and leans on the schema-level validators as its
+// backstop.
 @Injectable()
 export class RecurringService {
   private readonly logger = new Logger(RecurringService.name);
@@ -141,20 +142,21 @@ export class RecurringService {
   ): Promise<RecurringTransactionDocument> {
     const existing = await this.findOne(householdId, id);
 
+    const mergedNextDate =
+      dto.nextDate !== undefined ? new Date(dto.nextDate) : existing.nextDate;
+    const mergedEndDate =
+      dto.endDate === undefined
+        ? existing.endDate
+        : dto.endDate === null
+          ? undefined
+          : new Date(dto.endDate);
+
     this.validateScheduleState(
       {
         type: dto.type ?? existing.type,
         isSubscription: dto.isSubscription ?? existing.isSubscription,
-        nextDate:
-          dto.nextDate !== undefined
-            ? new Date(dto.nextDate)
-            : existing.nextDate,
-        endDate:
-          dto.endDate === undefined
-            ? existing.endDate
-            : dto.endDate === null
-              ? undefined
-              : new Date(dto.endDate),
+        nextDate: mergedNextDate,
+        endDate: mergedEndDate,
       },
       // Only a patch that touches a date can create an impossible window; a
       // scheduler-completed doc (nextDate advanced past endDate, VEG-467)
@@ -168,7 +170,9 @@ export class RecurringService {
     // onto an account/category archived while the schedule was paused.
     // Corrections to a schedule already sitting on an archived reference stay
     // allowed. Legacy docs (VEG-469) may have no accountId at all — optional
-    // chaining keeps that safe.
+    // chaining keeps that safe. Ids compare case-insensitively: @IsMongoId
+    // admits uppercase hex, and echoing the current reference uppercased
+    // must not count as a re-point.
     const existingAccountId = (
       existing.accountId as unknown as Types.ObjectId | undefined
     )?.toString();
@@ -176,16 +180,30 @@ export class RecurringService {
       existing.categoryId as unknown as Types.ObjectId
     ).toString();
     const reactivating = dto.isActive === true && !existing.isActive;
-    const checks: Promise<unknown>[] = [];
-    if (dto.accountId !== undefined && dto.accountId !== existingAccountId) {
+    const checks: Promise<void>[] = [];
+    if (
+      dto.accountId !== undefined &&
+      dto.accountId.toLowerCase() !== existingAccountId
+    ) {
       checks.push(this.assertAccountUsable(householdId, dto.accountId));
     } else if (reactivating && existingAccountId) {
-      checks.push(this.assertAccountUsable(householdId, existingAccountId));
+      checks.push(
+        this.assertAccountUsable(householdId, existingAccountId, {
+          reactivating: true,
+        }),
+      );
     }
-    if (dto.categoryId !== undefined && dto.categoryId !== existingCategoryId) {
+    if (
+      dto.categoryId !== undefined &&
+      dto.categoryId.toLowerCase() !== existingCategoryId
+    ) {
       checks.push(this.assertCategoryUsable(householdId, dto.categoryId));
     } else if (reactivating) {
-      checks.push(this.assertCategoryUsable(householdId, existingCategoryId));
+      checks.push(
+        this.assertCategoryUsable(householdId, existingCategoryId, {
+          reactivating: true,
+        }),
+      );
     }
     await Promise.all(checks);
 
@@ -205,14 +223,11 @@ export class RecurringService {
     if (dto.notes !== undefined) existing.notes = dto.notes;
     if (dto.tags !== undefined) existing.tags = dto.tags;
     if (dto.cadence !== undefined) existing.cadence = dto.cadence;
-    if (dto.nextDate !== undefined) existing.nextDate = new Date(dto.nextDate);
+    if (dto.nextDate !== undefined) existing.nextDate = mergedNextDate;
     if (dto.reminderDaysBefore !== undefined) {
       existing.reminderDaysBefore = dto.reminderDaysBefore;
     }
-    if (dto.endDate !== undefined) {
-      existing.endDate =
-        dto.endDate === null ? undefined : new Date(dto.endDate);
-    }
+    if (dto.endDate !== undefined) existing.endDate = mergedEndDate;
     if (dto.isActive !== undefined) existing.isActive = dto.isActive;
     if (dto.isSubscription !== undefined) {
       existing.isSubscription = dto.isSubscription;
@@ -236,9 +251,18 @@ export class RecurringService {
     const existing = await this.findOne(householdId, id);
     // Materialized Transactions keep their recurringId — deleting the
     // schedule never touches the ledger.
-    await this.recurringModel
+    const result = await this.recurringModel
       .deleteOne({ _id: existing._id } as Record<string, unknown>)
       .exec();
+    if (result.deletedCount === 0) {
+      // Concurrent delete between findOne and deleteOne; the 204 is still
+      // correct (idempotent), but don't log a deletion that didn't happen.
+      this.logger.warn(
+        { householdId, recurringId: id },
+        'Recurring schedule already deleted',
+      );
+      return;
+    }
     this.logger.log(
       { householdId, recurringId: id },
       'Recurring schedule deleted',
@@ -266,10 +290,13 @@ export class RecurringService {
     if (state.isSubscription && state.type !== RecurringType.EXPENSE) {
       throw new BadRequestException('isSubscription requires type: expense');
     }
+    // Day granularity, not instants: endDate is "the last DATE the schedule
+    // may run", and @IsDateString admits full datetimes — a date-only endDate
+    // on the same calendar day as a noon nextDate is a valid final occurrence.
     if (
       checkDates &&
       state.endDate &&
-      state.endDate.getTime() < state.nextDate.getTime()
+      utcDay(state.endDate) < utcDay(state.nextDate)
     ) {
       throw new BadRequestException('endDate must be on or after nextDate');
     }
@@ -277,11 +304,14 @@ export class RecurringService {
 
   // Assert the account exists in this household and can take new activity.
   // Cross-household/missing references are a client error (400), not a 404 —
-  // the schedule is what's being created/updated.
+  // the schedule is what's being created/updated. `reactivating` only reworks
+  // the archived message: on PATCH { isActive: true } the client never sent
+  // an accountId, so blaming that field would point at nothing actionable.
   private async assertAccountUsable(
     householdId: string,
     accountId: string,
-  ): Promise<AccountDocument> {
+    { reactivating = false }: { reactivating?: boolean } = {},
+  ): Promise<void> {
     let account: AccountDocument;
     try {
       account = await this.accountsService.findOne(householdId, accountId);
@@ -295,15 +325,17 @@ export class RecurringService {
     }
     if (account.isArchived) {
       throw new BadRequestException(
-        'Cannot point a recurring schedule at an archived account',
+        reactivating
+          ? 'Cannot reactivate a schedule whose account is archived'
+          : 'Cannot point a recurring schedule at an archived account',
       );
     }
-    return account;
   }
 
   private async assertCategoryUsable(
     householdId: string,
     categoryId: string,
+    { reactivating = false }: { reactivating?: boolean } = {},
   ): Promise<void> {
     const category = await this.categoriesService.findInHousehold(
       householdId,
@@ -316,8 +348,15 @@ export class RecurringService {
     }
     if (category.isArchived) {
       throw new BadRequestException(
-        'Cannot point a recurring schedule at an archived category',
+        reactivating
+          ? 'Cannot reactivate a schedule whose category is archived'
+          : 'Cannot point a recurring schedule at an archived category',
       );
     }
   }
+}
+
+// The UTC calendar day of an instant, comparable with < / ===.
+function utcDay(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }

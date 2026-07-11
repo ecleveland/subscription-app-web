@@ -181,6 +181,27 @@ describe('RecurringService', () => {
       expect(recSave).toHaveBeenCalledTimes(1);
     });
 
+    it('compares the date pair at day granularity (date-only endDate vs datetime nextDate)', async () => {
+      // endDate is documented as "last DATE the schedule may run" — a
+      // date-only endDate on the same calendar day as a datetime nextDate
+      // must not be rejected just because midnight < noon.
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...validCreate(),
+        nextDate: '2026-08-01T12:00:00.000Z',
+        endDate: '2026-08-01',
+      });
+      expect(recSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows non-NotFound account-lookup failures untranslated', async () => {
+      // Only NotFoundException means "bad reference" — an infrastructure
+      // error must never be masked as a client 400.
+      accountsService.findOne.mockRejectedValue(new Error('connection reset'));
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, validCreate()),
+      ).rejects.toThrow('connection reset');
+    });
+
     it('rejects an ISO string JS cannot parse (week date) as 400, not a save-time 500', async () => {
       // @IsDateString (isISO8601) passes '2026-W32', but new Date() cannot
       // parse it — without the guard it becomes Invalid Date and blows up
@@ -393,6 +414,50 @@ describe('RecurringService', () => {
       mockModel.findById.mockReturnValue(createChainable(recDoc()));
       await service.update(HOUSEHOLD_ID, REC_ID, { accountId: ACC_ID });
       expect(accountsService.findOne).not.toHaveBeenCalled();
+    });
+
+    it('treats the same id in uppercase hex as unchanged (@IsMongoId admits uppercase)', async () => {
+      // A client echoing the current reference uppercased must not be
+      // misclassified as a re-point — that would 400 corrections on
+      // schedules whose reference was archived after create.
+      mockModel.findById.mockReturnValue(createChainable(recDoc()));
+      await service.update(HOUSEHOLD_ID, REC_ID, {
+        accountId: ACC_ID.toUpperCase(),
+        categoryId: CAT_ID.toUpperCase(),
+      });
+      expect(accountsService.findOne).not.toHaveBeenCalled();
+      expect(categoriesService.findInHousehold).not.toHaveBeenCalled();
+    });
+
+    it('rejects moving nextDate past the stored endDate', async () => {
+      // Proves the EXISTING endDate is merged into the validated state —
+      // not only patches that send both dates.
+      mockModel.findById.mockReturnValue(
+        createChainable(recDoc({ endDate: new Date('2026-12-31') })),
+      );
+      await expect(
+        service.update(HOUSEHOLD_ID, REC_ID, { nextDate: '2027-01-15' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('checks only the incoming account when a reactivation also re-points', async () => {
+      const doc = recDoc({ isActive: false });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+      await service.update(HOUSEHOLD_ID, REC_ID, {
+        isActive: true,
+        accountId: OTHER_ACC_ID,
+      });
+      expect(accountsService.findOne).toHaveBeenCalledTimes(1);
+      expect(accountsService.findOne).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        OTHER_ACC_ID,
+      );
+      // Category is unchanged but the schedule is being reactivated, so it
+      // still gets checked.
+      expect(categoriesService.findInHousehold).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        CAT_ID,
+      );
     });
 
     it('validates the incoming account on a legacy doc with no accountId', async () => {

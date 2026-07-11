@@ -31,6 +31,7 @@ describe('Recurring (e2e)', () => {
 
   // Household A fixtures.
   let householdIdA: string;
+  let memberIdA: string;
   let expenseCatA: string;
   let incomeCatA: string;
   let checkingA: string;
@@ -98,6 +99,7 @@ describe('Recurring (e2e)', () => {
     householdIdA = (
       membershipA!.householdId as { toString(): string }
     ).toString();
+    memberIdA = membershipA!._id.toString();
     expenseCatA = await seededCategory(householdIdA, false);
     incomeCatA = await seededCategory(householdIdA, true);
     checkingA = await createAccount(app, tokenA, {
@@ -169,6 +171,8 @@ describe('Recurring (e2e)', () => {
       expect(body.reminderDaysBefore).toBe(3);
       expect(body.tags).toEqual([]);
       expect(body.householdId).toBe(householdIdA);
+      // Attribution comes from the guard-resolved membership, never the body.
+      expect(body.memberId).toBe(memberIdA);
     });
 
     it('creates a scheduled income (paycheck)', async () => {
@@ -226,6 +230,10 @@ describe('Recurring (e2e)', () => {
       ['sharedWith below 2', { sharedWith: 1 }],
       ['ISO week-date nextDate JS cannot parse', { nextDate: '2026-W32' }],
       ['ISO ordinal endDate JS cannot parse', { endDate: '2026-213' }],
+      // The string "false" would implicitly coerce to boolean true without
+      // the raw-value transform — reject it rather than invert it.
+      ['string-boolean isActive', { isActive: 'false' }],
+      ['string-boolean isSubscription', { isSubscription: 'false' }],
     ])('rejects %s with 400', async (_label, overrides) => {
       await request(app.getHttpServer())
         .post('/api/recurring')
@@ -239,6 +247,22 @@ describe('Recurring (e2e)', () => {
         endDate: '2026-08-01',
         payee: 'Final run',
       });
+    });
+
+    it('compares the date pair at day granularity, not instants', async () => {
+      await createSchedule(tokenA, {
+        nextDate: '2026-08-01T12:00:00.000Z',
+        endDate: '2026-08-01',
+        payee: 'Same-day finale',
+      });
+    });
+
+    it('accepts endDate: null as "no end date"', async () => {
+      const body = await createSchedule(tokenA, {
+        endDate: null,
+        payee: 'Open-ended',
+      });
+      expect(body.endDate).toBeUndefined();
     });
 
     it("rejects household B's accountId with 400 (not 404)", async () => {
@@ -365,6 +389,24 @@ describe('Recurring (e2e)', () => {
         .expect(400);
     });
 
+    it('filters by isActive=false (paused schedules only)', async () => {
+      const paused = await createSchedule(tokenA, { payee: 'Paused bill' });
+      await request(app.getHttpServer())
+        .patch(`/api/recurring/${paused._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isActive: false })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .get('/api/recurring?isActive=false')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(res.body.length).toBeGreaterThan(0);
+      for (const s of res.body) {
+        expect(s.isActive).toBe(false);
+      }
+    });
+
     it('filters by accountId and categoryId', async () => {
       const other = await createAccount(app, tokenA, {
         name: 'Second',
@@ -474,7 +516,17 @@ describe('Recurring (e2e)', () => {
       ['null nextDate', { nextDate: null }],
       ['null payee', { payee: null }],
       ['null reminderDaysBefore', { reminderDaysBefore: null }],
+      ['null type', { type: null }],
+      ['null cadence', { cadence: null }],
+      ['null accountId', { accountId: null }],
+      ['null categoryId', { categoryId: null }],
+      ['null amountCents', { amountCents: null }],
+      ['null tags', { tags: null }],
+      ['null isActive', { isActive: null }],
+      ['null isSubscription', { isSubscription: null }],
       ['float amountCents', { amountCents: 10.5 }],
+      ['whitespace-only payee', { payee: '   ' }],
+      ['string-boolean isSubscription', { isSubscription: 'false' }],
       ['unknown field', { billingCycle: 'monthly' }],
     ])('rejects %s with 400 (never a Mongoose 500)', async (_l, patch) => {
       await request(app.getHttpServer())
@@ -512,6 +564,24 @@ describe('Recurring (e2e)', () => {
         .patch(`/api/recurring/${scheduleId}`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ endDate: '2026-01-01' })
+        .expect(400);
+    });
+
+    it('rejects moving nextDate past the stored endDate', async () => {
+      // The fixture's endDate is 2026-12-31; the merged state must reject a
+      // nextDate beyond it even though the patch never mentions endDate.
+      await request(app.getHttpServer())
+        .patch(`/api/recurring/${scheduleId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ nextDate: '2027-01-15' })
+        .expect(400);
+    });
+
+    it('400s on a malformed id', async () => {
+      await request(app.getHttpServer())
+        .patch('/api/recurring/not-an-id')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ payee: 'X' })
         .expect(400);
     });
 
@@ -560,6 +630,41 @@ describe('Recurring (e2e)', () => {
         .expect(200);
     });
 
+    it('rejects reactivating a paused schedule whose category is now archived', async () => {
+      const catRes = await request(app.getHttpServer())
+        .post('/api/categories')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Doomed category',
+          groupId: (
+            (await categoryModel.findById(expenseCatA).exec())!
+              .groupId as unknown as Types.ObjectId
+          ).toString(),
+        })
+        .expect(201);
+      const doomedCat = catRes.body._id;
+      const schedule = await createSchedule(tokenA, {
+        categoryId: doomedCat,
+        payee: 'On doomed category',
+      });
+      await request(app.getHttpServer())
+        .patch(`/api/recurring/${schedule._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isActive: false })
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/api/categories/${doomedCat}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isArchived: true })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .patch(`/api/recurring/${schedule._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isActive: true })
+        .expect(400);
+    });
+
     it("rejects re-pointing at household B's account with 400", async () => {
       await request(app.getHttpServer())
         .patch(`/api/recurring/${scheduleId}`)
@@ -586,6 +691,13 @@ describe('Recurring (e2e)', () => {
   });
 
   describe('DELETE /api/recurring/:id', () => {
+    it('400s on a malformed id', async () => {
+      await request(app.getHttpServer())
+        .delete('/api/recurring/not-an-id')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+    });
+
     it('deletes an owned schedule (204, then 404 on fetch)', async () => {
       const id = (await createSchedule(tokenA, { payee: 'Delete me' }))._id;
       await request(app.getHttpServer())

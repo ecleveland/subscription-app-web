@@ -10,7 +10,6 @@ import {
   IsString,
   Max,
   Min,
-  ValidateIf,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -19,6 +18,8 @@ import {
   RecurringType,
 } from '../schemas/recurring-transaction.schema';
 import { ValidateIfDefined } from '../../common/validation/validate-if-defined';
+import { ValidateIfNotNullish } from '../../common/validation/validate-if-not-nullish';
+import { TransformRawValue } from '../../common/validation/transform-raw-value';
 
 export class CreateRecurringDto {
   // Required here even though the schema prop is optional: only migrated
@@ -102,20 +103,16 @@ export class CreateRecurringDto {
   @ApiPropertyOptional({
     description: 'Last date the schedule may run (ISO 8601); null = none',
   })
-  @ValidateIf((o: CreateRecurringDto) => o.endDate !== null)
-  @IsOptional()
+  @ValidateIfNotNullish
   @IsDateString()
   endDate?: string | null;
 
-  // Restore the raw request value: enableImplicitConversion coerces the string
-  // "false" to boolean true before validation, so validate against the
-  // pre-coercion value from the plain object — a string fails @IsBoolean.
   @ApiPropertyOptional({
     description: 'Pause/resume without deleting history',
     default: true,
   })
   @ValidateIfDefined
-  @Transform(({ obj }) => (obj as Record<string, unknown>).isActive)
+  @TransformRawValue
   @IsBoolean()
   isActive?: boolean;
 
@@ -125,7 +122,7 @@ export class CreateRecurringDto {
     default: false,
   })
   @ValidateIfDefined
-  @Transform(({ obj }) => (obj as Record<string, unknown>).isSubscription)
+  @TransformRawValue
   @IsBoolean()
   isSubscription?: boolean;
 
@@ -137,9 +134,8 @@ export class CreateRecurringDto {
     example: 3,
     minimum: 2,
   })
-  @ValidateIf((o: CreateRecurringDto) => o.sharedWith !== null)
+  @ValidateIfNotNullish
   @IsInt()
   @Min(2)
-  @IsOptional()
   sharedWith?: number | null;
 }
