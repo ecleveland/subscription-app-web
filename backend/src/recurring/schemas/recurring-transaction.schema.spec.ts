@@ -58,8 +58,10 @@ describe('RecurringCadence', () => {
 });
 
 describe('RecurringTransactionSchema validation', () => {
-  it('accepts a minimal well-formed schedule', () => {
-    expect(new RecurringModel(valid()).validateSync()).toBeUndefined();
+  it('accepts a minimal well-formed schedule (no account: migrated legacy subscriptions)', () => {
+    const doc = new RecurringModel(valid());
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.accountId).toBeUndefined();
   });
 
   it('requires householdId, categoryId, type, amountCents, payee, cadence, nextDate', () => {
@@ -82,12 +84,6 @@ describe('RecurringTransactionSchema validation', () => {
       new RecurringModel({ ...valid(), payee: '   ' }).validateSync()?.errors
         .payee,
     ).toBeDefined();
-  });
-
-  it('accepts a schedule without an account (migrated legacy subscriptions)', () => {
-    const doc = new RecurringModel(valid());
-    expect(doc.validateSync()).toBeUndefined();
-    expect(doc.accountId).toBeUndefined();
   });
 
   it('accepts optional accountId, memberId, notes, endDate, sharedWith', () => {
@@ -225,10 +221,13 @@ describe('RecurringTransactionSchema validation', () => {
     // The invariant is enforced on the save path; updates use load-and-save
     // (VEG-466).
     const { validators } = RecurringTransactionSchema.path('isSubscription');
-    const custom = validators[validators.length - 1].validator as unknown as (
-      this: unknown,
-      v: boolean,
-    ) => boolean;
+    // Select by message, not position — mongoose may reorder/augment the
+    // validator list, and pinning the wrong one would let a regression in
+    // the Document escape hatch ship while this test stays green.
+    const custom = validators.find((v) =>
+      String(v.message).includes('isSubscription'),
+    )?.validator as unknown as (this: unknown, v: boolean) => boolean;
+    expect(custom).toBeDefined();
     expect(custom.call({ notADocument: true }, true)).toBe(true);
   });
 
