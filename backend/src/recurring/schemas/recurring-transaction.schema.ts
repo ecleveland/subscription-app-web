@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
+import { Document, HydratedDocument, Schema as MongooseSchema } from 'mongoose';
 
 export type RecurringTransactionDocument =
   HydratedDocument<RecurringTransaction>;
@@ -117,13 +117,21 @@ export class RecurringTransaction {
   // Marks schedules that surface on the Subscriptions page — a filtered view
   // of this collection, not a separate silo (VEG-469). A subscription is by
   // definition a recurring *expense*; the validator makes income subscriptions
-  // unrepresentable before the fold-in writes data. (Document-path validation
-  // — updates must go through load-and-save or runValidators, per VEG-466.)
+  // unrepresentable on the save path. Updates MUST go through load-and-save
+  // (VEG-466): under update validators `this` is the Query (this.type is
+  // undefined), and they only run for paths in the update anyway, so
+  // runValidators cannot enforce a cross-field invariant — the validator
+  // passes on non-document paths rather than rejecting every valid update.
   @Prop({
     default: false,
     validate: {
-      validator: function (this: RecurringTransaction, v: boolean) {
-        return !v || this.type === RecurringType.EXPENSE;
+      validator: function (this: unknown, v: boolean) {
+        if (!(this instanceof Document)) return true;
+        return (
+          !v ||
+          (this as unknown as RecurringTransaction).type ===
+            RecurringType.EXPENSE
+        );
       },
       message: 'isSubscription requires type: expense',
     },
@@ -131,11 +139,15 @@ export class RecurringTransaction {
   isSubscription: boolean;
 
   // Number of people splitting the cost (mirrors Subscription.sharedWith).
+  // Explicit null must pass: the legacy Subscription contract accepts and
+  // persists sharedWith: null to clear sharing (DTO ValidateIf skips null;
+  // the service queries { $in: [null, undefined] }), so migrated docs and
+  // null-to-clear PATCHes stay valid. `min` already skips null.
   @Prop({
     required: false,
     min: 2,
     validate: {
-      validator: Number.isInteger,
+      validator: (v: number | null) => v == null || Number.isInteger(v),
       message: 'sharedWith must be an integer number of people',
     },
   })

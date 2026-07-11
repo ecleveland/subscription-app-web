@@ -192,6 +192,16 @@ describe('RecurringTransactionSchema validation', () => {
     ).toBeUndefined();
   });
 
+  it('accepts an explicit-null sharedWith (the legacy null-to-clear contract)', () => {
+    // Subscription deliberately accepts and persists sharedWith: null to
+    // clear sharing (DTO ValidateIf skips null; the service queries
+    // { $in: [null, undefined] }), so migrated docs and null-to-clear
+    // PATCHes must validate.
+    expect(
+      new RecurringModel({ ...valid(), sharedWith: null }).validateSync(),
+    ).toBeUndefined();
+  });
+
   it('rejects an income subscription (a subscription is a recurring expense)', () => {
     expect(
       new RecurringModel({
@@ -206,6 +216,20 @@ describe('RecurringTransactionSchema validation', () => {
     expect(
       new RecurringModel({ ...valid(), isSubscription: true }).validateSync(),
     ).toBeUndefined();
+  });
+
+  it('isSubscription validator passes on non-document paths (update validators cannot see the doc)', () => {
+    // Under runValidators `this` is the Query, so a cross-field read of
+    // this.type is undefined — the validator must not reject there (it would
+    // block every isSubscription: true update on valid expense schedules).
+    // The invariant is enforced on the save path; updates use load-and-save
+    // (VEG-466).
+    const { validators } = RecurringTransactionSchema.path('isSubscription');
+    const custom = validators[validators.length - 1].validator as unknown as (
+      this: unknown,
+      v: boolean,
+    ) => boolean;
+    expect(custom.call({ notADocument: true }, true)).toBe(true);
   });
 
   it('trims payee and notes', () => {
