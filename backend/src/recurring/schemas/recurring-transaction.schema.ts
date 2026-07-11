@@ -26,8 +26,8 @@ export enum RecurringCadence {
 // Subscriptions page becomes a filtered view of this collection (VEG-469).
 @Schema({ timestamps: true })
 export class RecurringTransaction {
-  // Ownership/visibility scope, resolved server-side by HouseholdGuard — never
-  // trusted from the client. No standalone index: the compound
+  // Ownership/visibility scope, resolved server-side by HouseholdGuard once
+  // VEG-466 wires it — never trusted from the client. No standalone index: the compound
   // { householdId: 1, nextDate: 1 } below has householdId as its prefix.
   @Prop({
     type: MongooseSchema.Types.ObjectId,
@@ -59,9 +59,9 @@ export class RecurringTransaction {
   type: RecurringType;
 
   // Positive integer magnitude in minor units (cents); sign comes from `type`.
-  // Enforced at the schema layer (not just DTOs) because the scheduler and the
-  // VEG-469 migration write outside the DTO pipeline — same rationale as
-  // Transaction.amountCents.
+  // Enforced at the schema layer (not just DTOs) because the VEG-469 fold-in
+  // migration — and any future non-DTO write path — bypasses the
+  // ValidationPipe; same rationale as Transaction.amountCents.
   @Prop({
     required: true,
     min: 1,
@@ -91,7 +91,18 @@ export class RecurringTransaction {
   @Prop({ required: true })
   nextDate: Date;
 
-  @Prop({ default: 3, min: 0, max: 30 })
+  // The integer validator also rejects explicit null (Mongoose applies the
+  // default only to undefined and skips min/max on null), which the VEG-469
+  // fold-in could otherwise persist and break the reminder cron's date math.
+  @Prop({
+    default: 3,
+    min: 0,
+    max: 30,
+    validate: {
+      validator: Number.isInteger,
+      message: 'reminderDaysBefore must be an integer number of days',
+    },
+  })
   reminderDaysBefore: number;
 
   // Last date the schedule may materialize; absent means it runs indefinitely.
@@ -104,12 +115,30 @@ export class RecurringTransaction {
   isActive: boolean;
 
   // Marks schedules that surface on the Subscriptions page — a filtered view
-  // of this collection, not a separate silo (VEG-469).
-  @Prop({ default: false })
+  // of this collection, not a separate silo (VEG-469). A subscription is by
+  // definition a recurring *expense*; the validator makes income subscriptions
+  // unrepresentable before the fold-in writes data. (Document-path validation
+  // — updates must go through load-and-save or runValidators, per VEG-466.)
+  @Prop({
+    default: false,
+    validate: {
+      validator: function (this: RecurringTransaction, v: boolean) {
+        return !v || this.type === RecurringType.EXPENSE;
+      },
+      message: 'isSubscription requires type: expense',
+    },
+  })
   isSubscription: boolean;
 
   // Number of people splitting the cost (mirrors Subscription.sharedWith).
-  @Prop({ required: false, min: 2 })
+  @Prop({
+    required: false,
+    min: 2,
+    validate: {
+      validator: Number.isInteger,
+      message: 'sharedWith must be an integer number of people',
+    },
+  })
   sharedWith?: number;
 }
 

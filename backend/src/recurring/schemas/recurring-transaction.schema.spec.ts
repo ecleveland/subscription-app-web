@@ -1,12 +1,14 @@
 import { model, Types } from 'mongoose';
 import {
+  RecurringCadence,
   RecurringTransaction,
   RecurringTransactionSchema,
 } from './recurring-transaction.schema';
+import { BillingCycle } from '../../subscriptions/schemas/subscription.schema';
 
 // A throwaway model so we can exercise schema validators (validateSync) without
 // a live Mongo connection — mirrors the lightweight, DB-free schema specs used
-// elsewhere (budget.schema.spec, subscription.schema.spec).
+// elsewhere (budget.schema.spec, password-reset.schema.spec).
 const RecurringModel = model<RecurringTransaction>(
   'RecurringTransactionSchemaSpec',
   RecurringTransactionSchema,
@@ -23,23 +25,35 @@ const valid = () => ({
 });
 
 describe('RecurringTransactionSchema indexes', () => {
-  // schema.indexes() → [[keys, options], ...]
-  const keyList = RecurringTransactionSchema.indexes().map(([keys]) => keys);
+  // JSON.stringify of each key spec keeps key ORDER significant — a compound
+  // index's prefix is what makes it useful, and deep-equality matchers like
+  // toContainEqual would not catch { nextDate, householdId } swapped.
+  const indexKeyJson = RecurringTransactionSchema.indexes().map(([keys]) =>
+    JSON.stringify(keys),
+  );
 
   it('indexes { householdId, nextDate } for household-scoped upcoming lists', () => {
-    expect(keyList).toContainEqual({ householdId: 1, nextDate: 1 });
+    expect(indexKeyJson).toContain('{"householdId":1,"nextDate":1}');
   });
 
   it('indexes { isActive, nextDate } for the cross-household cron scan', () => {
     // Mirrors { isActive, nextBillingDate } on Subscription: the daily
     // materialization/reminder crons scan active schedules by due date.
-    expect(keyList).toContainEqual({ isActive: 1, nextDate: 1 });
+    expect(indexKeyJson).toContain('{"isActive":1,"nextDate":1}');
   });
 
   it('drops the redundant standalone householdId index', () => {
     // The compound { householdId, nextDate } has householdId as its prefix, so
     // a single-field householdId index would be redundant write overhead.
-    expect(keyList).not.toContainEqual({ householdId: 1 });
+    expect(indexKeyJson).not.toContain('{"householdId":1}');
+  });
+});
+
+describe('RecurringCadence', () => {
+  it('stays value-identical to BillingCycle (the VEG-469 fold-in maps 1:1)', () => {
+    expect(Object.values(RecurringCadence)).toEqual(
+      Object.values(BillingCycle),
+    );
   });
 });
 
@@ -61,6 +75,13 @@ describe('RecurringTransactionSchema validation', () => {
     ]) {
       expect(err?.errors[field]).toBeDefined();
     }
+  });
+
+  it('rejects a whitespace-only payee (trims to empty, fails required)', () => {
+    expect(
+      new RecurringModel({ ...valid(), payee: '   ' }).validateSync()?.errors
+        .payee,
+    ).toBeDefined();
   });
 
   it('accepts a schedule without an account (migrated legacy subscriptions)', () => {
@@ -95,6 +116,14 @@ describe('RecurringTransactionSchema validation', () => {
     ).toBeUndefined();
   });
 
+  it('accepts weekly and yearly cadences', () => {
+    for (const cadence of ['weekly', 'yearly']) {
+      expect(
+        new RecurringModel({ ...valid(), cadence }).validateSync(),
+      ).toBeUndefined();
+    }
+  });
+
   it('rejects an unknown cadence', () => {
     expect(
       new RecurringModel({ ...valid(), cadence: 'daily' }).validateSync()
@@ -111,6 +140,12 @@ describe('RecurringTransactionSchema validation', () => {
     }
   });
 
+  it('accepts the amountCents lower bound (1 cent)', () => {
+    expect(
+      new RecurringModel({ ...valid(), amountCents: 1 }).validateSync(),
+    ).toBeUndefined();
+  });
+
   it('defaults tags to [], isActive to true, isSubscription to false, reminderDaysBefore to 3', () => {
     const doc = new RecurringModel(valid());
     expect(doc.tags).toEqual([]);
@@ -119,23 +154,58 @@ describe('RecurringTransactionSchema validation', () => {
     expect(doc.reminderDaysBefore).toBe(3);
   });
 
-  it('bounds reminderDaysBefore to 0..30', () => {
+  it('bounds reminderDaysBefore to 0..30 (both boundaries accepted)', () => {
     for (const reminderDaysBefore of [-1, 31]) {
       expect(
         new RecurringModel({ ...valid(), reminderDaysBefore }).validateSync()
           ?.errors.reminderDaysBefore,
       ).toBeDefined();
     }
+    for (const reminderDaysBefore of [0, 30]) {
+      expect(
+        new RecurringModel({ ...valid(), reminderDaysBefore }).validateSync(),
+      ).toBeUndefined();
+    }
+  });
+
+  it('rejects a non-integer or explicit-null reminderDaysBefore (non-DTO write paths)', () => {
+    // Mongoose applies defaults only to undefined and skips min/max on null,
+    // so without the integer validator a folded-in null (VEG-469) or a
+    // fractional day count would persist and break the reminder cron math.
+    for (const reminderDaysBefore of [2.5, null]) {
+      expect(
+        new RecurringModel({ ...valid(), reminderDaysBefore }).validateSync()
+          ?.errors.reminderDaysBefore,
+      ).toBeDefined();
+    }
+  });
+
+  it('rejects sharedWith below 2 and non-integer sharedWith; accepts 2', () => {
+    for (const sharedWith of [1, 2.5]) {
+      expect(
+        new RecurringModel({ ...valid(), sharedWith }).validateSync()?.errors
+          .sharedWith,
+      ).toBeDefined();
+    }
     expect(
-      new RecurringModel({ ...valid(), reminderDaysBefore: 0 }).validateSync(),
+      new RecurringModel({ ...valid(), sharedWith: 2 }).validateSync(),
     ).toBeUndefined();
   });
 
-  it('rejects sharedWith below 2 (a split needs at least two people)', () => {
+  it('rejects an income subscription (a subscription is a recurring expense)', () => {
     expect(
-      new RecurringModel({ ...valid(), sharedWith: 1 }).validateSync()?.errors
-        .sharedWith,
+      new RecurringModel({
+        ...valid(),
+        type: 'income',
+        isSubscription: true,
+      }).validateSync()?.errors.isSubscription,
     ).toBeDefined();
+  });
+
+  it('accepts an expense subscription', () => {
+    expect(
+      new RecurringModel({ ...valid(), isSubscription: true }).validateSync(),
+    ).toBeUndefined();
   });
 
   it('trims payee and notes', () => {
