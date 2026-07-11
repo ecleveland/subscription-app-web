@@ -238,6 +238,10 @@ describe('Recurring (e2e)', () => {
       // not persist a 1-cent schedule or a 1-day reminder.
       ['boolean amountCents', { amountCents: true }],
       ['boolean reminderDaysBefore', { reminderDaysBefore: true }],
+      // @IsOptional would skip explicit null, persisting tags: null (the
+      // schema default only applies to undefined) — reject like the PATCH DTO.
+      ['explicit-null tags', { tags: null }],
+      ['explicit-null notes', { notes: null }],
     ])('rejects %s with 400', async (_label, overrides) => {
       await request(app.getHttpServer())
         .post('/api/recurring')

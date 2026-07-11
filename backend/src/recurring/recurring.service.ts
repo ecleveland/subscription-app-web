@@ -17,6 +17,7 @@ import { QueryRecurringDto } from './dto/query-recurring.dto';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
+import { parseUtcDate, utcDay } from './recurring-dates.util';
 
 // The merged, would-be-persisted state of a schedule's cross-field invariants,
 // checked before any write so violations surface as 400s (the schema-level
@@ -187,32 +188,29 @@ export class RecurringService {
       existing.categoryId as unknown as Types.ObjectId
     ).toString();
     const reactivating = dto.isActive === true && !existing.isActive;
-    const checks: Promise<void>[] = [];
-    if (
-      dto.accountId !== undefined &&
-      dto.accountId.toLowerCase() !== existingAccountId
-    ) {
-      checks.push(this.assertAccountUsable(householdId, dto.accountId));
-    } else if (reactivating && existingAccountId) {
-      checks.push(
-        this.assertAccountUsable(householdId, existingAccountId, {
-          reactivating: true,
-        }),
-      );
-    }
-    if (
-      dto.categoryId !== undefined &&
-      dto.categoryId.toLowerCase() !== existingCategoryId
-    ) {
-      checks.push(this.assertCategoryUsable(householdId, dto.categoryId));
-    } else if (reactivating) {
-      checks.push(
-        this.assertCategoryUsable(householdId, existingCategoryId, {
-          reactivating: true,
-        }),
-      );
-    }
-    await Promise.all(checks);
+    // One rule for both reference types: validate the incoming id when it
+    // actually changes, else re-validate the current id on reactivation.
+    const referenceCheck = (
+      dtoId: string | undefined,
+      existingId: string | undefined,
+      assert: (id: string, opts?: { reactivating: boolean }) => Promise<void>,
+    ): Promise<void> | undefined => {
+      if (dtoId !== undefined && dtoId.toLowerCase() !== existingId) {
+        return assert(dtoId);
+      }
+      if (reactivating && existingId) {
+        return assert(existingId, { reactivating: true });
+      }
+      return undefined;
+    };
+    await Promise.all([
+      referenceCheck(dto.accountId, existingAccountId, (accId, opts) =>
+        this.assertAccountUsable(householdId, accId, opts),
+      ),
+      referenceCheck(dto.categoryId, existingCategoryId, (catId, opts) =>
+        this.assertCategoryUsable(householdId, catId, opts),
+      ),
+    ]);
 
     if (dto.accountId !== undefined) {
       existing.accountId = new Types.ObjectId(
@@ -362,18 +360,4 @@ export class RecurringService {
       );
     }
   }
-}
-
-// The UTC calendar day of an instant, comparable with < / ===.
-function utcDay(d: Date): number {
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
-
-// JS parses an offsetless ISO datetime ('2026-08-01T20:00:00') in the
-// SERVER's local timezone while date-only strings parse as UTC — pin the
-// frame to UTC so validation and the persisted instant don't depend on
-// where the server runs.
-const OFFSETLESS_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
-function parseUtcDate(value: string): Date {
-  return new Date(OFFSETLESS_DATETIME.test(value) ? `${value}Z` : value);
 }

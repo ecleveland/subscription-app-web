@@ -6,7 +6,6 @@ import {
   IsInt,
   IsMongoId,
   IsNotEmpty,
-  IsOptional,
   IsString,
   Max,
   Min,
@@ -62,13 +61,16 @@ export class CreateRecurringDto {
   @IsNotEmpty()
   payee: string;
 
+  // ValidateIfDefined, not @IsOptional: explicit null would skip @IsOptional
+  // validation entirely and persist (the schema defaults only apply to
+  // undefined) — reject it like the update DTO does.
   @ApiPropertyOptional({ description: 'Free-form notes' })
-  @IsOptional()
+  @ValidateIfDefined
   @IsString()
   notes?: string;
 
   @ApiPropertyOptional({ type: [String], example: ['streaming'] })
-  @IsOptional()
+  @ValidateIfDefined
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
