@@ -11,7 +11,6 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   RecurringCadence,
@@ -19,7 +18,10 @@ import {
 } from '../schemas/recurring-transaction.schema';
 import { ValidateIfDefined } from '../../common/validation/validate-if-defined';
 import { ValidateIfNotNullish } from '../../common/validation/validate-if-not-nullish';
-import { TransformRawValue } from '../../common/validation/transform-raw-value';
+import {
+  TransformRawValue,
+  TrimString,
+} from '../../common/validation/transform-raw-value';
 
 export class CreateRecurringDto {
   // Required here even though the schema prop is optional: only migrated
@@ -39,6 +41,9 @@ export class CreateRecurringDto {
   @IsEnum(RecurringType)
   type: RecurringType;
 
+  // TransformRawValue on the numeric fields: implicit conversion turns a
+  // stray JSON boolean into Number(true) === 1, which would pass @IsInt
+  // @Min(1) and persist a 1-cent schedule.
   @ApiProperty({
     description:
       'Positive amount in integer minor units (cents); the sign of its effect ' +
@@ -46,17 +51,13 @@ export class CreateRecurringDto {
     example: 1999,
     minimum: 1,
   })
+  @TransformRawValue
   @IsInt()
   @Min(1)
   amountCents: number;
 
-  // Trimmed before validation: the schema trims too, so an untrimmed
-  // whitespace-only payee would pass @IsNotEmpty, trim to "" at save time, and
-  // fail the schema's required check as a 500.
   @ApiProperty({ description: 'Payee / display name', example: 'Netflix' })
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim() : (value as unknown),
-  )
+  @TrimString
   @IsString()
   @IsNotEmpty()
   payee: string;
@@ -93,6 +94,7 @@ export class CreateRecurringDto {
     default: 3,
   })
   @ValidateIfDefined
+  @TransformRawValue
   @IsInt()
   @Min(0)
   @Max(30)
@@ -135,6 +137,7 @@ export class CreateRecurringDto {
     minimum: 2,
   })
   @ValidateIfNotNullish
+  @TransformRawValue
   @IsInt()
   @Min(2)
   sharedWith?: number | null;

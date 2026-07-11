@@ -49,11 +49,15 @@ export class RecurringService {
     memberId: string,
     dto: CreateRecurringDto,
   ): Promise<RecurringTransactionDocument> {
+    // Parse once and reuse: the validated dates and the persisted dates must
+    // be the same instants.
+    const nextDate = parseUtcDate(dto.nextDate);
+    const endDate = dto.endDate ? parseUtcDate(dto.endDate) : undefined;
     this.validateScheduleState({
       type: dto.type,
       isSubscription: dto.isSubscription ?? false,
-      nextDate: new Date(dto.nextDate),
-      endDate: dto.endDate ? new Date(dto.endDate) : undefined,
+      nextDate,
+      endDate,
     });
     await Promise.all([
       this.assertAccountUsable(householdId, dto.accountId),
@@ -69,12 +73,13 @@ export class RecurringService {
       amountCents: dto.amountCents,
       payee: dto.payee,
       notes: dto.notes,
-      tags: dto.tags ?? [],
+      // Leave omitted fields (tags, reminderDaysBefore, isActive,
+      // isSubscription) undefined so the schema defaults apply.
+      tags: dto.tags,
       cadence: dto.cadence,
-      nextDate: new Date(dto.nextDate),
-      // Leave omitted fields undefined so the schema defaults apply.
+      nextDate,
       reminderDaysBefore: dto.reminderDaysBefore,
-      endDate: dto.endDate ? new Date(dto.endDate) : undefined,
+      endDate,
       isActive: dto.isActive,
       isSubscription: dto.isSubscription,
       // Store null (the legacy "not shared" wire value) as unset.
@@ -143,13 +148,15 @@ export class RecurringService {
     const existing = await this.findOne(householdId, id);
 
     const mergedNextDate =
-      dto.nextDate !== undefined ? new Date(dto.nextDate) : existing.nextDate;
+      dto.nextDate !== undefined
+        ? parseUtcDate(dto.nextDate)
+        : existing.nextDate;
     const mergedEndDate =
       dto.endDate === undefined
         ? existing.endDate
         : dto.endDate === null
           ? undefined
-          : new Date(dto.endDate);
+          : parseUtcDate(dto.endDate);
 
     this.validateScheduleState(
       {
@@ -248,20 +255,21 @@ export class RecurringService {
   }
 
   async remove(householdId: string, id: string): Promise<void> {
-    const existing = await this.findOne(householdId, id);
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException(`Recurring schedule "${id}" not found`);
+    }
+    // One atomic household-scoped delete: the filter IS the tenancy check
+    // (missing and cross-household both come back deletedCount 0 → 404).
     // Materialized Transactions keep their recurringId — deleting the
     // schedule never touches the ledger.
     const result = await this.recurringModel
-      .deleteOne({ _id: existing._id } as Record<string, unknown>)
+      .deleteOne({
+        _id: new Types.ObjectId(id),
+        householdId: new Types.ObjectId(householdId),
+      } as Record<string, unknown>)
       .exec();
     if (result.deletedCount === 0) {
-      // Concurrent delete between findOne and deleteOne; the 204 is still
-      // correct (idempotent), but don't log a deletion that didn't happen.
-      this.logger.warn(
-        { householdId, recurringId: id },
-        'Recurring schedule already deleted',
-      );
-      return;
+      throw new NotFoundException(`Recurring schedule "${id}" not found`);
     }
     this.logger.log(
       { householdId, recurringId: id },
@@ -359,4 +367,13 @@ export class RecurringService {
 // The UTC calendar day of an instant, comparable with < / ===.
 function utcDay(d: Date): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+// JS parses an offsetless ISO datetime ('2026-08-01T20:00:00') in the
+// SERVER's local timezone while date-only strings parse as UTC — pin the
+// frame to UTC so validation and the persisted instant don't depend on
+// where the server runs.
+const OFFSETLESS_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+function parseUtcDate(value: string): Date {
+  return new Date(OFFSETLESS_DATETIME.test(value) ? `${value}Z` : value);
 }

@@ -10,7 +10,6 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   RecurringCadence,
@@ -18,7 +17,10 @@ import {
 } from '../schemas/recurring-transaction.schema';
 import { ValidateIfDefined } from '../../common/validation/validate-if-defined';
 import { ValidateIfNotNullish } from '../../common/validation/validate-if-not-nullish';
-import { TransformRawValue } from '../../common/validation/transform-raw-value';
+import {
+  TransformRawValue,
+  TrimString,
+} from '../../common/validation/transform-raw-value';
 
 // Explicit class rather than PartialType(CreateRecurringDto): PartialType's
 // @IsOptional skips explicit JSON null entirely, and a null slipping through
@@ -49,20 +51,22 @@ export class UpdateRecurringDto {
   @IsEnum(RecurringType)
   type?: RecurringType;
 
+  // TransformRawValue on the numeric fields: implicit conversion turns a
+  // stray JSON boolean into Number(true) === 1, which would pass @IsInt
+  // @Min(1) and rewrite a real bill to 1 cent.
   @ApiPropertyOptional({
     description: 'Positive amount in integer minor units (cents)',
     minimum: 1,
   })
   @ValidateIfDefined
+  @TransformRawValue
   @IsInt()
   @Min(1)
   amountCents?: number;
 
   @ApiPropertyOptional({ description: 'Payee / display name' })
   @ValidateIfDefined
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim() : (value as unknown),
-  )
+  @TrimString
   @IsString()
   @IsNotEmpty()
   payee?: string;
@@ -94,6 +98,7 @@ export class UpdateRecurringDto {
     maximum: 30,
   })
   @ValidateIfDefined
+  @TransformRawValue
   @IsInt()
   @Min(0)
   @Max(30)
@@ -130,6 +135,7 @@ export class UpdateRecurringDto {
     minimum: 2,
   })
   @ValidateIfNotNullish
+  @TransformRawValue
   @IsInt()
   @Min(2)
   sharedWith?: number | null;

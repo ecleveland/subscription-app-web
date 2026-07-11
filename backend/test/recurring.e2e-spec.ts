@@ -234,6 +234,10 @@ describe('Recurring (e2e)', () => {
       // the raw-value transform — reject it rather than invert it.
       ['string-boolean isActive', { isActive: 'false' }],
       ['string-boolean isSubscription', { isSubscription: 'false' }],
+      // Number(true) === 1 under implicit conversion — a stray boolean must
+      // not persist a 1-cent schedule or a 1-day reminder.
+      ['boolean amountCents', { amountCents: true }],
+      ['boolean reminderDaysBefore', { reminderDaysBefore: true }],
     ])('rejects %s with 400', async (_label, overrides) => {
       await request(app.getHttpServer())
         .post('/api/recurring')
@@ -525,6 +529,7 @@ describe('Recurring (e2e)', () => {
       ['null isActive', { isActive: null }],
       ['null isSubscription', { isSubscription: null }],
       ['float amountCents', { amountCents: 10.5 }],
+      ['boolean amountCents', { amountCents: true }],
       ['whitespace-only payee', { payee: '   ' }],
       ['string-boolean isSubscription', { isSubscription: 'false' }],
       ['unknown field', { billingCycle: 'monthly' }],
@@ -714,7 +719,10 @@ describe('Recurring (e2e)', () => {
       const id = (await createSchedule(tokenA, { payee: 'Materialized' }))._id;
       // Seed a ledger row the way the VEG-467 scheduler will: directly on the
       // model, pointing back at the schedule.
-      const txn = await transactionModel.create({
+      // Doc-constructor form: model.create()'s overloads reject
+      // mongoose.Types.ObjectId against the schema's prop typing under
+      // strict tsc (the divergence backend-patterns.md warns about).
+      const txn = await new transactionModel({
         householdId: new Types.ObjectId(householdIdA),
         accountId: new Types.ObjectId(checkingA),
         categoryId: new Types.ObjectId(expenseCatA),
@@ -724,7 +732,7 @@ describe('Recurring (e2e)', () => {
         recurringId: new Types.ObjectId(id),
         tags: [],
         cleared: false,
-      });
+      }).save();
 
       await request(app.getHttpServer())
         .delete(`/api/recurring/${id}`)

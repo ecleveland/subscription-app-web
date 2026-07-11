@@ -128,7 +128,9 @@ describe('RecurringService', () => {
       expect(doc.payee).toBe('Netflix');
       expect(doc.cadence).toBe(RecurringCadence.MONTHLY);
       expect(doc.nextDate).toEqual(new Date('2026-08-01'));
-      expect(doc.tags).toEqual([]);
+      // tags is left undefined so the schema's default: [] applies (asserted
+      // in the schema spec; the e2e asserts the round-tripped []).
+      expect(doc.tags).toBeUndefined();
       expect(recSave).toHaveBeenCalledTimes(1);
     });
 
@@ -191,6 +193,21 @@ describe('RecurringService', () => {
         endDate: '2026-08-01',
       });
       expect(recSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('parses an offsetless datetime as UTC (server-timezone independent)', async () => {
+      // JS parses '2026-08-01T20:00:00' (no offset) in the SERVER's local
+      // zone while date-only strings parse as UTC — on a west-of-UTC server
+      // that skews the pair across a day boundary and both the validation
+      // and the persisted instant become timezone-dependent.
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...validCreate(),
+        nextDate: '2026-08-01T20:00:00',
+        endDate: '2026-08-01',
+      });
+      expect(recSave).toHaveBeenCalledTimes(1);
+      const doc = mockModel.mock.calls[0][0];
+      expect(doc.nextDate.toISOString()).toBe('2026-08-01T20:00:00.000Z');
     });
 
     it('rethrows non-NotFound account-lookup failures untranslated', async () => {
@@ -610,24 +627,27 @@ describe('RecurringService', () => {
   });
 
   describe('remove', () => {
-    it('deletes the household-owned schedule', async () => {
-      mockModel.findById.mockReturnValue(createChainable(recDoc()));
+    it('deletes with a single household-scoped atomic query', async () => {
       await service.remove(HOUSEHOLD_ID, REC_ID);
       expect(mockModel.deleteOne).toHaveBeenCalledWith({
         _id: new Types.ObjectId(REC_ID),
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
       });
+      expect(mockModel.findById).not.toHaveBeenCalled();
     });
 
-    it("404s when deleting another household's schedule", async () => {
-      mockModel.findById.mockReturnValue(
-        createChainable(
-          recDoc({ householdId: new Types.ObjectId(OTHER_HOUSEHOLD_ID) }),
-        ),
-      );
-      await expect(service.remove(HOUSEHOLD_ID, REC_ID)).rejects.toThrow(
+    it('404s on a malformed id without querying', async () => {
+      await expect(service.remove(HOUSEHOLD_ID, 'nope')).rejects.toThrow(
         NotFoundException,
       );
       expect(mockModel.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it("404s when nothing matches (missing or another household's schedule)", async () => {
+      mockModel.deleteOne.mockReturnValue(createChainable({ deletedCount: 0 }));
+      await expect(service.remove(HOUSEHOLD_ID, REC_ID)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

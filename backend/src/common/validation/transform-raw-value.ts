@@ -26,3 +26,13 @@ export const TransformBooleanParam = Transform(
     return raw;
   },
 );
+
+/**
+ * Trim a string before validation, passing non-strings through untouched for
+ * the type validator to reject. Pairs with @IsNotEmpty on fields whose schema
+ * path also trims: without it a whitespace-only value passes DTO validation,
+ * trims to "" at save time, and fails the schema's required check as a 500.
+ */
+export const TrimString = Transform(({ value }: TransformFnParams) =>
+  typeof value === 'string' ? value.trim() : (value as unknown),
+);
