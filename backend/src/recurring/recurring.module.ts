@@ -6,11 +6,15 @@ import {
   RecurringTransaction,
   RecurringTransactionSchema,
 } from './schemas/recurring-transaction.schema';
+import { AccountsModule } from '../accounts/accounts.module';
+import { CategoriesModule } from '../categories/categories.module';
+import { HouseholdsModule } from '../households/households.module';
 
-// Phase 4 scaffold (VEG-465): model registration and the empty
-// controller/service pair. Deliberately minimal — HouseholdsModule (guards),
-// TransactionsModule (materialization), and NotificationsModule (reminders)
-// arrive with VEG-466/467/468 alongside the code that needs them.
+// Phase 4 recurring schedules. Depends on AccountsService/CategoriesService
+// (to validate that referenced accounts/categories belong to the household)
+// and HouseholdsModule (the HouseholdGuard applied after JwtAuthGuard).
+// TransactionsModule (materialization, VEG-467) and NotificationsModule
+// (reminders, VEG-468) arrive with the code that needs them.
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -19,6 +23,9 @@ import {
         schema: RecurringTransactionSchema,
       },
     ]),
+    AccountsModule,
+    CategoriesModule,
+    HouseholdsModule,
   ],
   controllers: [RecurringController],
   providers: [RecurringService],
