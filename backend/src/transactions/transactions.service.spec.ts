@@ -836,12 +836,23 @@ describe('TransactionsService', () => {
         expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
       });
 
-      it('warns, because in normal operation this is unreachable', async () => {
+      // Nothing records whether the earlier run's $inc landed, so this may be
+      // a permanently short balance — it must not read as routine.
+      it('logs at error with the amount at risk, not a routine warning', async () => {
+        const error = jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation(() => undefined);
         const warn = jest
           .spyOn(Logger.prototype, 'warn')
           .mockImplementation(() => undefined);
+
         await service.materializeRecurring(HOUSEHOLD_ID, input());
-        expect(warn).toHaveBeenCalled();
+
+        expect(error).toHaveBeenCalledWith(
+          expect.objectContaining({ accountId: ACC_A, amountCents: 1999 }),
+          expect.stringContaining('re-derived from the ledger'),
+        );
+        expect(warn).not.toHaveBeenCalled();
       });
     });
 

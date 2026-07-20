@@ -45,6 +45,12 @@ export interface MaterializationSummary {
   deactivated: number;
   /** Schedules that hit MAX_CATCHUP_PERIODS and will resume tomorrow. */
   capped: number;
+  /**
+   * Schedules whose guarded advance matched nothing, so the remaining periods
+   * were abandoned. Counted so a run that gave up mid-catch-up is
+   * distinguishable from one that finished cleanly.
+   */
+  yielded: number;
   /** Schedules abandoned mid-run after an error; the rest still ran. */
   failed: number;
 }
@@ -67,6 +73,14 @@ interface DueSchedule {
   cadenceAnchorDay?: number;
   endDate?: Date;
 }
+
+// Whether a schedule's references allow it to post right now. A discriminated
+// union rather than a boolean + optional: the usable branch carries the
+// resolved accountId, so the materialization path can never need a non-null
+// assertion on a field the schema marks optional.
+type MaterializationRefs =
+  | { usable: true; accountId: Types.ObjectId }
+  | { usable: false; reason: string };
 
 // RecurringType and TransactionType are deliberately distinct enums (recurring
 // has no `transfer` case), so translate explicitly rather than casting. A cast
@@ -386,6 +400,7 @@ export class RecurringService {
       skipped: 0,
       deactivated: 0,
       capped: 0,
+      yielded: 0,
       failed: 0,
     };
 
@@ -443,8 +458,21 @@ export class RecurringService {
       // schedule whose reference is archived, so the cron would create a state
       // the API will not let the user undo.
       summary.skipped += 1;
+      // Enough context to act on without a database round trip: which bill,
+      // and how long it has been stalled. A schedule 90 days behind reads very
+      // differently from one skipped for the first time, and this warns once
+      // per day for as long as it stays broken.
       this.logger.warn(
-        { householdId, recurringId, reason: references.reason },
+        {
+          householdId,
+          recurringId,
+          reason: references.reason,
+          payee: schedule.payee,
+          nextDate: schedule.nextDate.toISOString(),
+          daysStale: Math.floor(
+            (utcDay(now) - utcDay(schedule.nextDate)) / 86_400_000,
+          ),
+        },
         'Skipping recurring schedule with an unusable reference',
       );
       return;
@@ -478,7 +506,7 @@ export class RecurringService {
         householdId,
         {
           recurringId,
-          accountId: schedule.accountId!.toString(),
+          accountId: references.accountId.toString(),
           categoryId: schedule.categoryId.toString(),
           memberId: schedule.memberId?.toString(),
           type: toTransactionType(schedule.type),
@@ -518,11 +546,23 @@ export class RecurringService {
         !finished,
       );
       if (!advanced) {
-        // Another instance advanced this schedule between our read and now; it
-        // owns the remaining periods. Stop rather than double-posting.
+        // Someone else moved nextDate between our read and this write, so the
+        // remaining periods are not ours to post. State what was OBSERVED
+        // rather than guessing a cause: leader election makes a second cron
+        // instance unlikely, and the realistic causes are a concurrent PATCH
+        // or the cursor re-visiting this document — an unsnapshotted scan over
+        // { isActive, nextDate } while the loop pushes nextDate forward within
+        // that same index. The guard makes a re-visit harmless (the insert
+        // dedupes, this advance misses, we stop) but it is not "concurrency".
+        summary.yielded += 1;
         this.logger.warn(
-          { householdId, recurringId },
-          'Recurring schedule advanced concurrently; yielding the remaining periods',
+          {
+            householdId,
+            recurringId,
+            observedNextDate: occurrence.toISOString(),
+            attemptedNextDate: next.toISOString(),
+          },
+          'Guarded advance matched no schedule (concurrent edit or cursor re-visit); yielding the remaining periods',
         );
         return;
       }
@@ -573,9 +613,16 @@ export class RecurringService {
   // both references ONCE per schedule rather than per occurrence — a 60-period
   // catch-up would otherwise issue 120 redundant lookups for references that
   // cannot change mid-loop.
+  //
+  // The usable branch carries the resolved accountId so the caller cannot need
+  // a non-null assertion: `new Types.ObjectId(undefined)` mints a random VALID
+  // ObjectId, which would post money to a nonexistent account and leave
+  // applyBalanceDelta logging drift instead of throwing. Making the type carry
+  // the guarantee keeps that unreachable by construction rather than by a
+  // check in another function.
   private async resolveMaterializationRefs(
     schedule: DueSchedule,
-  ): Promise<{ usable: boolean; reason?: string }> {
+  ): Promise<MaterializationRefs> {
     if (!schedule.accountId) {
       // Legacy subscriptions migrate without an account (VEG-469) and wait
       // here until one is assigned.
@@ -610,7 +657,7 @@ export class RecurringService {
       // category. A scheduler write is new activity by that same rule.
       return { usable: false, reason: 'category archived' };
     }
-    return { usable: true };
+    return { usable: true, accountId: schedule.accountId };
   }
 
   // --- helpers -------------------------------------------------------------

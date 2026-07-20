@@ -1034,12 +1034,15 @@ describe('RecurringService', () => {
         );
         scanReturns([scanDoc({ nextDate: new Date('2026-05-01T00:00:00Z') })]);
 
-        await service.materializeDue(NOW);
+        const summary = await service.materializeDue(NOW);
 
-        // Another instance owns this schedule now — do not keep posting.
+        // Another writer owns this schedule now — do not keep posting.
         expect(transactionsService.materializeRecurring).toHaveBeenCalledTimes(
           1,
         );
+        // The abandoned periods must show up in the summary, or a run that
+        // gave up mid-catch-up looks identical to one that finished cleanly.
+        expect(summary).toMatchObject({ yielded: 1 });
       });
 
       it('keeps processing other schedules when one throws', async () => {

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import { RecurringCronService } from './recurring-cron.service';
 import { RecurringService } from './recurring.service';
 import { CronLockService } from '../common/cron-lock/cron-lock.service';
@@ -56,6 +57,67 @@ describe('RecurringCronService', () => {
     await cron.handleMaterialization();
 
     expect(mockRecurringService.materializeDue).not.toHaveBeenCalled();
+  });
+
+  // An operator filtering to warn+ would otherwise see per-schedule errors
+  // with no run-level context, and a run with failures would report at the
+  // same level as a clean one.
+  describe('run-level log severity', () => {
+    const levelSpy = (level: 'log' | 'warn' | 'error') =>
+      jest.spyOn(Logger.prototype, level).mockImplementation(() => undefined);
+
+    it('logs a clean run at info', async () => {
+      const log = levelSpy('log');
+      await cron.handleMaterialization();
+      expect(log).toHaveBeenCalledWith(
+        expect.objectContaining({ failed: 0 }),
+        expect.stringContaining('complete'),
+      );
+    });
+
+    it('escalates to warn when schedules were skipped', async () => {
+      mockRecurringService.materializeDue.mockResolvedValue({
+        ...summary,
+        skipped: 2,
+      });
+      const warn = levelSpy('warn');
+      await cron.handleMaterialization();
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ skipped: 2 }),
+        expect.stringContaining('complete'),
+      );
+    });
+
+    it('escalates to error when schedules failed', async () => {
+      mockRecurringService.materializeDue.mockResolvedValue({
+        ...summary,
+        failed: 1,
+        skipped: 3,
+      });
+      const error = levelSpy('error');
+      await cron.handleMaterialization();
+      expect(error).toHaveBeenCalledWith(
+        expect.objectContaining({ failed: 1 }),
+        expect.stringContaining('complete'),
+      );
+    });
+  });
+
+  // This is the job that writes money unattended; a throw escaping the cron
+  // boundary would surface only as an unhandled rejection (there is no global
+  // handler in main.ts).
+  it('logs and contains an error thrown by the scan itself', async () => {
+    mockRecurringService.materializeDue.mockRejectedValue(
+      new Error('cursor exploded'),
+    );
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+
+    await expect(cron.handleMaterialization()).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('cursor exploded'),
+    );
   });
 
   it('uses its own lock key, independent of the subscriptions cron', async () => {

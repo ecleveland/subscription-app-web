@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { RecurringService } from './recurring.service';
+import {
+  RecurringService,
+  type MaterializationSummary,
+} from './recurring.service';
 import { CronLockService } from '../common/cron-lock/cron-lock.service';
 
 // The daily materialization scheduler (VEG-467): turns due recurring schedules
@@ -36,7 +39,24 @@ export class RecurringCronService {
     }
 
     this.logger.log('Running recurring materialization cron job');
-    const summary = await this.recurringService.materializeDue();
-    this.logger.log(summary, 'Recurring materialization complete');
+    let summary: MaterializationSummary;
+    try {
+      summary = await this.recurringService.materializeDue();
+    } catch (error: unknown) {
+      // The per-schedule loop already isolates individual failures, so
+      // reaching here means the scan itself died. Contain it at the cron
+      // boundary: an escaping rejection from a job that writes money would
+      // surface only as an unhandled rejection, and nothing installs a global
+      // handler.
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Recurring materialization run failed: ${message}`);
+      return;
+    }
+
+    // Escalate the run-level verdict so an operator filtering to warn+ sees
+    // aggregate context, not just isolated per-schedule errors.
+    const level =
+      summary.failed > 0 ? 'error' : summary.skipped > 0 ? 'warn' : 'log';
+    this.logger[level](summary, 'Recurring materialization complete');
   }
 }

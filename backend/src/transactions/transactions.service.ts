@@ -202,16 +202,25 @@ export class TransactionsService {
       // A previous run already wrote this occurrence and died before advancing
       // nextDate. Skipping the balance apply is the point: the earlier run may
       // already have applied it, and re-applying is the double-count this
-      // index exists to prevent. Warn rather than swallow — in a clean run
-      // this is unreachable, so reaching it means a resumed crash (where the
-      // cached balance may be short) or a bug.
-      this.logger.warn(
+      // index exists to prevent.
+      //
+      // ERROR, not warn, and the message states the consequence: nothing
+      // records whether that earlier run's $inc actually landed. If it died
+      // between the insert and syncBalances, the cached balance is short by
+      // this amount permanently — this path cannot tell, and advancing past
+      // the occurrence closes the only chance to retry it. A clean run never
+      // reaches here, so this is always worth a human's attention.
+      this.logger.error(
         {
           householdId,
           recurringId: occurrence.recurringId,
           date: date.toISOString(),
+          accountId: occurrence.accountId,
+          amountCents: occurrence.amountCents,
         },
-        'Recurring occurrence already materialized; skipping re-insert and balance apply',
+        'Recurring occurrence already materialized; skipping balance apply. If ' +
+          'the prior run died before syncing balances, the cached balance is ' +
+          'short by this amount and must be re-derived from the ledger.',
       );
       return { materialized: false, duplicate: true };
     }
