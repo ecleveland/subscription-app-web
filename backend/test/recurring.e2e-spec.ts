@@ -8,6 +8,7 @@ import { userIdFromToken } from './helpers/jwt';
 import { HouseholdsService } from '../src/households/households.service';
 import { Category } from '../src/categories/schemas/category.schema';
 import { Transaction } from '../src/transactions/schemas/transaction.schema';
+import { RecurringService } from '../src/recurring/recurring.service';
 
 async function createAccount(
   app: INestApplication<App>,
@@ -762,6 +763,240 @@ describe('Recurring (e2e)', () => {
         .get(`/api/recurring/${id}`)
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(200);
+    });
+  });
+
+  // The scheduler against a real database — the layer where the unique
+  // { recurringId, date } index actually exists (buildAllIndexes runs in
+  // createTestApp), so idempotency is genuinely exercised rather than mocked.
+  describe('materialization scheduler (VEG-467)', () => {
+    // A fixed "today" so the assertions do not drift with the wall clock.
+    const NOW = new Date('2026-08-15T00:00:00Z');
+
+    const balanceOf = async (accountId: string): Promise<number> => {
+      const res = await request(app.getHttpServer())
+        .get('/api/accounts')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      return res.body.find((a: any) => a._id === accountId).balanceCents;
+    };
+
+    // The CRUD suites above leave many schedules behind, and every one of them
+    // is due — a scheduler run touches them all. So each test here gets its own
+    // account, and every assertion is scoped to its own schedule's rows rather
+    // than to the run-wide summary counters.
+    const scheduleOnFreshAccount = async (
+      overrides: Record<string, unknown>,
+    ): Promise<{ id: string; accountId: string }> => {
+      const accountId = await createAccount(app, tokenA, {
+        name: `Scheduler ${Math.random().toString(36).slice(2, 10)}`,
+        type: 'checking',
+      });
+      const body = await createSchedule(tokenA, { ...overrides, accountId });
+      return { id: body._id, accountId };
+    };
+
+    const ledgerFor = async (recurringId: string) =>
+      transactionModel
+        .find({ recurringId: new Types.ObjectId(recurringId) } as Record<
+          string,
+          unknown
+        >)
+        .sort({ date: 1 })
+        .exec();
+
+    let recurringService: RecurringService;
+
+    beforeAll(() => {
+      recurringService = app.get(RecurringService);
+    });
+
+    it('materializes a due schedule into the ledger and moves the balance', async () => {
+      const { id, accountId } = await scheduleOnFreshAccount({
+        payee: 'Rent',
+        amountCents: 150000,
+        nextDate: '2026-08-01',
+      });
+
+      await recurringService.materializeDue(NOW);
+
+      const rows = await ledgerFor(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].amountCents).toBe(150000);
+      expect(rows[0].type).toBe('expense');
+      expect((rows[0].categoryId as unknown as Types.ObjectId).toString()).toBe(
+        expenseCatA,
+      );
+      // Normalized to UTC midnight — the dedupe key is per calendar day.
+      expect(rows[0].date.toISOString()).toBe('2026-08-01T00:00:00.000Z');
+      // A fresh account starts at zero, so the expense is the whole balance.
+      expect(await balanceOf(accountId)).toBe(-150000);
+
+      // And the schedule advanced one month.
+      const after = await request(app.getHttpServer())
+        .get(`/api/recurring/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(after.body.nextDate).toContain('2026-09-01');
+    });
+
+    // The ticket's headline acceptance criterion.
+    it('shows the materialized transaction in budget-vs-actual', async () => {
+      await createSchedule(tokenA, {
+        payee: 'Utilities',
+        amountCents: 8500,
+        nextDate: '2026-08-05',
+      });
+
+      await recurringService.materializeDue(NOW);
+
+      const budget = await request(app.getHttpServer())
+        .get('/api/budgets/2026-08')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const row = budget.body.categories.find(
+        (c: any) => c.categoryId === expenseCatA,
+      );
+      expect(row).toBeDefined();
+      expect(row.actualCents).toBeGreaterThanOrEqual(8500);
+    });
+
+    // The crash-retry property the whole insert-first design rests on.
+    it('is idempotent: a second run neither duplicates nor double-charges', async () => {
+      const { id, accountId } = await scheduleOnFreshAccount({
+        payee: 'Insurance',
+        amountCents: 4200,
+        nextDate: '2026-08-10',
+      });
+
+      await recurringService.materializeDue(NOW);
+      const afterFirst = await balanceOf(accountId);
+      expect(await ledgerFor(id)).toHaveLength(1);
+
+      // Re-running the same day is a no-op: the schedule has already advanced
+      // past today, so nothing is due.
+      await recurringService.materializeDue(NOW);
+      expect(await ledgerFor(id)).toHaveLength(1);
+      expect(await balanceOf(accountId)).toBe(afterFirst);
+    });
+
+    // Simulates a crash between the insert and the nextDate advance: the row
+    // exists but the schedule still points at that occurrence. The retry must
+    // be absorbed by the unique index, not produce a second row.
+    it('absorbs a replayed occurrence via the unique index', async () => {
+      const { id, accountId } = await scheduleOnFreshAccount({
+        payee: 'Replayed',
+        amountCents: 3300,
+        nextDate: '2026-08-12',
+      });
+
+      await recurringService.materializeDue(NOW);
+      const balanceAfterFirst = await balanceOf(accountId);
+      expect(await ledgerFor(id)).toHaveLength(1);
+
+      // Rewind nextDate to the occurrence just written, as a crash would leave it.
+      await request(app.getHttpServer())
+        .patch(`/api/recurring/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ nextDate: '2026-08-12' })
+        .expect(200);
+
+      const summary = await recurringService.materializeDue(NOW);
+
+      // At least this schedule's replay was absorbed (other leftover schedules
+      // in this database share the run).
+      expect(summary.duplicate).toBeGreaterThanOrEqual(1);
+      expect(await ledgerFor(id)).toHaveLength(1);
+      // Critically: the balance was NOT applied twice.
+      expect(await balanceOf(accountId)).toBe(balanceAfterFirst);
+    });
+
+    it('materializes one transaction per missed period when overdue', async () => {
+      const { id } = await scheduleOnFreshAccount({
+        payee: 'Backlog',
+        amountCents: 1000,
+        nextDate: '2026-05-01',
+      });
+
+      await recurringService.materializeDue(NOW);
+
+      const rows = await ledgerFor(id);
+      expect(rows.map((r) => r.date.toISOString().slice(0, 10))).toEqual([
+        '2026-05-01',
+        '2026-06-01',
+        '2026-07-01',
+        '2026-08-01',
+      ]);
+    });
+
+    it('stops at endDate and deactivates the schedule', async () => {
+      const { id } = await scheduleOnFreshAccount({
+        payee: 'Ending',
+        amountCents: 500,
+        nextDate: '2026-06-01',
+        endDate: '2026-07-01',
+      });
+
+      await recurringService.materializeDue(NOW);
+
+      expect(await ledgerFor(id)).toHaveLength(2);
+      const after = await request(app.getHttpServer())
+        .get(`/api/recurring/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(after.body.isActive).toBe(false);
+    });
+
+    it('leaves a schedule on an archived account untouched and reactivatable', async () => {
+      // Created against a live account, then the account is archived — the only
+      // route into this state, since the API blocks pointing at archived refs.
+      const { id, accountId } = await scheduleOnFreshAccount({
+        payee: 'Stranded',
+        amountCents: 700,
+        nextDate: '2026-08-01',
+      });
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isArchived: true })
+        .expect(200);
+
+      const summary = await recurringService.materializeDue(NOW);
+
+      expect(summary.skipped).toBeGreaterThanOrEqual(1);
+      expect(await ledgerFor(id)).toHaveLength(0);
+      // Still active and still due, so un-archiving self-heals on the next run.
+      const after = await request(app.getHttpServer())
+        .get(`/api/recurring/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(after.body.isActive).toBe(true);
+      expect(after.body.nextDate).toContain('2026-08-01');
+    });
+
+    it('does not materialize another household schedules', async () => {
+      const before = await request(app.getHttpServer())
+        .post('/api/recurring')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({
+          accountId: bAccount,
+          categoryId: bCategory,
+          type: 'expense',
+          amountCents: 999,
+          payee: 'B bill',
+          cadence: 'monthly',
+          nextDate: '2026-08-01',
+        })
+        .expect(201);
+
+      await recurringService.materializeDue(NOW);
+
+      // B's schedule is materialized into B's ledger, never A's.
+      const rows = await ledgerFor(before.body._id);
+      expect(rows).toHaveLength(1);
+      expect(
+        (rows[0].householdId as unknown as Types.ObjectId).toString(),
+      ).not.toBe(householdIdA);
     });
   });
 });

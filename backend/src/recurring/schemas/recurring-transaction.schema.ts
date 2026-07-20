@@ -91,6 +91,28 @@ export class RecurringTransaction {
   @Prop({ required: true })
   nextDate: Date;
 
+  // The schedule's intended day-of-month, held separately from `nextDate` so a
+  // month-length clamp stays temporary. Re-deriving the day from the stored
+  // date each run (what SubscriptionsService.advanceToFutureDate does) makes a
+  // clamp permanent: a bill on the 31st becomes Feb 28 and then stays on the
+  // 28th forever. With the anchor kept, Jan 31 → Feb 28 → Mar 31 (VEG-467).
+  //
+  // Server-derived only — deliberately absent from both DTOs, so `whitelist:
+  // true` strips any client attempt to set an anchor that disagrees with
+  // nextDate. Optional: absent means "use nextDate's own day", which is exactly
+  // right for every schedule anchored on day ≤ 28 and for legacy rows the
+  // VEG-469 fold-in migrates, so no backfill is required.
+  @Prop({
+    required: false,
+    min: 1,
+    max: 31,
+    validate: {
+      validator: (v: number | null) => v == null || Number.isInteger(v),
+      message: 'cadenceAnchorDay must be an integer day-of-month',
+    },
+  })
+  cadenceAnchorDay?: number;
+
   // The integer validator also rejects explicit null (Mongoose applies the
   // default only to undefined and skips min/max on null), which the VEG-469
   // fold-in could otherwise persist and break the reminder cron's date math.
