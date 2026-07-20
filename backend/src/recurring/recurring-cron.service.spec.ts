@@ -47,7 +47,12 @@ describe('RecurringCronService', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    // restoreAllMocks, not clearAllMocks: the severity tests spy on
+    // Logger.prototype with mockImplementation, and clearing only wipes call
+    // history — the stub would stay installed for the rest of the file and
+    // make it order-fragile for anyone adding a test that expects real
+    // logging. There is no restoreMocks in the Jest config to cover this.
+    jest.restoreAllMocks();
   });
 
   it('materializes due schedules when it wins the daily lock', async () => {

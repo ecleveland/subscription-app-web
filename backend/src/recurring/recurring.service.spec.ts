@@ -1086,6 +1086,23 @@ describe('RecurringService', () => {
         expect(mockModel.updateOne).not.toHaveBeenCalled();
       });
 
+      // The scheduler-side half of the balance-apply-failure contract: a
+      // rethrow from materializeRecurring must demote the occurrence to
+      // `failed` and leave nextDate untouched, so the occurrence is retried
+      // rather than skipped past. Only observable here, not in the
+      // transactions spec where the call simply rejects.
+      it('counts a rejected materialization as failed and does not advance', async () => {
+        transactionsService.materializeRecurring.mockRejectedValue(
+          new Error('balance write failed'),
+        );
+        scanReturns([scanDoc()]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({ materialized: 0, failed: 1 });
+        expect(mockModel.updateOne).not.toHaveBeenCalled();
+      });
+
       // Resume-where-it-stopped, the property the insert-first ordering buys.
       it('persists progress made before a mid-catch-up failure', async () => {
         transactionsService.materializeRecurring
@@ -1116,8 +1133,10 @@ describe('RecurringService', () => {
 
         const summary = await service.materializeDue(NOW);
 
-        expect(summary).toMatchObject({ failed: 1 });
-        expect(summary.materialized).toBeGreaterThanOrEqual(1);
+        // Exact, not a lower bound: "without losing earlier progress" is the
+        // whole claim, and >= 1 would pass even if progress HAD been lost.
+        // June advances; July posts and its advance throws.
+        expect(summary).toMatchObject({ failed: 1, materialized: 2 });
       });
 
       it('keeps processing other schedules when one throws', async () => {

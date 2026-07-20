@@ -906,18 +906,15 @@ describe('TransactionsService', () => {
         );
       });
 
+      // Rethrowing is what demotes the occurrence to `failed` upstream and
+      // stops the scheduler advancing past it — asserted from the scheduler's
+      // side in recurring.service.spec.ts, where the summary is observable.
       it('still persists the transaction, then rethrows', async () => {
         await expect(
           service.materializeRecurring(HOUSEHOLD_ID, input()),
         ).rejects.toThrow('balance write failed');
         // Written before the balance was touched — not rolled back.
         expect(txnSave).toHaveBeenCalledTimes(1);
-      });
-
-      it('does not report the occurrence as materialized', async () => {
-        await expect(
-          service.materializeRecurring(HOUSEHOLD_ID, input()),
-        ).rejects.toThrow();
       });
     });
   });
