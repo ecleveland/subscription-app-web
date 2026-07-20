@@ -501,6 +501,26 @@ export class RecurringService {
       if (utcDay(occurrence) > utcDay(now)) {
         return;
       }
+      // Cap check sits AFTER the two clean-exit guards, so a schedule that
+      // finishes exactly on the cap leaves via "caught up" rather than being
+      // reported capped — otherwise it would look permanently behind and be
+      // re-scanned as such forever. Reaching here means real work remains.
+      if (periods >= RecurringService.MAX_CATCHUP_PERIODS) {
+        summary.capped += 1;
+        this.logger.warn(
+          {
+            householdId,
+            recurringId,
+            cap: RecurringService.MAX_CATCHUP_PERIODS,
+            nextDate: occurrence.toISOString(),
+            daysBehind: Math.floor(
+              (utcDay(now) - utcDay(occurrence)) / 86_400_000,
+            ),
+          },
+          'Recurring schedule hit the per-run catch-up cap; resuming on the next run',
+        );
+        return;
+      }
 
       const result = await this.transactionsService.materializeRecurring(
         householdId,
@@ -531,7 +551,6 @@ export class RecurringService {
         schedule.cadence,
         schedule.cadenceAnchorDay,
       );
-      periods += 1;
 
       // Deactivate in the SAME write as the final advance when the schedule
       // has now run its course — no extra round trip, and it drops the row out
@@ -572,19 +591,7 @@ export class RecurringService {
       }
 
       occurrence = next;
-      if (periods >= RecurringService.MAX_CATCHUP_PERIODS) {
-        summary.capped += 1;
-        this.logger.warn(
-          {
-            householdId,
-            recurringId,
-            cap: RecurringService.MAX_CATCHUP_PERIODS,
-            nextDate: next.toISOString(),
-          },
-          'Recurring schedule hit the per-run catch-up cap; resuming on the next run',
-        );
-        return;
-      }
+      periods += 1;
     }
   }
 

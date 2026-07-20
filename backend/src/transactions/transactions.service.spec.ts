@@ -894,6 +894,32 @@ describe('TransactionsService', () => {
         service.materializeRecurring(HOUSEHOLD_ID, input()),
       ).rejects.toThrow('connection reset');
     });
+
+    // The ledger-is-truth / balance-is-cache contract, pinned. The row must
+    // survive a failed balance apply — it is the artifact reconciliation would
+    // rebuild the cached balance FROM. Rethrowing is what demotes the
+    // occurrence to `failed` and stops the scheduler advancing past it.
+    describe('when the balance apply fails after the row is written', () => {
+      beforeEach(() => {
+        accountsService.applyBalanceDelta.mockRejectedValue(
+          new Error('balance write failed'),
+        );
+      });
+
+      it('still persists the transaction, then rethrows', async () => {
+        await expect(
+          service.materializeRecurring(HOUSEHOLD_ID, input()),
+        ).rejects.toThrow('balance write failed');
+        // Written before the balance was touched — not rolled back.
+        expect(txnSave).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not report the occurrence as materialized', async () => {
+        await expect(
+          service.materializeRecurring(HOUSEHOLD_ID, input()),
+        ).rejects.toThrow();
+      });
+    });
   });
 
   describe('aggregateMonthlyActualsByCategory', () => {

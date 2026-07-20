@@ -1045,6 +1045,81 @@ describe('RecurringService', () => {
         expect(summary).toMatchObject({ yielded: 1 });
       });
 
+      // The entire design rationale is insert → balance → advance: the ledger
+      // is the source of truth and the balance is a re-derivable cache, so a
+      // crash must leave a complete ledger rather than a lost occurrence.
+      // Every other test asserts both happened; reversing them would pass.
+      it('inserts the transaction BEFORE advancing nextDate', async () => {
+        scanReturns([scanDoc()]);
+
+        await service.materializeDue(NOW);
+
+        expect(
+          transactionsService.materializeRecurring.mock.invocationCallOrder[0],
+        ).toBeLessThan(mockModel.updateOne.mock.invocationCallOrder[0]);
+      });
+
+      // An infrastructure blip must surface as `failed`, not be laundered into
+      // "unusable reference" — which would leave nextDate stale while the run
+      // summary reported a clean pass.
+      it('counts a transient account-lookup error as failed, not skipped', async () => {
+        accountsService.findOne.mockRejectedValue(
+          new Error('connection reset'),
+        );
+        scanReturns([scanDoc()]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({ failed: 1, skipped: 0 });
+        expect(mockModel.updateOne).not.toHaveBeenCalled();
+      });
+
+      it('counts a transient category-lookup error as failed, not skipped', async () => {
+        categoriesService.findInHousehold.mockRejectedValue(
+          new Error('connection reset'),
+        );
+        scanReturns([scanDoc()]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({ failed: 1, skipped: 0 });
+        expect(mockModel.updateOne).not.toHaveBeenCalled();
+      });
+
+      // Resume-where-it-stopped, the property the insert-first ordering buys.
+      it('persists progress made before a mid-catch-up failure', async () => {
+        transactionsService.materializeRecurring
+          .mockResolvedValueOnce({ materialized: true, duplicate: false })
+          .mockResolvedValueOnce({ materialized: true, duplicate: false })
+          .mockRejectedValueOnce(new Error('write failed'));
+        // Due May 1 with today Aug 15 → May, Jun, Jul, Aug; the third throws.
+        scanReturns([scanDoc({ nextDate: new Date('2026-05-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({ materialized: 2, failed: 1 });
+        // Two advances persisted, so tomorrow resumes at July rather than
+        // replaying May and June.
+        expect(mockModel.updateOne).toHaveBeenCalledTimes(2);
+        expect(advancedTo(1)).toEqual(new Date('2026-07-01T00:00:00Z'));
+      });
+
+      it('counts a failed advance as failed without losing earlier progress', async () => {
+        mockModel.updateOne
+          .mockReturnValueOnce(
+            createChainable({ matchedCount: 1, modifiedCount: 1 }),
+          )
+          .mockImplementationOnce(() => {
+            throw new Error('advance failed');
+          });
+        scanReturns([scanDoc({ nextDate: new Date('2026-06-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({ failed: 1 });
+        expect(summary.materialized).toBeGreaterThanOrEqual(1);
+      });
+
       it('keeps processing other schedules when one throws', async () => {
         const other = new Types.ObjectId('507f191e810c19729de860ff');
         transactionsService.materializeRecurring
@@ -1077,6 +1152,38 @@ describe('RecurringService', () => {
       expect(summary).toMatchObject({ materialized: 60, capped: 1 });
       // Progress persisted, so tomorrow resumes rather than restarting.
       expect(advancedTo(59)).toEqual(new Date('2021-02-24T00:00:00Z'));
+    });
+
+    // Boundary cases for the cap. A schedule that legitimately finishes ON the
+    // cap must not be reported capped — it would look permanently behind and
+    // be re-scanned forever.
+    describe('cap boundary', () => {
+      // A weekly schedule with EXACTLY n due occurrences. The occurrence on
+      // NOW itself is due, so n periods means starting (n-1) weeks back.
+      const weeklyWithDuePeriods = (n: number) =>
+        scanDoc({
+          cadence: RecurringCadence.WEEKLY,
+          nextDate: new Date(NOW.getTime() - (n - 1) * 7 * 86_400_000),
+          cadenceAnchorDay: undefined,
+        });
+
+      it('does not report capped when exactly 60 periods are due', async () => {
+        scanReturns([weeklyWithDuePeriods(60)]);
+
+        const summary = await service.materializeDue(NOW);
+
+        // Fully caught up ON the cap: it exits via "not due yet", not via the
+        // cap, so it is not re-scanned tomorrow as though it were behind.
+        expect(summary).toMatchObject({ materialized: 60, capped: 0 });
+      });
+
+      it('reports capped when 61 periods are due', async () => {
+        scanReturns([weeklyWithDuePeriods(61)]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({ materialized: 60, capped: 1 });
+      });
     });
 
     it('reports a summary across several schedules', async () => {

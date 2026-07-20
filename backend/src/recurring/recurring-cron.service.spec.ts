@@ -1,21 +1,30 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Logger } from '@nestjs/common';
 import { RecurringCronService } from './recurring-cron.service';
-import { RecurringService } from './recurring.service';
+import {
+  RecurringService,
+  type MaterializationSummary,
+} from './recurring.service';
 import { CronLockService } from '../common/cron-lock/cron-lock.service';
+import { SubscriptionsCronService } from '../subscriptions/subscriptions-cron.service';
+import { NotificationsCronService } from '../notifications/notifications-cron.service';
 
 describe('RecurringCronService', () => {
   let cron: RecurringCronService;
   let mockRecurringService: { materializeDue: jest.Mock };
   let mockCronLock: { tryAcquire: jest.Mock };
 
-  const summary = {
+  // Typed, so a field added to MaterializationSummary fails to compile here
+  // rather than silently leaving this fixture stale (mockResolvedValue would
+  // otherwise accept any shape).
+  const summary: MaterializationSummary = {
     scanned: 1,
     materialized: 1,
     duplicate: 0,
     skipped: 0,
     deactivated: 0,
     capped: 0,
+    yielded: 0,
     failed: 0,
   };
 
@@ -120,14 +129,21 @@ describe('RecurringCronService', () => {
     );
   });
 
-  it('uses its own lock key, independent of the subscriptions cron', async () => {
+  it('uses a lock key distinct from every other daily cron', async () => {
     // Sharing a key would let whichever job ran first suppress the other for
-    // the rest of the day.
-    await cron.handleMaterialization();
+    // the rest of the day. Compare against the REAL constants, not literals:
+    // asserting against a hardcoded string would not catch someone renaming
+    // the subscriptions key INTO a collision, which is the failure this guards.
+    const keys = [
+      RecurringCronService.LOCK_KEY,
+      SubscriptionsCronService.LOCK_KEY,
+      NotificationsCronService.LOCK_KEY,
+    ];
+    expect(new Set(keys).size).toBe(keys.length);
 
-    expect(RecurringCronService.LOCK_KEY).toBe('materialize-recurring');
-    expect(mockCronLock.tryAcquire.mock.calls[0][0]).not.toBe(
-      'advance-overdue-dates',
+    await cron.handleMaterialization();
+    expect(mockCronLock.tryAcquire.mock.calls[0][0]).toBe(
+      RecurringCronService.LOCK_KEY,
     );
   });
 });

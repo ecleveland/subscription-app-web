@@ -40,6 +40,7 @@ describe('Recurring (e2e)', () => {
   let archivedCatA: string;
 
   // Household B fixtures (cross-household isolation).
+  let householdIdB: string;
   let bAccount: string;
   let bCategory: string;
 
@@ -140,7 +141,7 @@ describe('Recurring (e2e)', () => {
     const membershipB = await households.findMembershipByUser(
       userIdFromToken(tokenB),
     );
-    const householdIdB = (
+    householdIdB = (
       membershipB!.householdId as { toString(): string }
     ).toString();
     bCategory = await seededCategory(householdIdB, false);
@@ -840,25 +841,57 @@ describe('Recurring (e2e)', () => {
       expect(after.body.nextDate).toContain('2026-09-01');
     });
 
-    // The ticket's headline acceptance criterion.
+    // The ticket's headline acceptance criterion. Asserted as an exact DELTA,
+    // not a lower bound: expenseCatA is shared with the CRUD suites and with
+    // the other scheduler tests in this month, so `toBeGreaterThanOrEqual`
+    // would be satisfied before this test did anything at all.
+    const actualForCategory = async (
+      month: string,
+      categoryId: string,
+    ): Promise<number> => {
+      const budget = await request(app.getHttpServer())
+        .get(`/api/budgets/${month}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const row = budget.body.categories.find(
+        (c: any) => c.categoryId === categoryId,
+      );
+      expect(row).toBeDefined();
+      return row.actualCents;
+    };
+
     it('shows the materialized transaction in budget-vs-actual', async () => {
-      await createSchedule(tokenA, {
+      const before = await actualForCategory('2026-08', expenseCatA);
+
+      await scheduleOnFreshAccount({
         payee: 'Utilities',
         amountCents: 8500,
         nextDate: '2026-08-05',
       });
-
       await recurringService.materializeDue(NOW);
 
-      const budget = await request(app.getHttpServer())
-        .get('/api/budgets/2026-08')
-        .set('Authorization', `Bearer ${tokenA}`)
-        .expect(200);
-      const row = budget.body.categories.find(
-        (c: any) => c.categoryId === expenseCatA,
+      const after = await actualForCategory('2026-08', expenseCatA);
+      expect(after - before).toBe(8500);
+    });
+
+    it('counts a materialized income schedule as income actuals', async () => {
+      const before = await actualForCategory('2026-08', incomeCatA);
+
+      const { accountId } = await scheduleOnFreshAccount({
+        type: 'income',
+        categoryId: incomeCatA,
+        payee: 'Employer',
+        amountCents: 250000,
+        nextDate: '2026-08-03',
+      });
+      await recurringService.materializeDue(NOW);
+
+      expect((await actualForCategory('2026-08', incomeCatA)) - before).toBe(
+        250000,
       );
-      expect(row).toBeDefined();
-      expect(row.actualCents).toBeGreaterThanOrEqual(8500);
+      // The INCOME balance sign against a real database — everywhere else it
+      // is only asserted against the applyBalanceDelta mock.
+      expect(await balanceOf(accountId)).toBe(250000);
     });
 
     // The crash-retry property the whole insert-first design rests on.
@@ -989,14 +1022,19 @@ describe('Recurring (e2e)', () => {
         })
         .expect(201);
 
+      const aBalanceBefore = await balanceOf(checkingA);
+
       await recurringService.materializeDue(NOW);
 
-      // B's schedule is materialized into B's ledger, never A's.
+      // B's schedule is materialized into B's OWN ledger — asserting merely
+      // "not A" would also pass if it landed in some third household.
       const rows = await ledgerFor(before.body._id);
       expect(rows).toHaveLength(1);
       expect(
         (rows[0].householdId as unknown as Types.ObjectId).toString(),
-      ).not.toBe(householdIdA);
+      ).toBe(householdIdB);
+      // And the isolation that actually matters: A's money did not move.
+      expect(await balanceOf(checkingA)).toBe(aBalanceBefore);
     });
   });
 });
