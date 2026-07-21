@@ -23,6 +23,7 @@ import { parseAmountToCents } from './csv-import.util';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
+import { utcDay } from '../common/utc-date.util';
 
 // The normalized, validated reference/effect shape of a transaction, derived
 // from a create DTO or an existing doc merged with a patch. `categoryId` is set
@@ -60,6 +61,33 @@ export interface MonthlyCategoryActual {
   categoryId: string;
   type: TransactionType.INCOME | TransactionType.EXPENSE;
   totalCents: number;
+}
+
+/**
+ * One occurrence of a recurring schedule, in ledger terms (VEG-467). The
+ * scheduler translates its own `RecurringType` into a `TransactionType` before
+ * calling, so this module stays independent of the recurring enum — the two are
+ * deliberately distinct (recurring has no `transfer` case).
+ */
+export interface RecurringOccurrence {
+  recurringId: string;
+  accountId: string;
+  categoryId: string;
+  memberId?: string;
+  type: TransactionType.INCOME | TransactionType.EXPENSE;
+  amountCents: number;
+  /** The occurrence's date; normalized to UTC midnight before persisting. */
+  date: Date;
+  payee: string;
+  notes?: string;
+  tags: string[];
+}
+
+export interface MaterializeResult {
+  materialized: boolean;
+  /** The occurrence already existed — a resumed run, not an error. */
+  duplicate: boolean;
+  transactionId?: string;
 }
 
 @Injectable()
@@ -117,6 +145,130 @@ export class TransactionsService {
       'Transaction created',
     );
     return created;
+  }
+
+  /**
+   * Write one occurrence of a recurring schedule into the ledger (VEG-467).
+   *
+   * Separate from `create()` deliberately: that path takes a DTO with no
+   * `recurringId` (the global `whitelist: true` would strip it), re-resolves
+   * both references per call, and throws `BadRequestException` on archived
+   * references — the wrong control flow inside a scheduler batch. Balance sync
+   * is NOT reimplemented here: it goes through the same private
+   * `balanceDeltas`/`syncBalances` the manual path uses, so the two cannot
+   * drift apart.
+   *
+   * Reference validation is the CALLER's job — the scheduler resolves the
+   * account and category once per schedule (it needs them for the archived
+   * checks anyway) rather than twice per occurrence.
+   *
+   * Ordering is insert → balance, and the caller advances `nextDate` only
+   * afterwards. A crash mid-way therefore leaves a complete ledger and, at
+   * worst, a cached balance short by one occurrence — recoverable by
+   * re-deriving from the ledger. The reverse order would silently lose an
+   * occurrence outright, with nothing recording that it should have existed.
+   */
+  async materializeRecurring(
+    householdId: string,
+    occurrence: RecurringOccurrence,
+  ): Promise<MaterializeResult> {
+    // Normalize to UTC midnight: the { recurringId, date } unique index keys on
+    // the exact instant, so an occurrence carrying a time-of-day would produce
+    // a different key for the same calendar day and a retry would insert twice.
+    const date = new Date(utcDay(occurrence.date));
+
+    let created: TransactionDocument;
+    try {
+      created = await new this.transactionModel({
+        householdId: new Types.ObjectId(householdId),
+        accountId: new Types.ObjectId(occurrence.accountId),
+        categoryId: new Types.ObjectId(occurrence.categoryId),
+        memberId: occurrence.memberId
+          ? new Types.ObjectId(occurrence.memberId)
+          : undefined,
+        recurringId: new Types.ObjectId(occurrence.recurringId),
+        type: occurrence.type,
+        amountCents: occurrence.amountCents,
+        date,
+        payee: occurrence.payee,
+        notes: occurrence.notes,
+        tags: occurrence.tags ?? [],
+        cleared: false,
+      }).save();
+    } catch (error: unknown) {
+      if (!this.isRecurringDuplicateKey(error)) {
+        throw error;
+      }
+      // A previous run already wrote this occurrence and died before advancing
+      // nextDate. Skipping the balance apply is the point: the earlier run may
+      // already have applied it, and re-applying is the double-count this
+      // index exists to prevent.
+      //
+      // ERROR, not warn, and the message states the consequence: nothing
+      // records whether that earlier run's $inc actually landed. If it died
+      // between the insert and syncBalances, the cached balance is short by
+      // this amount permanently — this path cannot tell, and advancing past
+      // the occurrence closes the only chance to retry it. A clean run never
+      // reaches here, so this is always worth a human's attention.
+      this.logger.error(
+        {
+          householdId,
+          recurringId: occurrence.recurringId,
+          date: date.toISOString(),
+          accountId: occurrence.accountId,
+          amountCents: occurrence.amountCents,
+        },
+        'Recurring occurrence already materialized; skipping balance apply. If ' +
+          'the prior run died before syncing balances, the cached balance is ' +
+          'short by this amount and must be re-derived from the ledger.',
+      );
+      return { materialized: false, duplicate: true };
+    }
+
+    await this.syncBalances(
+      householdId,
+      [],
+      this.balanceDeltas({
+        type: occurrence.type,
+        accountId: occurrence.accountId,
+        amountCents: occurrence.amountCents,
+        categoryId: occurrence.categoryId,
+      }),
+      created._id.toString(),
+    );
+    this.logger.log(
+      {
+        householdId,
+        transactionId: created._id.toString(),
+        recurringId: occurrence.recurringId,
+      },
+      'Recurring occurrence materialized',
+    );
+    return {
+      materialized: true,
+      duplicate: false,
+      transactionId: created._id.toString(),
+    };
+  }
+
+  // A duplicate-key error specifically from the { recurringId, date } index.
+  // Matched on the EXACT key pattern, not merely "mentions recurringId": a
+  // future wider index that happens to include the field is a different
+  // constraint, and reporting its violation as "already materialized" would
+  // silently skip the balance apply for a write that never landed. An error
+  // carrying no keyPattern falls through to a rethrow — the fail-loud
+  // direction.
+  private isRecurringDuplicateKey(error: unknown): boolean {
+    if (!(error instanceof Error) || !('code' in error)) {
+      return false;
+    }
+    if ((error as { code?: number }).code !== 11000) {
+      return false;
+    }
+    const keyPattern = (error as { keyPattern?: Record<string, unknown> })
+      .keyPattern;
+    const keys = keyPattern === undefined ? [] : Object.keys(keyPattern);
+    return keys.length === 2 && keys[0] === 'recurringId' && keys[1] === 'date';
   }
 
   async findAll(

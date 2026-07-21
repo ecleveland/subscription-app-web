@@ -7,17 +7,21 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
+  RecurringCadence,
   RecurringTransaction,
   RecurringTransactionDocument,
   RecurringType,
 } from './schemas/recurring-transaction.schema';
+import { TransactionsService } from '../transactions/transactions.service';
+import { TransactionType } from '../transactions/schemas/transaction.schema';
 import { CreateRecurringDto } from './dto/create-recurring.dto';
 import { UpdateRecurringDto } from './dto/update-recurring.dto';
 import { QueryRecurringDto } from './dto/query-recurring.dto';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
-import { parseUtcDate, utcDay } from './recurring-dates.util';
+import { addCadence } from './recurring-dates.util';
+import { parseUtcDate, utcDay } from '../common/utc-date.util';
 
 // The merged, would-be-persisted state of a schedule's cross-field invariants,
 // checked before any write so violations surface as 400s (the schema-level
@@ -27,6 +31,67 @@ interface ScheduleState {
   isSubscription: boolean;
   nextDate: Date;
   endDate?: Date;
+}
+
+/** What one scheduler run did, for the cron's summary log. */
+export interface MaterializationSummary {
+  scanned: number;
+  materialized: number;
+  /** Occurrences a previous run had already written (resumed after a crash). */
+  duplicate: number;
+  /** Schedules skipped for an unusable account/category, left un-advanced. */
+  skipped: number;
+  /** Schedules that reached their endDate and were deactivated. */
+  deactivated: number;
+  /** Schedules that hit MAX_CATCHUP_PERIODS and will resume tomorrow. */
+  capped: number;
+  /**
+   * Schedules whose guarded advance matched nothing, so the remaining periods
+   * were abandoned. Counted so a run that gave up mid-catch-up is
+   * distinguishable from one that finished cleanly.
+   */
+  yielded: number;
+  /** Schedules abandoned mid-run after an error; the rest still ran. */
+  failed: number;
+}
+
+// The lean scan row. Narrower than the full document on purpose: the scan uses
+// .lean(), so there is no save() and nothing here may be mutated in place.
+interface DueSchedule {
+  _id: Types.ObjectId;
+  householdId: Types.ObjectId;
+  accountId?: Types.ObjectId;
+  categoryId: Types.ObjectId;
+  memberId?: Types.ObjectId;
+  type: RecurringType;
+  amountCents: number;
+  payee: string;
+  notes?: string;
+  tags: string[];
+  cadence: RecurringCadence;
+  nextDate: Date;
+  cadenceAnchorDay?: number;
+  endDate?: Date;
+}
+
+// Whether a schedule's references allow it to post right now. A discriminated
+// union rather than a boolean + optional: the usable branch carries the
+// resolved accountId, so the materialization path can never need a non-null
+// assertion on a field the schema marks optional.
+type MaterializationRefs =
+  | { usable: true; accountId: Types.ObjectId }
+  | { usable: false; reason: string };
+
+// RecurringType and TransactionType are deliberately distinct enums (recurring
+// has no `transfer` case), so translate explicitly rather than casting. A cast
+// would keep compiling — and silently mean the wrong thing — if either enum
+// changed.
+function toTransactionType(
+  type: RecurringType,
+): TransactionType.INCOME | TransactionType.EXPENSE {
+  return type === RecurringType.INCOME
+    ? TransactionType.INCOME
+    : TransactionType.EXPENSE;
 }
 
 // Household-scoped CRUD for recurring schedules (VEG-466). The materialization
@@ -43,7 +108,19 @@ export class RecurringService {
     private readonly recurringModel: Model<RecurringTransactionDocument>,
     private readonly accountsService: AccountsService,
     private readonly categoriesService: CategoriesService,
+    private readonly transactionsService: TransactionsService,
   ) {}
+
+  /**
+   * How many periods one schedule may catch up in a single run. A schedule
+   * left with a years-stale nextDate (a bad migration, a long-dormant row
+   * reactivated) would otherwise mint hundreds of ledger entries and balance
+   * deltas unattended. Hitting the cap is a data signal, not an outage signal:
+   * 60 already absorbs ~14 months of downtime at the tightest cadence
+   * (weekly), 5 years at monthly. Progress is persisted, so the next daily run
+   * continues rather than restarting.
+   */
+  static readonly MAX_CATCHUP_PERIODS = 60;
 
   async create(
     householdId: string,
@@ -79,6 +156,10 @@ export class RecurringService {
       tags: dto.tags,
       cadence: dto.cadence,
       nextDate,
+      // Server-derived, never client-supplied (absent from the DTO, so
+      // whitelist:true strips any attempt). Anchoring on the creation date
+      // keeps a later month-length clamp temporary — see the schema comment.
+      cadenceAnchorDay: nextDate.getUTCDate(),
       reminderDaysBefore: dto.reminderDaysBefore,
       endDate,
       isActive: dto.isActive,
@@ -227,8 +308,25 @@ export class RecurringService {
     if (dto.payee !== undefined) existing.payee = dto.payee;
     if (dto.notes !== undefined) existing.notes = dto.notes;
     if (dto.tags !== undefined) existing.tags = dto.tags;
-    if (dto.cadence !== undefined) existing.cadence = dto.cadence;
-    if (dto.nextDate !== undefined) existing.nextDate = mergedNextDate;
+    if (dto.cadence !== undefined) {
+      existing.cadence = dto.cadence;
+      // Changing cadence re-anchors off the current nextDate, unless the patch
+      // also sets one explicitly (handled below). A weekly schedule's nextDate
+      // walks forward every run while its anchor stays frozen at the creation
+      // day — addCadence ignores the anchor for weekly — so carrying that
+      // stale value into monthly/yearly would hand it authority over the
+      // posting date it never had.
+      if (dto.nextDate === undefined) {
+        existing.cadenceAnchorDay = existing.nextDate.getUTCDate();
+      }
+    }
+    if (dto.nextDate !== undefined) {
+      existing.nextDate = mergedNextDate;
+      // Moving the date IS re-anchoring — but only then. Re-deriving on every
+      // patch would let an unrelated edit rewrite the anchor from an
+      // already-clamped nextDate, reintroducing the drift the field prevents.
+      existing.cadenceAnchorDay = mergedNextDate.getUTCDate();
+    }
     if (dto.reminderDaysBefore !== undefined) {
       existing.reminderDaysBefore = dto.reminderDaysBefore;
     }
@@ -273,6 +371,300 @@ export class RecurringService {
       { householdId, recurringId: id },
       'Recurring schedule deleted',
     );
+  }
+
+  /**
+   * Turn every due recurring schedule into ledger transactions (VEG-467).
+   *
+   * Runs once a day behind the CronLockService leader election. Per schedule,
+   * per occurrence, the order is: **insert the transaction → apply the balance
+   * → advance nextDate**. That ordering is deliberate. The ledger is the source
+   * of truth and `Account.balanceCents` is a cache that can be re-derived from
+   * it, so a crash mid-occurrence leaves the ledger complete and, at worst, the
+   * cached balance short — loud and recoverable. Advancing first would instead
+   * lose the occurrence outright, with nothing anywhere recording that it
+   * should have existed. The { recurringId, date } unique index makes the retry
+   * safe: re-attempting an already-written occurrence is a benign duplicate,
+   * not a second row and a double-applied delta.
+   *
+   * The advance is a guarded `updateOne` (filtered on the nextDate we observed)
+   * so two instances racing the same schedule cannot both advance it.
+   */
+  async materializeDue(
+    now: Date = new Date(),
+  ): Promise<MaterializationSummary> {
+    const summary: MaterializationSummary = {
+      scanned: 0,
+      materialized: 0,
+      duplicate: 0,
+      skipped: 0,
+      deactivated: 0,
+      capped: 0,
+      yielded: 0,
+      failed: 0,
+    };
+
+    // Day granularity, matching how endDate is compared everywhere else: an
+    // occurrence dated noon today is due at a midnight run. An `$lte: now`
+    // bound would defer it by a whole day.
+    const dueBefore = new Date(utcDay(now) + 24 * 60 * 60 * 1000);
+    const cursor = this.recurringModel
+      .find({
+        isActive: true,
+        nextDate: { $lt: dueBefore },
+      } as Record<string, unknown>)
+      .lean()
+      .cursor();
+
+    for await (const raw of cursor) {
+      const schedule = raw as unknown as DueSchedule;
+      summary.scanned += 1;
+      try {
+        await this.materializeSchedule(schedule, now, summary);
+      } catch (error: unknown) {
+        // One bad schedule must not strand the rest of the households — same
+        // per-document isolation the notifications cron uses.
+        summary.failed += 1;
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          {
+            householdId: schedule.householdId.toString(),
+            recurringId: schedule._id.toString(),
+          },
+          `Recurring materialization failed for schedule: ${message}`,
+        );
+      }
+    }
+
+    return summary;
+  }
+
+  // Catch one schedule up to today, materializing an occurrence per period.
+  private async materializeSchedule(
+    schedule: DueSchedule,
+    now: Date,
+    summary: MaterializationSummary,
+  ): Promise<void> {
+    const householdId = schedule.householdId.toString();
+    const recurringId = schedule._id.toString();
+
+    const references = await this.resolveMaterializationRefs(schedule);
+    if (!references.usable) {
+      // Skip WITHOUT advancing. Leaving nextDate stale keeps the schedule at
+      // the top of the household's nextDate-sorted list as a visible signal,
+      // and once the account/category is fixed this same loop replays every
+      // missed period. Advancing would swallow those occurrences silently.
+      // Deactivating would be worse still: update() refuses to reactivate a
+      // schedule whose reference is archived, so the cron would create a state
+      // the API will not let the user undo.
+      summary.skipped += 1;
+      // Enough context to act on without a database round trip: which bill,
+      // and how long it has been stalled. A schedule 90 days behind reads very
+      // differently from one skipped for the first time, and this warns once
+      // per day for as long as it stays broken.
+      this.logger.warn(
+        {
+          householdId,
+          recurringId,
+          reason: references.reason,
+          payee: schedule.payee,
+          nextDate: schedule.nextDate.toISOString(),
+          daysStale: Math.floor(
+            (utcDay(now) - utcDay(schedule.nextDate)) / 86_400_000,
+          ),
+        },
+        'Skipping recurring schedule with an unusable reference',
+      );
+      return;
+    }
+
+    let occurrence = schedule.nextDate;
+    let periods = 0;
+
+    for (;;) {
+      // Past its end: nothing more to post, ever.
+      if (schedule.endDate && utcDay(occurrence) > utcDay(schedule.endDate)) {
+        // Count it only if THIS run is the one that deactivated it — a
+        // concurrent run winning the guard would otherwise be double-counted.
+        const deactivated = await this.advanceSchedule(
+          schedule,
+          occurrence,
+          occurrence,
+          false,
+        );
+        if (deactivated) {
+          summary.deactivated += 1;
+        }
+        return;
+      }
+      // Not due yet — the normal exit once the schedule has caught up.
+      if (utcDay(occurrence) > utcDay(now)) {
+        return;
+      }
+      // Cap check sits AFTER the two clean-exit guards, so a schedule that
+      // finishes exactly on the cap leaves via "caught up" rather than being
+      // reported capped — otherwise it would look permanently behind and be
+      // re-scanned as such forever. Reaching here means real work remains.
+      if (periods >= RecurringService.MAX_CATCHUP_PERIODS) {
+        summary.capped += 1;
+        this.logger.warn(
+          {
+            householdId,
+            recurringId,
+            cap: RecurringService.MAX_CATCHUP_PERIODS,
+            nextDate: occurrence.toISOString(),
+            daysBehind: Math.floor(
+              (utcDay(now) - utcDay(occurrence)) / 86_400_000,
+            ),
+          },
+          'Recurring schedule hit the per-run catch-up cap; resuming on the next run',
+        );
+        return;
+      }
+
+      const result = await this.transactionsService.materializeRecurring(
+        householdId,
+        {
+          recurringId,
+          accountId: references.accountId.toString(),
+          categoryId: schedule.categoryId.toString(),
+          memberId: schedule.memberId?.toString(),
+          type: toTransactionType(schedule.type),
+          amountCents: schedule.amountCents,
+          date: occurrence,
+          payee: schedule.payee,
+          notes: schedule.notes,
+          tags: schedule.tags ?? [],
+        },
+      );
+      if (result.duplicate) {
+        // A previous run wrote this one and died before advancing. Treat it as
+        // done and move on — aborting here would wedge the schedule forever,
+        // re-colliding on the same date every night.
+        summary.duplicate += 1;
+      } else {
+        summary.materialized += 1;
+      }
+
+      const next = addCadence(
+        occurrence,
+        schedule.cadence,
+        schedule.cadenceAnchorDay,
+      );
+
+      // Deactivate in the SAME write as the final advance when the schedule
+      // has now run its course — no extra round trip, and it drops the row out
+      // of the { isActive, nextDate } scan instead of being re-read forever.
+      const finished =
+        schedule.endDate !== undefined &&
+        utcDay(next) > utcDay(schedule.endDate);
+      const advanced = await this.advanceSchedule(
+        schedule,
+        occurrence,
+        next,
+        !finished,
+      );
+      if (!advanced) {
+        // Someone else moved nextDate between our read and this write, so the
+        // remaining periods are not ours to post. State what was OBSERVED
+        // rather than guessing a cause: leader election makes a second cron
+        // instance unlikely, and the realistic causes are a concurrent PATCH
+        // or the cursor re-visiting this document — an unsnapshotted scan over
+        // { isActive, nextDate } while the loop pushes nextDate forward within
+        // that same index. The guard makes a re-visit harmless (the insert
+        // dedupes, this advance misses, we stop) but it is not "concurrency".
+        summary.yielded += 1;
+        this.logger.warn(
+          {
+            householdId,
+            recurringId,
+            observedNextDate: occurrence.toISOString(),
+            attemptedNextDate: next.toISOString(),
+          },
+          'Guarded advance matched no schedule (concurrent edit or cursor re-visit); yielding the remaining periods',
+        );
+        return;
+      }
+      if (finished) {
+        summary.deactivated += 1;
+        return;
+      }
+
+      occurrence = next;
+      periods += 1;
+    }
+  }
+
+  // Advance nextDate, guarded on the value we observed so concurrent runs
+  // cannot both advance the same schedule. Returns false when the guard misses.
+  private async advanceSchedule(
+    schedule: DueSchedule,
+    observed: Date,
+    next: Date,
+    stayActive: boolean,
+  ): Promise<boolean> {
+    const set: Record<string, unknown> = { nextDate: next };
+    if (!stayActive) {
+      set.isActive = false;
+    }
+    const result = await this.recurringModel
+      .updateOne(
+        { _id: schedule._id, nextDate: observed } as Record<string, unknown>,
+        { $set: set },
+      )
+      .exec();
+    return (result.matchedCount ?? 0) > 0;
+  }
+
+  // Whether a schedule can post to the ledger right now. The scheduler resolves
+  // both references ONCE per schedule rather than per occurrence — a 60-period
+  // catch-up would otherwise issue 120 redundant lookups for references that
+  // cannot change mid-loop.
+  //
+  // The usable branch carries the resolved accountId so the caller cannot need
+  // a non-null assertion: `new Types.ObjectId(undefined)` mints a random VALID
+  // ObjectId, which would post money to a nonexistent account and leave
+  // applyBalanceDelta logging drift instead of throwing. Making the type carry
+  // the guarantee keeps that unreachable by construction rather than by a
+  // check in another function.
+  private async resolveMaterializationRefs(
+    schedule: DueSchedule,
+  ): Promise<MaterializationRefs> {
+    if (!schedule.accountId) {
+      // Legacy subscriptions migrate without an account (VEG-469) and wait
+      // here until one is assigned.
+      return { usable: false, reason: 'no accountId' };
+    }
+    const householdId = schedule.householdId.toString();
+
+    try {
+      const account = await this.accountsService.findOne(
+        householdId,
+        schedule.accountId.toString(),
+      );
+      if (account.isArchived) {
+        return { usable: false, reason: 'account archived' };
+      }
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        return { usable: false, reason: 'account missing' };
+      }
+      throw error;
+    }
+
+    const category = await this.categoriesService.findInHousehold(
+      householdId,
+      schedule.categoryId.toString(),
+    );
+    if (!category) {
+      return { usable: false, reason: 'category missing' };
+    }
+    if (category.isArchived) {
+      // Mirrors the manual create path: no NEW activity against an archived
+      // category. A scheduler write is new activity by that same rule.
+      return { usable: false, reason: 'category archived' };
+    }
+    return { usable: true, accountId: schedule.accountId };
   }
 
   // --- helpers -------------------------------------------------------------

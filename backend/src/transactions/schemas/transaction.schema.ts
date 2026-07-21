@@ -82,8 +82,9 @@ export class Transaction {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Account' })
   transferAccountId?: MongooseSchema.Types.ObjectId;
 
-  // Links a transaction materialized by a recurring schedule. Reserved for
-  // Phase 4; always null for now.
+  // Links a transaction materialized by a recurring schedule (VEG-467); unset
+  // on manually-entered transactions. Also the dedupe key backing the
+  // scheduler's exactly-once guarantee — see the unique index below.
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'RecurringTransaction' })
   recurringId?: MongooseSchema.Types.ObjectId;
 }
@@ -94,3 +95,34 @@ export const TransactionSchema = SchemaFactory.createForClass(Transaction);
 // household-scoped date-range filters.
 TransactionSchema.index({ householdId: 1, date: -1 });
 TransactionSchema.index({ accountId: 1, date: -1 });
+
+// The recurring scheduler's idempotency backstop (VEG-467): one materialized
+// transaction per (schedule, occurrence day). The scheduler inserts BEFORE
+// advancing nextDate, so a crash-and-retry re-attempts the same occurrence —
+// this index turns that retry into a benign duplicate-key skip instead of a
+// second ledger row and a double-applied balance delta.
+//
+// Two details are load-bearing:
+//   * `$type: 'objectId'`, NOT `$exists: true`. `$exists` also matches a
+//     document with an explicit `recurringId: null`, so every manual
+//     transaction written that way would collide with every other on
+//     (null, date) and start throwing E11000 at users. Manual writes leave the
+//     field undefined today, but that's a property of the current write paths,
+//     not one worth betting the create endpoint on.
+//   * The scheduler normalizes `date` to UTC midnight before inserting.
+//     Without that, two occurrences on the same calendar day but a different
+//     time-of-day (nextDate carries one; @IsDateString admits full datetimes)
+//     produce different keys and BOTH insert — silently defeating this index.
+//
+// Explicit name: VEG-450's bug was an auto-generated name colliding with an
+// existing index and the build failing silently. buildAllIndexes() runs fatally
+// at boot and in the E2E test app, so a conflict aborts rather than leaving the
+// constraint unenforced.
+TransactionSchema.index(
+  { recurringId: 1, date: 1 },
+  {
+    unique: true,
+    name: 'recurring_occurrence_unique',
+    partialFilterExpression: { recurringId: { $type: 'objectId' } },
+  },
+);

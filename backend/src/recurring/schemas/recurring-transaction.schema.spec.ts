@@ -49,6 +49,31 @@ describe('RecurringTransactionSchema indexes', () => {
   });
 });
 
+describe('cadenceAnchorDay', () => {
+  it('is optional (absent means "use the date own day-of-month")', () => {
+    const doc = new RecurringModel(valid());
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.cadenceAnchorDay).toBeUndefined();
+  });
+
+  it('accepts the 1..31 bounds', () => {
+    for (const day of [1, 15, 31]) {
+      const doc = new RecurringModel({ ...valid(), cadenceAnchorDay: day });
+      expect(doc.validateSync()).toBeUndefined();
+    }
+  });
+
+  it('rejects out-of-range and non-integer anchors', () => {
+    for (const day of [0, 32, 15.5]) {
+      const err = new RecurringModel({
+        ...valid(),
+        cadenceAnchorDay: day,
+      }).validateSync();
+      expect(err?.errors.cadenceAnchorDay).toBeDefined();
+    }
+  });
+});
+
 describe('RecurringCadence', () => {
   it('stays value-identical to BillingCycle (the VEG-469 fold-in maps 1:1)', () => {
     expect(Object.values(RecurringCadence)).toEqual(

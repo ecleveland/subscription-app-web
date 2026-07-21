@@ -721,6 +721,204 @@ describe('TransactionsService', () => {
     });
   });
 
+  describe('materializeRecurring (VEG-467)', () => {
+    const REC_ID = '507f191e810c19729de860c9';
+
+    const input = (overrides: Record<string, any> = {}) => ({
+      recurringId: REC_ID,
+      accountId: ACC_A,
+      categoryId: CAT_ID,
+      memberId: MEMBER_ID,
+      type: TransactionType.EXPENSE as
+        | TransactionType.EXPENSE
+        | TransactionType.INCOME,
+      amountCents: 1999,
+      date: new Date('2026-08-01T00:00:00Z'),
+      payee: 'Netflix',
+      tags: [],
+      ...overrides,
+    });
+
+    // Duplicate-key error shaped the way the driver reports a violation of the
+    // { recurringId, date } partial unique index.
+    const dupKeyError = (keyPattern: Record<string, number>) =>
+      Object.assign(new Error('E11000 duplicate key error'), {
+        code: 11000,
+        keyPattern,
+      });
+
+    it('persists the ledger row with recurringId linking back to the schedule', async () => {
+      await service.materializeRecurring(HOUSEHOLD_ID, input());
+
+      const doc = mockModel.mock.calls[0][0];
+      expect(doc.recurringId).toEqual(new Types.ObjectId(REC_ID));
+      expect(doc.householdId).toEqual(new Types.ObjectId(HOUSEHOLD_ID));
+      expect(doc.accountId).toEqual(new Types.ObjectId(ACC_A));
+      expect(doc.categoryId).toEqual(new Types.ObjectId(CAT_ID));
+      expect(doc.type).toBe(TransactionType.EXPENSE);
+      expect(doc.amountCents).toBe(1999);
+      expect(doc.payee).toBe('Netflix');
+      expect(txnSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('carries memberId through for attribution', async () => {
+      await service.materializeRecurring(HOUSEHOLD_ID, input());
+      expect(mockModel.mock.calls[0][0].memberId).toEqual(
+        new Types.ObjectId(MEMBER_ID),
+      );
+    });
+
+    it('omits memberId when the schedule has none', async () => {
+      await service.materializeRecurring(
+        HOUSEHOLD_ID,
+        input({ memberId: undefined }),
+      );
+      expect(mockModel.mock.calls[0][0].memberId).toBeUndefined();
+    });
+
+    // The unique index is keyed on the exact date instant. A schedule whose
+    // nextDate carries a time-of-day would otherwise produce a different key
+    // for the same calendar day, and a retry would insert a SECOND row —
+    // silently defeating the index.
+    it('normalizes date to UTC midnight so the dedupe key is per calendar day', async () => {
+      await service.materializeRecurring(
+        HOUSEHOLD_ID,
+        input({ date: new Date('2026-08-01T14:30:00Z') }),
+      );
+      expect(mockModel.mock.calls[0][0].date.toISOString()).toBe(
+        '2026-08-01T00:00:00.000Z',
+      );
+    });
+
+    it('expense decreases the account balance by the amount', async () => {
+      await service.materializeRecurring(HOUSEHOLD_ID, input());
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        ACC_A,
+        -1999,
+      );
+    });
+
+    it('income increases the account balance by the amount', async () => {
+      await service.materializeRecurring(
+        HOUSEHOLD_ID,
+        input({ type: TransactionType.INCOME, amountCents: 250000 }),
+      );
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        ACC_A,
+        250000,
+      );
+    });
+
+    it('reports materialized on the happy path', async () => {
+      const result = await service.materializeRecurring(HOUSEHOLD_ID, input());
+      expect(result).toMatchObject({ materialized: true, duplicate: false });
+    });
+
+    describe('when the occurrence was already materialized', () => {
+      beforeEach(() => {
+        txnSave.mockRejectedValue(dupKeyError({ recurringId: 1, date: 1 }));
+      });
+
+      it('reports a duplicate instead of throwing', async () => {
+        const result = await service.materializeRecurring(
+          HOUSEHOLD_ID,
+          input(),
+        );
+        expect(result).toMatchObject({ materialized: false, duplicate: true });
+      });
+
+      // The whole point of insert-first ordering: a retry must not re-apply a
+      // balance delta that the crashed run may already have applied.
+      it('does NOT apply a balance delta', async () => {
+        await service.materializeRecurring(HOUSEHOLD_ID, input());
+        expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
+      });
+
+      // Nothing records whether the earlier run's $inc landed, so this may be
+      // a permanently short balance — it must not read as routine.
+      it('logs at error with the amount at risk, not a routine warning', async () => {
+        const error = jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation(() => undefined);
+        const warn = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+
+        await service.materializeRecurring(HOUSEHOLD_ID, input());
+
+        expect(error).toHaveBeenCalledWith(
+          expect.objectContaining({ accountId: ACC_A, amountCents: 1999 }),
+          expect.stringContaining('re-derived from the ledger'),
+        );
+        expect(warn).not.toHaveBeenCalled();
+      });
+    });
+
+    // A duplicate-key error from some OTHER unique index is a real failure and
+    // must not be silently swallowed as "already materialized".
+    it('rethrows a duplicate-key error from a different index', async () => {
+      txnSave.mockRejectedValue(dupKeyError({ somethingElse: 1 }));
+      await expect(
+        service.materializeRecurring(HOUSEHOLD_ID, input()),
+      ).rejects.toThrow(/duplicate key/);
+      expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
+    });
+
+    // A future index that merely MENTIONS recurringId is not the dedupe index.
+    // Treating its violation as "already materialized" would silently skip a
+    // balance apply for a write that never landed.
+    it('rethrows a duplicate-key error from a wider index mentioning recurringId', async () => {
+      txnSave.mockRejectedValue(
+        dupKeyError({ householdId: 1, recurringId: 1, externalRef: 1 }),
+      );
+      await expect(
+        service.materializeRecurring(HOUSEHOLD_ID, input()),
+      ).rejects.toThrow(/duplicate key/);
+      expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a duplicate-key error carrying no keyPattern at all', async () => {
+      txnSave.mockRejectedValue(
+        Object.assign(new Error('E11000 duplicate key error'), { code: 11000 }),
+      );
+      await expect(
+        service.materializeRecurring(HOUSEHOLD_ID, input()),
+      ).rejects.toThrow(/duplicate key/);
+    });
+
+    it('rethrows non-duplicate write errors', async () => {
+      txnSave.mockRejectedValue(new Error('connection reset'));
+      await expect(
+        service.materializeRecurring(HOUSEHOLD_ID, input()),
+      ).rejects.toThrow('connection reset');
+    });
+
+    // The ledger-is-truth / balance-is-cache contract, pinned. The row must
+    // survive a failed balance apply — it is the artifact reconciliation would
+    // rebuild the cached balance FROM. Rethrowing is what demotes the
+    // occurrence to `failed` and stops the scheduler advancing past it.
+    describe('when the balance apply fails after the row is written', () => {
+      beforeEach(() => {
+        accountsService.applyBalanceDelta.mockRejectedValue(
+          new Error('balance write failed'),
+        );
+      });
+
+      // Rethrowing is what demotes the occurrence to `failed` upstream and
+      // stops the scheduler advancing past it — asserted from the scheduler's
+      // side in recurring.service.spec.ts, where the summary is observable.
+      it('still persists the transaction, then rethrows', async () => {
+        await expect(
+          service.materializeRecurring(HOUSEHOLD_ID, input()),
+        ).rejects.toThrow('balance write failed');
+        // Written before the balance was touched — not rolled back.
+        expect(txnSave).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
   describe('aggregateMonthlyActualsByCategory', () => {
     const start = new Date('2026-06-01T00:00:00.000Z');
     const end = new Date('2026-07-01T00:00:00.000Z');
