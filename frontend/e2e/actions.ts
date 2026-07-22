@@ -86,6 +86,44 @@ export async function addExpense(
   ).toBeVisible();
 }
 
+export interface NewBill {
+  account: string;
+  category: string;
+  payee: string;
+  amount: string;
+  cadence?: 'weekly' | 'monthly' | 'yearly';
+  nextDate?: string;
+  type?: 'expense' | 'income';
+}
+
+/** Create a recurring schedule through the /recurring form and wait for its row. */
+export async function createBill(page: Page, bill: NewBill): Promise<void> {
+  await page.goto('/recurring');
+  await page.getByRole('button', { name: '+ Add bill' }).click();
+  if (bill.type) {
+    await page.getByLabel('Type', { exact: true }).selectOption(bill.type);
+  }
+  await page
+    .getByLabel('Account', { exact: true })
+    .selectOption({ label: bill.account });
+  await page
+    .getByLabel('Category', { exact: true })
+    .selectOption({ label: bill.category });
+  await page.getByLabel('Payee').fill(bill.payee);
+  await page.getByLabel('Amount ($)').fill(bill.amount);
+  if (bill.cadence) {
+    await page.getByLabel('Cadence').selectOption(bill.cadence);
+  }
+  await page.getByLabel('Next date').fill(bill.nextDate ?? futureDate(15));
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  // Waiting for the row also keeps a following navigation from aborting the
+  // in-flight POST. .first(): the schedule can appear in both the upcoming
+  // summary and the main list.
+  await expect(
+    page.getByRole('listitem').filter({ hasText: bill.payee }).first(),
+  ).toBeVisible();
+}
+
 /**
  * Go to the dashboard, search for a subscription by name (search filters across
  * all subscriptions client-side, so this is robust to pagination), and return

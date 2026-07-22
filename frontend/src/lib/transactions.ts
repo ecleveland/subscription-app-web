@@ -16,6 +16,7 @@ export interface ImportTransactionsInput {
 export interface TransactionFilters {
   accountId?: string;
   categoryId?: string;
+  recurringId?: string;
   type?: TransactionType;
   dateFrom?: string;
   dateTo?: string;

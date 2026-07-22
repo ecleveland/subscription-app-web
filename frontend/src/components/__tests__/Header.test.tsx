@@ -81,6 +81,10 @@ describe('Header', () => {
       'href',
       '/transactions',
     );
+    expect(screen.getByRole('link', { name: 'Bills' })).toHaveAttribute(
+      'href',
+      '/recurring',
+    );
     expect(screen.getByRole('link', { name: 'Budget' })).toHaveAttribute(
       'href',
       '/budget',

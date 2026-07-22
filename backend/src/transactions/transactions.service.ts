@@ -284,6 +284,9 @@ export class TransactionsService {
     if (query.categoryId) {
       filter.categoryId = new Types.ObjectId(query.categoryId);
     }
+    if (query.recurringId) {
+      filter.recurringId = new Types.ObjectId(query.recurringId);
+    }
     if (query.type) {
       filter.type = query.type;
     }

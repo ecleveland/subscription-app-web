@@ -23,6 +23,13 @@ export class QueryTransactionDto {
   @IsMongoId()
   categoryId?: string;
 
+  @ApiPropertyOptional({
+    description: "Filter to a recurring schedule's materialized transactions",
+  })
+  @IsOptional()
+  @IsMongoId()
+  recurringId?: string;
+
   @ApiPropertyOptional({ enum: TransactionType })
   @IsOptional()
   @IsEnum(TransactionType)
