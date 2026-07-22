@@ -145,6 +145,64 @@ describe('RecurringForm', () => {
     expect(createRecurring).not.toHaveBeenCalled();
   });
 
+  it('sends an explicit end date when one is set', async () => {
+    const user = userEvent.setup();
+    vi.mocked(createRecurring).mockResolvedValue(existing);
+    renderForm();
+    await user.type(screen.getByLabelText(/payee/i), 'Netflix');
+    await user.type(screen.getByLabelText(/amount/i), '9.99');
+    await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
+    await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
+    await user.click(screen.getByLabelText('Has end date'));
+    await user.type(screen.getByLabelText('End date'), '2026-12-01');
+    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+
+    await waitFor(() => expect(createRecurring).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRecurring).mock.calls[0][0].endDate).toBe('2026-12-01');
+  });
+
+  it('requires an end date once "Has end date" is checked', async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await user.type(screen.getByLabelText(/payee/i), 'Netflix');
+    await user.type(screen.getByLabelText(/amount/i), '9.99');
+    await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
+    await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
+    await user.click(screen.getByLabelText('Has end date'));
+    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+
+    expect(await screen.findByText(/please choose an end date/i)).toBeInTheDocument();
+    expect(createRecurring).not.toHaveBeenCalled();
+  });
+
+  it('clears the end date (null) when unchecked while editing', async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateRecurring).mockResolvedValue(existing);
+    // A schedule that currently has an end date.
+    renderForm({ recurring: { ...existing, endDate: '2026-12-01' } });
+    // The box starts checked; unchecking it must send endDate: null to clear.
+    await user.click(screen.getByLabelText('Has end date'));
+    await user.click(screen.getByRole('button', { name: /update|save/i }));
+
+    await waitFor(() => expect(updateRecurring).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(updateRecurring).mock.calls[0][1].endDate).toBeNull();
+  });
+
+  it('flags a subscription only for expenses in the submitted body', async () => {
+    const user = userEvent.setup();
+    vi.mocked(createRecurring).mockResolvedValue(existing);
+    renderForm();
+    await user.type(screen.getByLabelText(/payee/i), 'Netflix');
+    await user.type(screen.getByLabelText(/amount/i), '9.99');
+    await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
+    await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
+    await user.click(screen.getByLabelText(/subscription/i));
+    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+
+    await waitFor(() => expect(createRecurring).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRecurring).mock.calls[0][0].isSubscription).toBe(true);
+  });
+
   it('offers the subscription flag for expenses but hides it for income', async () => {
     const user = userEvent.setup();
     renderForm();

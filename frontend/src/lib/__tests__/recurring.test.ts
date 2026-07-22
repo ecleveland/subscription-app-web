@@ -95,6 +95,15 @@ describe('recurring pure helpers', () => {
       expect(result.map((r) => r._id)).toEqual(['today', 'soon']);
     });
 
+    it('includes the exact boundary day and excludes the day after', () => {
+      const list = [
+        makeRecurring({ _id: 'edge', nextDate: dayOffset(30) }),
+        makeRecurring({ _id: 'over', nextDate: dayOffset(31) }),
+      ];
+      const result = upcomingWithin(list, 30);
+      expect(result.map((r) => r._id)).toEqual(['edge']);
+    });
+
     it('excludes schedules beyond the window and in the past', () => {
       const list = [
         makeRecurring({ _id: 'far', nextDate: dayOffset(45) }),

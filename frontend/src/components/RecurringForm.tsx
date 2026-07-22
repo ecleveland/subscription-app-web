@@ -82,7 +82,11 @@ export default function RecurringForm({
       setError('Please choose a category');
       return;
     }
-    if (hasEndDate && endDate && endDate < nextDate) {
+    if (hasEndDate && !endDate) {
+      setError('Please choose an end date');
+      return;
+    }
+    if (hasEndDate && endDate < nextDate) {
       setError('End date must be on or after the next date');
       return;
     }

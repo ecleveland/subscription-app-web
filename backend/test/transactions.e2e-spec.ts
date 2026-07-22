@@ -407,6 +407,27 @@ describe('Transactions (e2e)', () => {
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(400);
     });
+
+    it('does not leak another household’s rows via recurringId (scoping ANDs)', async () => {
+      const recurringId = new Types.ObjectId();
+      await transactionModel.create({
+        householdId: new Types.ObjectId(householdIdA),
+        accountId: new Types.ObjectId(checkingA),
+        categoryId: new Types.ObjectId(expenseCatA),
+        type: 'expense',
+        amountCents: 1200,
+        date: new Date('2026-06-22'),
+        payee: 'A-only recurring',
+        recurringId,
+      });
+
+      // Household B queries A's recurringId — scoping must yield nothing.
+      const res = await request(app.getHttpServer())
+        .get(`/api/transactions?recurringId=${recurringId.toString()}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+      expect(res.body.data).toHaveLength(0);
+    });
   });
 
   describe('validation', () => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAccounts } from '@/lib/accounts-context';
 import {
   listTransactions,
@@ -36,6 +36,7 @@ export default function TransactionsPage() {
 
 function TransactionsPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const {
     accounts,
     error: accountsError,
@@ -56,11 +57,10 @@ function TransactionsPageInner() {
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [type, setType] = useState<'' | TransactionType>('');
-  // Seeded from ?recurringId= so a schedule can deep-link to its materialized
-  // transactions (VEG-470).
-  const [recurringId, setRecurringId] = useState(
-    searchParams.get('recurringId') ?? '',
-  );
+  // Derived from ?recurringId= (a schedule's "History" deep link, VEG-470) so
+  // the URL is the single source of truth — a second History click that only
+  // changes the query param re-applies the filter without a remount.
+  const recurringId = searchParams.get('recurringId') ?? '';
   // Bumped to force a re-fetch after a mutation.
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -194,7 +194,9 @@ function TransactionsPageInner() {
           <button
             onClick={() => {
               setPage(1);
-              setRecurringId('');
+              // Strip the param (the source of truth) so the filter clears and
+              // a reload/bookmark doesn't silently re-apply it.
+              router.replace('/transactions');
             }}
             className="font-medium hover:underline whitespace-nowrap"
           >

@@ -19,9 +19,17 @@ vi.mock('@/lib/toast', () => ({
 }));
 vi.mock('@/components/RecurringForm', async () => {
   const { useState } = await import('react');
-  function RecurringFormStub(props: { recurring?: { _id: string } }) {
+  function RecurringFormStub(props: {
+    recurring?: { _id: string };
+    categories: { name: string }[];
+  }) {
     const [mountedFor] = useState(props.recurring?._id ?? 'new');
-    return <div>RecurringFormStub:mounted-for={mountedFor}</div>;
+    return (
+      <div>
+        RecurringFormStub:mounted-for={mountedFor};
+        {props.categories.map((c) => c.name).join(',')}
+      </div>
+    );
   }
   return { default: RecurringFormStub };
 });
@@ -179,6 +187,55 @@ describe('RecurringPage', () => {
 
     await waitFor(() => expect(deleteRecurring).toHaveBeenCalledWith('r1'));
     expect(showSuccessToast).toHaveBeenCalledWith('Schedule deleted');
+  });
+
+  it('warns when balances fail to refresh after a delete', async () => {
+    accountsState = {
+      accounts,
+      error: null,
+      refresh: vi.fn().mockRejectedValue(new Error('refresh fail')),
+    };
+    vi.mocked(listRecurring).mockResolvedValue([bill]);
+    vi.mocked(deleteRecurring).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<RecurringPage />);
+    await screen.findAllByText('Netflix');
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await user.click(
+      screen.getAllByRole('button', { name: 'Delete', hidden: true }).at(-1)!,
+    );
+
+    await waitFor(() =>
+      expect(showErrorToast).toHaveBeenCalledWith(
+        'Saved, but balances may be out of date — refresh to update.',
+      ),
+    );
+  });
+
+  it('keeps an editing schedule’s archived category selectable', async () => {
+    const archived: BudgetCategory = {
+      _id: 'cArch',
+      householdId: 'h',
+      groupId: 'g',
+      name: 'Old Utility',
+      isIncome: false,
+      sortOrder: 1,
+      isArchived: true,
+      createdAt: '',
+      updatedAt: '',
+    };
+    vi.mocked(listCategories).mockResolvedValue([...categories, archived]);
+    vi.mocked(listRecurring).mockResolvedValue([
+      { ...bill, categoryId: 'cArch' },
+    ]);
+    const user = userEvent.setup();
+    render(<RecurringPage />);
+    await screen.findAllByText('Netflix');
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    // The stub echoes the categories prop; its archived category must be offered.
+    expect(screen.getByText(/RecurringFormStub:/)).toHaveTextContent('Old Utility');
   });
 
   it('disables the add button until an account exists', async () => {

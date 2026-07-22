@@ -165,13 +165,16 @@ export interface RecurringTransaction {
   amountCents: number;
   payee: string;
   notes?: string;
-  tags?: string[];
+  // Always present in the response (schema default []).
+  tags: string[];
   cadence: RecurringCadence;
   nextDate: string;
   cadenceAnchorDay?: number;
   reminderDaysBefore: number;
+  // Absent when the schedule runs indefinitely (a null-clear is stored unset).
   endDate?: string;
   isActive: boolean;
+  // Expenses only — the server rejects an income schedule flagged true.
   isSubscription: boolean;
   sharedWith?: number | null;
   createdAt: string;

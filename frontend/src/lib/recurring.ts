@@ -28,6 +28,7 @@ export interface RecurringInput {
   // `null` clears an existing end date on edit.
   endDate?: string | null;
   isActive?: boolean;
+  // Expenses only — the server rejects an income schedule flagged true.
   isSubscription?: boolean;
   sharedWith?: number | null;
 }
