@@ -43,6 +43,13 @@ export interface MaterializationSummary {
   skipped: number;
   /** Schedules that reached their endDate and were deactivated. */
   deactivated: number;
+  /**
+   * Occurrences rolled forward WITHOUT posting to the ledger: account-less
+   * subscriptions (VEG-469 fold-in) whose date must still advance the way the
+   * retired subscription cron advanced them. Distinct from `materialized` so a
+   * date-only roll is never mistaken for a ledger write.
+   */
+  advancedOnly: number;
   /** Schedules that hit MAX_CATCHUP_PERIODS and will resume tomorrow. */
   capped: number;
   /**
@@ -72,6 +79,8 @@ interface DueSchedule {
   nextDate: Date;
   cadenceAnchorDay?: number;
   endDate?: Date;
+  // Account-less subscriptions advance their date without materializing (VEG-469).
+  isSubscription: boolean;
 }
 
 // Whether a schedule's references allow it to post right now. A discriminated
@@ -399,6 +408,7 @@ export class RecurringService {
       duplicate: 0,
       skipped: 0,
       deactivated: 0,
+      advancedOnly: 0,
       capped: 0,
       yielded: 0,
       failed: 0,
@@ -447,6 +457,18 @@ export class RecurringService {
   ): Promise<void> {
     const householdId = schedule.householdId.toString();
     const recurringId = schedule._id.toString();
+
+    // Account-less subscriptions (VEG-469 fold-in) never post to the ledger —
+    // they have no account — but their nextDate must still roll forward so the
+    // Subscriptions page shows a real upcoming date, exactly as the retired
+    // subscription cron did. This runs BEFORE reference resolution: an
+    // account-less sub has nothing to resolve, and an archived category must
+    // not freeze its billing date (nothing posts, so the "no new activity on
+    // archived refs" rule doesn't apply).
+    if (schedule.isSubscription && !schedule.accountId) {
+      await this.advanceSubscriptionOnly(schedule, now, summary);
+      return;
+    }
 
     const references = await this.resolveMaterializationRefs(schedule);
     if (!references.usable) {
@@ -585,6 +607,94 @@ export class RecurringService {
         );
         return;
       }
+      if (finished) {
+        summary.deactivated += 1;
+        return;
+      }
+
+      occurrence = next;
+      periods += 1;
+    }
+  }
+
+  // Roll an account-less subscription's nextDate forward to the next future
+  // occurrence WITHOUT materializing anything — the retired subscription cron's
+  // sole job (VEG-469). Same catch-up shape as materializeSchedule (endDate
+  // deactivation, per-run cap, guarded advance) minus the ledger write and the
+  // reference resolution. Advancing period-by-period (rather than jumping) keeps
+  // cadenceAnchorDay drift-correct and reuses the same guarded write, so a
+  // cursor re-visit or concurrent PATCH can't double-advance.
+  private async advanceSubscriptionOnly(
+    schedule: DueSchedule,
+    now: Date,
+    summary: MaterializationSummary,
+  ): Promise<void> {
+    const householdId = schedule.householdId.toString();
+    const recurringId = schedule._id.toString();
+
+    let occurrence = schedule.nextDate;
+    let periods = 0;
+
+    for (;;) {
+      // Past its end: deactivate in the guarded write, like the ledger path.
+      if (schedule.endDate && utcDay(occurrence) > utcDay(schedule.endDate)) {
+        const deactivated = await this.advanceSchedule(
+          schedule,
+          occurrence,
+          occurrence,
+          false,
+        );
+        if (deactivated) {
+          summary.deactivated += 1;
+        }
+        return;
+      }
+      // Caught up to today — the normal exit.
+      if (utcDay(occurrence) > utcDay(now)) {
+        return;
+      }
+      if (periods >= RecurringService.MAX_CATCHUP_PERIODS) {
+        summary.capped += 1;
+        this.logger.warn(
+          {
+            householdId,
+            recurringId,
+            cap: RecurringService.MAX_CATCHUP_PERIODS,
+            nextDate: occurrence.toISOString(),
+          },
+          'Subscription advance-only hit the per-run catch-up cap; resuming on the next run',
+        );
+        return;
+      }
+
+      const next = addCadence(
+        occurrence,
+        schedule.cadence,
+        schedule.cadenceAnchorDay,
+      );
+      const finished =
+        schedule.endDate !== undefined &&
+        utcDay(next) > utcDay(schedule.endDate);
+      const advanced = await this.advanceSchedule(
+        schedule,
+        occurrence,
+        next,
+        !finished,
+      );
+      if (!advanced) {
+        summary.yielded += 1;
+        this.logger.warn(
+          {
+            householdId,
+            recurringId,
+            observedNextDate: occurrence.toISOString(),
+            attemptedNextDate: next.toISOString(),
+          },
+          'Guarded advance-only matched no schedule (concurrent edit or cursor re-visit); yielding',
+        );
+        return;
+      }
+      summary.advancedOnly += 1;
       if (finished) {
         summary.deactivated += 1;
         return;

@@ -1012,6 +1012,70 @@ describe('RecurringService', () => {
       });
     });
 
+    describe('account-less subscriptions — advance without materializing (VEG-469)', () => {
+      // A migrated subscription has no account, so it can never post to the
+      // ledger — but its nextDate must still roll forward, the way the retired
+      // subscription cron advanced it, or it freezes stale forever.
+      const subDoc = (overrides: Record<string, any> = {}) =>
+        scanDoc({ isSubscription: true, accountId: undefined, ...overrides });
+
+      it('advances the date one period without posting a transaction', async () => {
+        scanReturns([subDoc({ nextDate: new Date('2026-08-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).not.toHaveBeenCalled();
+        expect(mockModel.updateOne).toHaveBeenCalledTimes(1);
+        expect(advancedTo(0)).toEqual(new Date('2026-09-01T00:00:00Z'));
+        expect(summary).toMatchObject({
+          advancedOnly: 1,
+          materialized: 0,
+          skipped: 0,
+        });
+      });
+
+      it('catches up across multiple missed periods, still posting nothing', async () => {
+        scanReturns([subDoc({ nextDate: new Date('2026-05-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).not.toHaveBeenCalled();
+        // 05-01 → 06-01 → 07-01 → 08-01 → 09-01 (first date strictly after today).
+        expect(mockModel.updateOne).toHaveBeenCalledTimes(4);
+        expect(advancedTo(3)).toEqual(new Date('2026-09-01T00:00:00Z'));
+        expect(summary).toMatchObject({ advancedOnly: 4, materialized: 0 });
+      });
+
+      it('deactivates in the guarded write once it advances past endDate', async () => {
+        scanReturns([
+          subDoc({
+            nextDate: new Date('2026-08-01T00:00:00Z'),
+            endDate: new Date('2026-08-10T00:00:00Z'),
+          }),
+        ]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).not.toHaveBeenCalled();
+        expect(mockModel.updateOne.mock.calls[0][1].$set.isActive).toBe(false);
+        expect(summary).toMatchObject({ deactivated: 1, materialized: 0 });
+      });
+
+      it('yields the remaining periods when the guarded advance misses', async () => {
+        mockModel.updateOne.mockReturnValue(
+          createChainable({ matchedCount: 0, modifiedCount: 0 }),
+        );
+        scanReturns([subDoc({ nextDate: new Date('2026-05-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        // First guarded advance matched nothing (concurrent edit / re-visit):
+        // stop rather than double-advancing.
+        expect(mockModel.updateOne).toHaveBeenCalledTimes(1);
+        expect(summary).toMatchObject({ yielded: 1, advancedOnly: 0 });
+      });
+    });
+
     describe('crash-safety and concurrency', () => {
       it('advances past an occurrence another run already materialized', async () => {
         transactionsService.materializeRecurring.mockResolvedValueOnce({
