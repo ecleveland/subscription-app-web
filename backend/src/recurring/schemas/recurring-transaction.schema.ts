@@ -58,16 +58,29 @@ export class RecurringTransaction {
   @Prop({ required: true, enum: RecurringType })
   type: RecurringType;
 
-  // Positive integer magnitude in minor units (cents); sign comes from `type`.
-  // Enforced at the schema layer (not just DTOs) because the VEG-469 fold-in
-  // migration — and any future non-DTO write path — bypasses the
-  // ValidationPipe; same rationale as Transaction.amountCents.
+  // Integer magnitude in minor units (cents); sign comes from `type`. Enforced
+  // at the schema layer (not just DTOs) because the VEG-469 fold-in migration —
+  // and any future non-DTO write path — bypasses the ValidationPipe; same
+  // rationale as Transaction.amountCents.
+  //
+  // Bound is conditional: subscriptions may be free ($0 → 0 cents, a legal
+  // legacy Subscription.cost), so a subscription doc allows 0; every other
+  // schedule needs a positive magnitude (≥1). The `/api/recurring` DTOs keep
+  // Min(1), so this relaxation only reaches the fold-in write path. On query
+  // (update) validation `this` isn't a Document, so it falls back to the strict
+  // ≥1 bound (the invariant is enforced on the save path the fold-in uses).
   @Prop({
     required: true,
-    min: 1,
     validate: {
-      validator: Number.isInteger,
-      message: 'amountCents must be a positive integer (minor units)',
+      validator: function (this: unknown, v: number): boolean {
+        if (!Number.isInteger(v)) return false;
+        const isSub =
+          this instanceof Document &&
+          (this as unknown as RecurringTransaction).isSubscription === true;
+        return isSub ? v >= 0 : v >= 1;
+      },
+      message:
+        'amountCents must be an integer (minor units); 0 is allowed only for subscriptions',
     },
   })
   amountCents: number;
@@ -174,6 +187,20 @@ export class RecurringTransaction {
     },
   })
   sharedWith?: number;
+
+  // Subscription-only: the free-trial end date carried over from
+  // Subscription.trialEndDate (VEG-469). The recurring model has no other use
+  // for it, so it is optional and unindexed (the trial UI derives from the
+  // fetched list; no cron scans by it).
+  @Prop({ required: false })
+  trialEndDate?: Date;
+
+  // Subscription-only: the verbatim legacy Subscription.category string
+  // (VEG-469). Kept alongside the budgeting `categoryId` so the /api/subscriptions
+  // compatibility layer round-trips the original free-text category exactly,
+  // independent of the best-effort budget-category link. Absent for non-subs.
+  @Prop({ required: false, trim: true })
+  subscriptionCategory?: string;
 }
 
 export const RecurringTransactionSchema =

@@ -60,6 +60,14 @@ export class Subscription {
 
   @Prop({ required: false, min: 2 })
   sharedWith?: number;
+
+  // Set once the VEG-469 fold-in has copied this subscription into a
+  // RecurringTransaction. The migration skips already-stamped docs, so it is
+  // the idempotency authority: a re-run inserts nothing, and a user deleting
+  // the migrated recurring doc afterwards does not resurrect it. The
+  // subscription row is retained (frozen archive + rollback), not deleted.
+  @Prop({ required: false })
+  migratedAt?: Date;
 }
 
 export const SubscriptionSchema = SchemaFactory.createForClass(Subscription);

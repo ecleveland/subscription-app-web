@@ -152,7 +152,7 @@ describe('RecurringTransactionSchema validation', () => {
     ).toBeDefined();
   });
 
-  it('rejects non-integer, zero, and negative amountCents', () => {
+  it('rejects non-integer, zero, and negative amountCents on a non-subscription', () => {
     for (const amountCents of [19.99, 0, -500]) {
       expect(
         new RecurringModel({ ...valid(), amountCents }).validateSync()?.errors
@@ -165,6 +165,30 @@ describe('RecurringTransactionSchema validation', () => {
     expect(
       new RecurringModel({ ...valid(), amountCents: 1 }).validateSync(),
     ).toBeUndefined();
+  });
+
+  it('allows amountCents 0 on a subscription (a free/$0 subscription, VEG-469)', () => {
+    // Legacy Subscription.cost has min 0; the fold-in must preserve $0 subs
+    // (e.g. free trials) rather than clamping them up to 1 cent.
+    expect(
+      new RecurringModel({
+        ...valid(),
+        isSubscription: true,
+        amountCents: 0,
+      }).validateSync(),
+    ).toBeUndefined();
+  });
+
+  it('still rejects a non-integer or negative amountCents even on a subscription', () => {
+    for (const amountCents of [19.99, -1]) {
+      expect(
+        new RecurringModel({
+          ...valid(),
+          isSubscription: true,
+          amountCents,
+        }).validateSync()?.errors.amountCents,
+      ).toBeDefined();
+    }
   });
 
   it('defaults tags to [], isActive to true, isSubscription to false, reminderDaysBefore to 3', () => {
@@ -264,5 +288,18 @@ describe('RecurringTransactionSchema validation', () => {
     });
     expect(doc.payee).toBe('Netflix');
     expect(doc.notes).toBe('shared');
+  });
+
+  it('accepts optional subscription fold-in fields (trialEndDate, subscriptionCategory)', () => {
+    const doc = new RecurringModel({
+      ...valid(),
+      isSubscription: true,
+      trialEndDate: new Date('2026-09-01'),
+      subscriptionCategory: '  Streaming  ',
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    // The verbatim legacy category string is trimmed but otherwise preserved.
+    expect(doc.subscriptionCategory).toBe('Streaming');
+    expect(doc.trialEndDate).toEqual(new Date('2026-09-01'));
   });
 });
