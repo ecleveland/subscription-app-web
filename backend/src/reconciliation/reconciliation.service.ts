@@ -70,18 +70,29 @@ export class ReconciliationService {
       // reconciled: `openingBalanceCents + delta` would be NaN. Defaulting the
       // anchor to 0 would be worse than skipping — it would "correct" the
       // balance to Σ(ledger) and WIPE the real opening balance, the exact
-      // failure this whole design exists to prevent. Skip it loudly; the next
-      // boot backfill stamps the anchor and the following run reconciles it.
-      if (!Number.isInteger(account.openingBalanceCents)) {
+      // failure this whole design exists to prevent. Record it as a first-class
+      // `skipped-no-anchor` result (so it shows in the audit report and the
+      // counters, not just a stray log line) and move on; the next boot backfill
+      // stamps the anchor and the following run reconciles it.
+      const opening = account.openingBalanceCents;
+      if (opening === undefined || !Number.isInteger(opening)) {
         this.logger.warn(
           { householdId: account.householdId, accountId: account.id },
           'Skipping account with no opening-balance anchor; run backfill first',
         );
+        results.push({
+          accountId: account.id,
+          householdId: account.householdId,
+          name: account.name,
+          previousBalanceCents: account.balanceCents,
+          computedBalanceCents: account.balanceCents,
+          driftCents: 0,
+          status: 'skipped-no-anchor',
+        });
         continue;
       }
 
-      const computed =
-        account.openingBalanceCents + (deltas.get(account.id) ?? 0);
+      const computed = opening + (deltas.get(account.id) ?? 0);
       const previous = account.balanceCents;
       const driftCents = computed - previous;
 
@@ -120,20 +131,25 @@ export class ReconciliationService {
         (r) => r.status === 'skipped-concurrent',
       ).length,
       drifted: results.filter((r) => r.status === 'drifted').length,
+      skippedNoAnchor: results.filter((r) => r.status === 'skipped-no-anchor')
+        .length,
       totalDriftCents: results
         .filter((r) => r.status !== 'clean')
         .reduce((sum, r) => sum + Math.abs(r.driftCents), 0),
       results,
     };
 
-    // Escalate the run-level verdict so an operator filtering to warn+ sees when
-    // drift was found (mirrors the recurring cron's summary logging).
-    const level =
-      summary.skippedConcurrent > 0
-        ? 'warn'
-        : summary.corrected > 0 || summary.drifted > 0
-          ? 'warn'
-          : 'log';
+    // Escalate the run-level verdict so an operator filtering the summary to
+    // warn+ sees when anything needed attention: drift corrected or detected
+    // (dry run), a concurrent-write race that will heal next run, or — most
+    // importantly — accounts that could not be reconciled at all because a boot
+    // backfill left them without an anchor.
+    const needsAttention =
+      summary.corrected > 0 ||
+      summary.drifted > 0 ||
+      summary.skippedConcurrent > 0 ||
+      summary.skippedNoAnchor > 0;
+    const level = needsAttention ? 'warn' : 'log';
     this.logger[level](
       {
         householdId: householdId ?? 'all',
@@ -142,6 +158,7 @@ export class ReconciliationService {
         corrected: summary.corrected,
         skippedConcurrent: summary.skippedConcurrent,
         drifted: summary.drifted,
+        skippedNoAnchor: summary.skippedNoAnchor,
         totalDriftCents: summary.totalDriftCents,
       },
       'Balance reconciliation complete',
@@ -169,21 +186,39 @@ export class ReconciliationService {
     const deltas = await this.transactionsService.sumLedgerDeltasByAccount();
 
     let stamped = 0;
-    for (const account of legacy) {
-      const opening = account.balanceCents - (deltas.get(account.id) ?? 0);
-      const didStamp = await this.accountsService.setOpeningBalanceIfUnset(
-        account.id,
-        opening,
-      );
-      if (didStamp) {
-        stamped += 1;
+    let failed = 0;
+    try {
+      for (const account of legacy) {
+        // Isolate each account: a transient write failure on one must not
+        // abandon the rest (and leave them unanchored → unreconcilable). Log and
+        // press on, counting failures so the progress line reflects reality.
+        try {
+          const opening = account.balanceCents - (deltas.get(account.id) ?? 0);
+          const didStamp = await this.accountsService.setOpeningBalanceIfUnset(
+            account.id,
+            opening,
+          );
+          if (didStamp) {
+            stamped += 1;
+          }
+        } catch (error: unknown) {
+          failed += 1;
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            { householdId: account.householdId, accountId: account.id },
+            `Failed to stamp openingBalanceCents; account left unanchored: ${message}`,
+          );
+        }
       }
+    } finally {
+      // Always report progress — even if the loop is cut short — so a partial
+      // backfill is visible rather than silently swallowed by the boot handler.
+      this.logger[failed > 0 ? 'error' : 'log'](
+        { candidates: legacy.length, stamped, failed },
+        'Backfilled openingBalanceCents on legacy accounts',
+      );
     }
-
-    this.logger.log(
-      { candidates: legacy.length, stamped },
-      'Backfilled openingBalanceCents on legacy accounts',
-    );
     return stamped;
   }
 }

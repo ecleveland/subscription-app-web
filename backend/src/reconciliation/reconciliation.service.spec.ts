@@ -56,6 +56,7 @@ describe('ReconciliationService', () => {
     service = module.get<ReconciliationService>(ReconciliationService);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -130,6 +131,15 @@ describe('ReconciliationService', () => {
         5000,
         5200,
       );
+      // Pin the down-correction leg too: previous 0 → computed −1000. Because
+      // the CAS mock returns true unconditionally, asserting the exact args is
+      // what actually catches a wrong expected/new value on this leg.
+      expect(accountsService.compareAndSetBalance).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        ACC_SRC,
+        0,
+        -1000,
+      );
     });
 
     it('scopes the ledger sum and account scan to the given household', async () => {
@@ -181,12 +191,12 @@ describe('ReconciliationService', () => {
       expect(summary.corrected).toBe(0);
     });
 
-    it('skips an account still missing its opening-balance anchor rather than wiping it or aborting the run', async () => {
+    it('records an un-anchored account as skipped-no-anchor rather than wiping it or aborting the run', async () => {
       accountsService.findForReconcile.mockResolvedValue([
         // Missing anchor (e.g. partial boot backfill): openingBalanceCents absent.
         view({
           id: ACC_INCOME,
-          openingBalanceCents: undefined as unknown as number,
+          openingBalanceCents: undefined,
           balanceCents: 5000,
         }),
         // A well-formed account in the same run is still reconciled.
@@ -201,10 +211,18 @@ describe('ReconciliationService', () => {
 
       const summary = await service.reconcile();
 
-      // The un-anchored account is neither corrected nor reported (no wipe).
+      // The un-anchored account is reported (audit-visible) but never written —
+      // the cached balance is echoed unchanged, drift 0, no wipe.
       expect(
         summary.results.find((r) => r.accountId === ACC_INCOME),
-      ).toBeUndefined();
+      ).toMatchObject({
+        status: 'skipped-no-anchor',
+        previousBalanceCents: 5000,
+        computedBalanceCents: 5000,
+        driftCents: 0,
+      });
+      expect(summary.skippedNoAnchor).toBe(1);
+      expect(summary.accountsScanned).toBe(2);
       expect(accountsService.compareAndSetBalance).not.toHaveBeenCalledWith(
         HOUSEHOLD_ID,
         ACC_INCOME,
@@ -310,6 +328,23 @@ describe('ReconciliationService', () => {
         transactionsService.sumLedgerDeltasByAccount,
       ).not.toHaveBeenCalled();
       expect(accountsService.setOpeningBalanceIfUnset).not.toHaveBeenCalled();
+    });
+
+    it('isolates a per-account failure: stamps the rest and does not throw', async () => {
+      accountsService.findAccountsMissingOpeningBalance.mockResolvedValue([
+        { id: ACC_INCOME, householdId: HOUSEHOLD_ID, balanceCents: 5200 },
+        { id: ACC_SRC, householdId: HOUSEHOLD_ID, balanceCents: -1000 },
+      ]);
+      transactionsService.sumLedgerDeltasByAccount.mockResolvedValue(new Map());
+      accountsService.setOpeningBalanceIfUnset
+        .mockRejectedValueOnce(new Error('mongo blip'))
+        .mockResolvedValueOnce(true);
+
+      const stamped = await service.backfillOpeningBalances();
+
+      // The first account failed; the second was still stamped.
+      expect(stamped).toBe(1);
+      expect(accountsService.setOpeningBalanceIfUnset).toHaveBeenCalledTimes(2);
     });
 
     it('counts only the accounts it actually stamped (concurrent-boot loser no-ops)', async () => {

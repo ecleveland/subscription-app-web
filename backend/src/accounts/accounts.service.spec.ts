@@ -276,6 +276,8 @@ describe('AccountsService', () => {
 
       const filter = mockAccountModel.find.mock.calls[0][0];
       expect(filter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      // Archived accounts must be reconciled too — no isArchived filter.
+      expect(filter.isArchived).toBeUndefined();
       expect(result).toEqual([
         {
           id: ACCOUNT_ID,

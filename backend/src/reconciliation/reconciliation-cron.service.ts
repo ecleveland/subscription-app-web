@@ -45,16 +45,25 @@ export class ReconciliationCronService {
     } catch (error: unknown) {
       // Contain the failure at the cron boundary: an escaping rejection from a
       // job that writes money would surface only as an unhandled rejection, and
-      // nothing installs a global handler.
-      const message = error instanceof Error ? error.message : String(error);
+      // nothing installs a global handler. Log the stack (not just the message)
+      // — a weekly job that fails leaves little else to debug from.
+      const message =
+        error instanceof Error ? (error.stack ?? error.message) : String(error);
       this.logger.error(`Balance reconciliation sweep failed: ${message}`);
       return;
     }
 
-    // Escalate so an operator filtering to warn+ sees when the sweep actually
-    // corrected drift (which means an online `$inc` was previously lost).
+    // Escalate so an operator filtering to warn+ sees when the sweep needed
+    // attention: it corrected drift (an online `$inc` was previously lost), hit
+    // a concurrent-write race that will heal next run (`skipped-concurrent`), or
+    // found accounts it could not reconcile because they lack an anchor
+    // (`skipped-no-anchor` — a boot backfill did not complete).
     const level =
-      summary.corrected > 0 || summary.skippedConcurrent > 0 ? 'warn' : 'log';
+      summary.corrected > 0 ||
+      summary.skippedConcurrent > 0 ||
+      summary.skippedNoAnchor > 0
+        ? 'warn'
+        : 'log';
     this.logger[level](summary, 'Weekly balance reconciliation complete');
   }
 }

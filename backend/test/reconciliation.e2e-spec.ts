@@ -60,6 +60,12 @@ describe('Balance reconciliation (e2e)', () => {
   let expenseCat: string;
   let incomeCat: string;
 
+  // A second household, for scoped-run isolation.
+  let userTokenB: string;
+  let householdIdB: string;
+  let checkingB: string;
+  const CHECKING_B_OPENING = 5000;
+
   const CHECKING_OPENING = 100000;
 
   async function seededCategory(isIncome: boolean): Promise<string> {
@@ -131,6 +137,24 @@ describe('Balance reconciliation (e2e)', () => {
       amountCents: 10000,
       date: '2026-06-03',
       transferAccountId: savings,
+    });
+
+    // A second household with a single ledger-less account (balance == opening),
+    // for proving a household-scoped run never touches another household.
+    const userRegB = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ username: 'otheruser', password: 'Password123' });
+    userTokenB = userRegB.body.access_token;
+    const membershipB = await app
+      .get(HouseholdsService)
+      .findMembershipByUser(userIdFromToken(userTokenB));
+    householdIdB = (
+      membershipB!.householdId as { toString(): string }
+    ).toString();
+    checkingB = await createAccount(app, userTokenB, {
+      name: 'B Checking',
+      type: 'checking',
+      balanceCents: CHECKING_B_OPENING,
     });
   });
 
@@ -256,6 +280,53 @@ describe('Balance reconciliation (e2e)', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
       expect(await getBalance(app, userToken, checking)).toBe(CHECKING_TRUE);
+    });
+  });
+
+  describe('household scoping', () => {
+    it('a scoped run corrects its household and never touches another', async () => {
+      // Drift accounts in BOTH households.
+      await accountModel
+        .updateOne(
+          { _id: new Types.ObjectId(checking) } as Record<string, unknown>,
+          { $inc: { balanceCents: -500 } },
+        )
+        .exec();
+      await accountModel
+        .updateOne(
+          { _id: new Types.ObjectId(checkingB) } as Record<string, unknown>,
+          { $inc: { balanceCents: -500 } },
+        )
+        .exec();
+
+      // Reconcile ONLY household A.
+      const res = await request(app.getHttpServer())
+        .post('/api/admin/reconciliation/balances')
+        .query({ householdId })
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      // Household B's account is absent from the report and left drifted.
+      expect(
+        res.body.results.some(
+          (r: { accountId: string }) => r.accountId === checkingB,
+        ),
+      ).toBe(false);
+      expect(await getBalance(app, userTokenB, checkingB)).toBe(
+        CHECKING_B_OPENING - 500,
+      );
+      // Household A was corrected.
+      expect(await getBalance(app, userToken, checking)).toBe(CHECKING_TRUE);
+
+      // Restore B so later tests see a clean slate.
+      await request(app.getHttpServer())
+        .post('/api/admin/reconciliation/balances')
+        .query({ householdId: householdIdB })
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(await getBalance(app, userTokenB, checkingB)).toBe(
+        CHECKING_B_OPENING,
+      );
     });
   });
 

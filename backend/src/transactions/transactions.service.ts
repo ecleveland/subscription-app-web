@@ -455,10 +455,25 @@ export class TransactionsService {
 
     const rows = (await this.transactionModel
       .aggregate(pipeline)
-      .exec()) as unknown as { _id: Types.ObjectId; deltaCents: number }[];
+      .exec()) as unknown as {
+      _id: Types.ObjectId | null;
+      deltaCents: number;
+    }[];
 
     const deltas = new Map<string, number>();
     for (const row of rows) {
+      // A null group `_id` would mean a transaction with no accountId (or a
+      // transfer with no transferAccountId). Schema requires accountId and the
+      // union guards `transferAccountId: { $ne: null }`, so this shouldn't
+      // occur — but warn rather than crash the sweep on `null.toString()`, and
+      // never key the Map on null (mirrors aggregateMonthlyActualsByCategory).
+      if (row._id == null) {
+        this.logger.warn(
+          { householdId: householdId ?? 'all' },
+          'Dropped a ledger delta group with a null account id',
+        );
+        continue;
+      }
       deltas.set(row._id.toString(), row.deltaCents);
     }
     return deltas;

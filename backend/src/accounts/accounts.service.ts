@@ -14,7 +14,13 @@ export interface AccountBalanceView {
   householdId: string;
   name: string;
   balanceCents: number;
-  openingBalanceCents: number;
+  // Deliberately `| undefined`: this is read with `.lean()`, which bypasses
+  // Mongoose hydration and so does NOT apply the schema's `default: 0`. A legacy
+  // account that predates the anchor (before its boot backfill) genuinely yields
+  // `undefined` here. Typing it honestly forces every consumer to guard the
+  // anchor before arithmetic (a missing anchor must be skipped, never treated
+  // as 0 — that would wipe the opening balance).
+  openingBalanceCents: number | undefined;
 }
 
 // A legacy account still missing the opening-balance anchor, plus the inputs the

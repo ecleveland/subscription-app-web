@@ -9,11 +9,16 @@
 //                           legitimate write raced in; deferred to the next run
 //                           rather than clobbering it.
 //   - `drifted`           — drift found in a dry run; reported but not written.
+//   - `skipped-no-anchor` — the account has no openingBalanceCents anchor yet
+//                           (a partial boot backfill), so it cannot be
+//                           reconciled without wiping its opening balance. Left
+//                           untouched; the next boot backfill stamps the anchor.
 export type AccountReconcileStatus =
   | 'clean'
   | 'corrected'
   | 'skipped-concurrent'
-  | 'drifted';
+  | 'drifted'
+  | 'skipped-no-anchor';
 
 export interface AccountReconcileResult {
   accountId: string;
@@ -35,6 +40,10 @@ export interface ReconciliationSummary {
   corrected: number;
   skippedConcurrent: number;
   drifted: number;
+  // Accounts that could not be reconciled because they still lack the opening
+  // balance anchor. A nonzero count means a boot backfill did not complete and
+  // is escalated in the run's log level so it is not silently healthy-looking.
+  skippedNoAnchor: number;
   totalDriftCents: number;
   results: AccountReconcileResult[];
 }
