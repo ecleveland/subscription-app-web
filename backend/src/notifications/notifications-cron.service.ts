@@ -3,9 +3,9 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
-  Subscription,
-  SubscriptionDocument,
-} from '../subscriptions/schemas/subscription.schema';
+  RecurringTransaction,
+  RecurringTransactionDocument,
+} from '../recurring/schemas/recurring-transaction.schema';
 import { NotificationsService } from './notifications.service';
 import { CronLockService } from '../common/cron-lock/cron-lock.service';
 
@@ -14,9 +14,14 @@ export class NotificationsCronService {
   private readonly logger = new Logger(NotificationsCronService.name);
   static readonly LOCK_KEY = 'renewal-reminders';
 
+  // Reads the subscription slice of RecurringTransaction (VEG-469). Because the
+  // fold-in preserved each subscription's _id, the Notification dedup key
+  // { householdId, subscriptionId, billingDate } stays byte-stable across the
+  // cutover — no double reminders, no schema change. Reminders for
+  // non-subscription bills are VEG-468 (a wider filter + copy), out of scope here.
   constructor(
-    @InjectModel(Subscription.name)
-    private subscriptionModel: Model<SubscriptionDocument>,
+    @InjectModel(RecurringTransaction.name)
+    private recurringModel: Model<RecurringTransactionDocument>,
     private notificationsService: NotificationsService,
     private cronLock: CronLockService,
   ) {}
@@ -44,11 +49,12 @@ export class NotificationsCronService {
     maxWindow.setDate(maxWindow.getDate() + 30);
 
     // Stream matching subscriptions rather than loading them all into memory.
-    const cursor = this.subscriptionModel
+    const cursor = this.recurringModel
       .find({
         isActive: true,
+        isSubscription: true,
         reminderDaysBefore: { $gt: 0 },
-        nextBillingDate: { $gte: now, $lte: maxWindow },
+        nextDate: { $gte: now, $lte: maxWindow },
       } as Record<string, unknown>)
       .lean()
       .cursor();
@@ -59,7 +65,7 @@ export class NotificationsCronService {
     let skipped = 0;
     for await (const sub of cursor) {
       checked++;
-      const billingDate = new Date(sub.nextBillingDate);
+      const billingDate = new Date(sub.nextDate);
       const reminderDate = new Date(billingDate);
       reminderDate.setDate(reminderDate.getDate() - sub.reminderDaysBefore);
 
@@ -88,7 +94,7 @@ export class NotificationsCronService {
           await this.notificationsService.createRenewalReminder(
             householdId,
             docId,
-            sub.name,
+            sub.payee,
             billingDate,
             sub.reminderDaysBefore,
           );

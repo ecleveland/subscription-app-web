@@ -6,7 +6,6 @@ import {
   type MaterializationSummary,
 } from './recurring.service';
 import { CronLockService } from '../common/cron-lock/cron-lock.service';
-import { SubscriptionsCronService } from '../subscriptions/subscriptions-cron.service';
 import { NotificationsCronService } from '../notifications/notifications-cron.service';
 
 describe('RecurringCronService', () => {
@@ -141,7 +140,6 @@ describe('RecurringCronService', () => {
     // the subscriptions key INTO a collision, which is the failure this guards.
     const keys = [
       RecurringCronService.LOCK_KEY,
-      SubscriptionsCronService.LOCK_KEY,
       NotificationsCronService.LOCK_KEY,
     ];
     expect(new Set(keys).size).toBe(keys.length);

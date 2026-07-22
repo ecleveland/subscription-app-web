@@ -2,15 +2,19 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types, AnyBulkWriteOperation } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { BillingCycle } from './schemas/subscription.schema';
 import {
-  Subscription,
-  SubscriptionDocument,
-  BillingCycle,
-} from './schemas/subscription.schema';
+  RecurringTransaction,
+  RecurringTransactionDocument,
+  RecurringType,
+  RecurringCadence,
+} from '../recurring/schemas/recurring-transaction.schema';
+import { CategoriesService } from '../categories/categories.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
@@ -18,58 +22,47 @@ import { BulkOperationDto, BulkAction } from './dto/bulk-operation.dto';
 import { PaginatedSubscriptions } from './interfaces/paginated-subscriptions.interface';
 import { BulkOperationResult } from './interfaces/bulk-operation-result.interface';
 
+/**
+ * The legacy /api/subscriptions wire shape, projected from a RecurringTransaction
+ * (VEG-469). Dollars/`billingCycle`/string-`category` live only at this boundary;
+ * the store is integer cents / `cadence` / `categoryId` + verbatim
+ * `subscriptionCategory`.
+ */
+export interface SubscriptionView {
+  _id: Types.ObjectId;
+  householdId: Types.ObjectId;
+  memberId?: Types.ObjectId;
+  name: string;
+  cost: number;
+  billingCycle: BillingCycle;
+  nextBillingDate: Date;
+  category: string;
+  notes?: string;
+  tags: string[];
+  isActive: boolean;
+  reminderDaysBefore: number;
+  trialEndDate?: Date;
+  sharedWith?: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * The Subscriptions API, served over `RecurringTransaction` (the
+ * `isSubscription: true` slice) — VEG-469. The wire contract is unchanged, so
+ * the controller, the frontend, and the subscription suites are untouched; only
+ * the storage moved. Every query is hard-scoped to `isSubscription: true` so the
+ * subscriptions API can never read or mutate an ordinary bill/paycheck.
+ */
 @Injectable()
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
-  static readonly ADVANCE_BATCH_SIZE = 500;
 
   constructor(
-    @InjectModel(Subscription.name)
-    private subscriptionModel: Model<SubscriptionDocument>,
+    @InjectModel(RecurringTransaction.name)
+    private readonly recurringModel: Model<RecurringTransactionDocument>,
+    private readonly categoriesService: CategoriesService,
   ) {}
-
-  static advanceToFutureDate(
-    currentDate: Date,
-    billingCycle: BillingCycle,
-    now: Date = new Date(),
-  ): Date {
-    const result = new Date(currentDate);
-    const originalDay = currentDate.getUTCDate();
-
-    while (result <= now) {
-      if (billingCycle === BillingCycle.WEEKLY) {
-        result.setUTCDate(result.getUTCDate() + 7);
-        continue;
-      }
-
-      const targetMonth =
-        billingCycle === BillingCycle.MONTHLY
-          ? (result.getUTCMonth() + 1) % 12
-          : result.getUTCMonth();
-
-      if (billingCycle === BillingCycle.MONTHLY) {
-        result.setUTCMonth(result.getUTCMonth() + 1);
-      } else {
-        result.setUTCFullYear(result.getUTCFullYear() + 1);
-      }
-
-      // If month overflowed (e.g. Jan 31 → Mar 3), clamp to last day of target month
-      if (result.getUTCMonth() !== targetMonth) {
-        result.setUTCDate(0);
-      }
-
-      // Try to restore the original day-of-month when the month supports it
-      if (result.getUTCDate() !== originalDay) {
-        const month = result.getUTCMonth();
-        result.setUTCDate(originalDay);
-        if (result.getUTCMonth() !== month) {
-          result.setUTCDate(0);
-        }
-      }
-    }
-
-    return result;
-  }
 
   private static getMonthlyCost(
     cost: number,
@@ -84,91 +77,109 @@ export class SubscriptionsService {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  /**
-   * Advance every active subscription whose billing date is in the past to its
-   * next future date. Runs from a scheduled cron (see SubscriptionsCronService)
-   * — never from a read path — and streams matches with a cursor, flushing
-   * `bulkWrite` batches so memory stays bounded regardless of dataset size.
-   * The per-op `nextBillingDate: { $lte: now }` guard keeps each update atomic.
-   */
-  async advanceOverdueDates(): Promise<number> {
-    const now = new Date();
-    const cursor = this.subscriptionModel
-      .find({
-        isActive: true,
-        nextBillingDate: { $lte: now },
-      } as Record<string, unknown>)
-      .lean()
-      .cursor();
-
-    let bulkOps: AnyBulkWriteOperation<SubscriptionDocument>[] = [];
-    let advanced = 0;
-
-    const flush = async (): Promise<void> => {
-      if (bulkOps.length === 0) return;
-      // `ordered: false` so one failing op doesn't abort the rest of the batch.
-      const result = await this.subscriptionModel.bulkWrite(bulkOps, {
-        ordered: false,
-      });
-      advanced += result.modifiedCount ?? 0;
-      bulkOps = [];
+  private baseFilter(householdId: string): Record<string, unknown> {
+    return {
+      householdId: new Types.ObjectId(householdId),
+      isSubscription: true,
     };
+  }
 
-    for await (const sub of cursor) {
-      const newDate = SubscriptionsService.advanceToFutureDate(
-        sub.nextBillingDate,
-        sub.billingCycle,
-        now,
+  private toView(doc: RecurringTransactionDocument): SubscriptionView {
+    return {
+      _id: doc._id,
+      householdId: doc.householdId as unknown as Types.ObjectId,
+      memberId: doc.memberId as unknown as Types.ObjectId | undefined,
+      name: doc.payee,
+      cost: doc.amountCents / 100,
+      // BillingCycle and RecurringCadence share identical string values.
+      billingCycle: doc.cadence as unknown as BillingCycle,
+      nextBillingDate: doc.nextDate,
+      category: doc.subscriptionCategory ?? '',
+      notes: doc.notes,
+      tags: doc.tags ?? [],
+      isActive: doc.isActive,
+      reminderDaysBefore: doc.reminderDaysBefore,
+      trialEndDate: doc.trialEndDate,
+      sharedWith: doc.sharedWith ?? null,
+      createdAt: (doc as unknown as { createdAt: Date }).createdAt,
+      updatedAt: (doc as unknown as { updatedAt: Date }).updatedAt,
+    };
+  }
+
+  // Best-effort budgeting link for the legacy free-text category string: exact
+  // name match, else the seeded "Subscriptions" category, else the generic
+  // fallback. The verbatim string is stored separately (subscriptionCategory),
+  // so this never changes what the user sees — it only links the budget view.
+  private async resolveCategoryId(
+    householdId: string,
+    category: string,
+  ): Promise<Types.ObjectId> {
+    const { byName, fallbackId } =
+      await this.categoriesService.resolveImportCategories(householdId);
+    const key = category?.trim().toLowerCase();
+    const resolved =
+      (key ? byName.get(key) : undefined) ??
+      byName.get('subscriptions') ??
+      fallbackId;
+    if (!resolved) {
+      // Households are always seeded with categories; a null fallback means an
+      // unseeded household, which shouldn't happen at a write path.
+      throw new InternalServerErrorException(
+        'Cannot resolve a category for the subscription',
       );
-      bulkOps.push({
-        updateOne: {
-          filter: {
-            _id: sub._id,
-            nextBillingDate: { $lte: now },
-          },
-          update: { $set: { nextBillingDate: newDate } },
-        },
-      });
-      if (bulkOps.length >= SubscriptionsService.ADVANCE_BATCH_SIZE) {
-        await flush();
-      }
     }
-    await flush();
-
-    return advanced;
+    return resolved;
   }
 
   async create(
     householdId: string,
     memberId: string,
     createDto: CreateSubscriptionDto,
-  ): Promise<SubscriptionDocument> {
-    const subscription = new this.subscriptionModel({
-      ...createDto,
+  ): Promise<SubscriptionView> {
+    const categoryId = await this.resolveCategoryId(
+      householdId,
+      createDto.category,
+    );
+
+    const doc = new this.recurringModel({
       householdId: new Types.ObjectId(householdId),
       memberId: new Types.ObjectId(memberId),
+      type: RecurringType.EXPENSE,
+      isSubscription: true,
+      amountCents: Math.round(createDto.cost * 100),
+      payee: createDto.name,
+      cadence: createDto.billingCycle as unknown as RecurringCadence,
+      nextDate: new Date(createDto.nextBillingDate),
+      categoryId,
+      subscriptionCategory: createDto.category,
+      notes: createDto.notes,
+      tags: createDto.tags ?? [],
+      reminderDaysBefore: createDto.reminderDaysBefore ?? 3,
+      isActive: createDto.isActive ?? true,
+      sharedWith: createDto.sharedWith ?? undefined,
+      trialEndDate: createDto.trialEndDate
+        ? new Date(createDto.trialEndDate)
+        : undefined,
     });
-    const saved = await subscription.save();
+    const saved = await doc.save();
     this.logger.log(
       { householdId, memberId, subscriptionId: saved._id.toString() },
       'Subscription created',
     );
-    return saved;
+    return this.toView(saved);
   }
 
   async findAll(
     householdId: string,
     query: QuerySubscriptionDto,
   ): Promise<PaginatedSubscriptions> {
-    const filter: Record<string, unknown> = {
-      householdId: new Types.ObjectId(householdId),
-    };
+    const filter = this.baseFilter(householdId);
 
     if (query.category) {
-      filter.category = query.category;
+      filter.subscriptionCategory = query.category;
     }
     if (query.billingCycle) {
-      filter.billingCycle = query.billingCycle;
+      filter.cadence = query.billingCycle;
     }
     if (query.tags) {
       const tagList = query.tags
@@ -189,23 +200,25 @@ export class SubscriptionsService {
         SubscriptionsService.escapeRegex(query.search.trim()),
         'i',
       );
-      filter.$or = [{ name: regex }, { notes: regex }];
+      filter.$or = [{ payee: regex }, { notes: regex }];
     }
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const skip = limit === 0 ? 0 : (page - 1) * limit;
 
-    const total = await this.subscriptionModel.countDocuments(filter).exec();
+    const total = await this.recurringModel.countDocuments(filter).exec();
 
     const sortBy = query.sortBy || 'createdAt';
     const sortOrder = query.sortOrder === 'asc' ? 1 : -1;
 
-    let data: SubscriptionDocument[];
+    let views: SubscriptionView[];
 
     if (sortBy === 'cost') {
-      const subscriptions = await this.subscriptionModel.find(filter).exec();
-      const sorted = subscriptions.sort((a, b) => {
+      // Normalized-to-monthly sort, in-memory (matches the legacy semantics).
+      const docs = await this.recurringModel.find(filter).exec();
+      const mapped = docs.map((d) => this.toView(d));
+      const sorted = mapped.sort((a, b) => {
         const aCost = SubscriptionsService.getMonthlyCost(
           a.cost,
           a.billingCycle,
@@ -216,63 +229,111 @@ export class SubscriptionsService {
         );
         return (aCost - bCost) * sortOrder;
       });
-      data = limit === 0 ? sorted : sorted.slice(skip, skip + limit);
+      views = limit === 0 ? sorted : sorted.slice(skip, skip + limit);
     } else {
-      const q = this.subscriptionModel
+      // Translate the legacy sort keys to the recurring field names.
+      const sortField =
+        sortBy === 'name'
+          ? 'payee'
+          : sortBy === 'nextBillingDate'
+            ? 'nextDate'
+            : 'createdAt';
+      const q = this.recurringModel
         .find(filter)
-        .sort({ [sortBy]: sortOrder });
+        .sort({ [sortField]: sortOrder });
       if (limit !== 0) {
         q.skip(skip).limit(limit);
       }
-      data = await q.exec();
+      const docs = await q.exec();
+      views = docs.map((d) => this.toView(d));
     }
 
     const totalPages = limit === 0 ? 1 : Math.ceil(total / limit);
     const hasNextPage = limit === 0 ? false : page < totalPages;
 
     return {
-      data,
+      // The controller serializes these plain objects identically to the old
+      // Mongoose docs; the interface type is a structural match.
+      data: views as unknown as PaginatedSubscriptions['data'],
       meta: { total, page, limit, totalPages, hasNextPage },
     };
   }
 
-  async findOne(
+  private async findDoc(
     householdId: string,
     id: string,
-  ): Promise<SubscriptionDocument> {
-    const subscription = await this.subscriptionModel.findById(id).exec();
+  ): Promise<RecurringTransactionDocument> {
+    const doc = await this.recurringModel.findById(id).exec();
     if (
-      !subscription ||
-      !subscription.householdId ||
+      !doc ||
+      !doc.isSubscription ||
+      !doc.householdId ||
       !new Types.ObjectId(householdId).equals(
-        subscription.householdId as unknown as Types.ObjectId,
+        doc.householdId as unknown as Types.ObjectId,
       )
     ) {
       throw new NotFoundException(`Subscription with ID "${id}" not found`);
     }
-    return subscription;
+    return doc;
+  }
+
+  async findOne(householdId: string, id: string): Promise<SubscriptionView> {
+    return this.toView(await this.findDoc(householdId, id));
   }
 
   async update(
     householdId: string,
     id: string,
     updateDto: UpdateSubscriptionDto,
-  ): Promise<SubscriptionDocument> {
-    const existing = await this.findOne(householdId, id);
-    Object.assign(existing, updateDto);
-    const saved = await existing.save();
+  ): Promise<SubscriptionView> {
+    const doc = await this.findDoc(householdId, id);
+
+    if (updateDto.name !== undefined) doc.payee = updateDto.name;
+    if (updateDto.cost !== undefined) {
+      doc.amountCents = Math.round(updateDto.cost * 100);
+    }
+    if (updateDto.billingCycle !== undefined) {
+      doc.cadence = updateDto.billingCycle as unknown as RecurringCadence;
+    }
+    if (updateDto.nextBillingDate !== undefined) {
+      doc.nextDate = new Date(updateDto.nextBillingDate);
+    }
+    if (updateDto.category !== undefined) {
+      doc.subscriptionCategory = updateDto.category;
+      doc.categoryId = (await this.resolveCategoryId(
+        householdId,
+        updateDto.category,
+      )) as unknown as typeof doc.categoryId;
+    }
+    if (updateDto.notes !== undefined) doc.notes = updateDto.notes;
+    if (updateDto.tags !== undefined) doc.tags = updateDto.tags;
+    if (updateDto.isActive !== undefined) doc.isActive = updateDto.isActive;
+    if (updateDto.reminderDaysBefore !== undefined) {
+      doc.reminderDaysBefore = updateDto.reminderDaysBefore;
+    }
+    if (updateDto.trialEndDate !== undefined) {
+      doc.trialEndDate = updateDto.trialEndDate
+        ? new Date(updateDto.trialEndDate)
+        : undefined;
+    }
+    if (updateDto.sharedWith !== undefined) {
+      doc.sharedWith = updateDto.sharedWith ?? undefined;
+    }
+
+    const saved = await doc.save();
     this.logger.log(
       { householdId, subscriptionId: id },
       'Subscription updated',
     );
-    return saved;
+    return this.toView(saved);
   }
 
   async remove(householdId: string, id: string): Promise<void> {
-    const deleted = await this.subscriptionModel
+    const deleted = await this.recurringModel
       .findOneAndDelete({
         _id: new Types.ObjectId(id),
         householdId: new Types.ObjectId(householdId),
+        isSubscription: true,
       } as Record<string, unknown>)
       .exec();
 
@@ -291,11 +352,14 @@ export class SubscriptionsService {
   ): Promise<BulkOperationResult> {
     const ids = dto.ids.map((id) => new Types.ObjectId(id));
     const filter = {
+      ...this.baseFilter(householdId),
       _id: { $in: ids },
-      householdId: new Types.ObjectId(householdId),
     } as Record<string, unknown>;
 
-    const validDocs = await this.subscriptionModel.find(filter).exec();
+    const validDocs = await this.recurringModel
+      .find(filter)
+      .select('_id')
+      .exec();
     const validIds = validDocs.map((doc) => doc._id);
 
     if (validIds.length === 0) {
@@ -303,30 +367,26 @@ export class SubscriptionsService {
     }
 
     const validFilter = {
+      ...this.baseFilter(householdId),
       _id: { $in: validIds },
-      householdId: new Types.ObjectId(householdId),
     } as Record<string, unknown>;
 
-    // Report the count actually affected by the write (deletedCount, or
-    // matchedCount for updates — matched, not modified, so re-applying a value a
-    // doc already has still counts as a success), rather than the pre-write
-    // candidate count which would over-report if a concurrent change raced us.
     let success = 0;
     switch (dto.action) {
       case BulkAction.DELETE: {
-        const res = await this.subscriptionModel.deleteMany(validFilter).exec();
+        const res = await this.recurringModel.deleteMany(validFilter).exec();
         success = res.deletedCount;
         break;
       }
       case BulkAction.ACTIVATE: {
-        const res = await this.subscriptionModel
+        const res = await this.recurringModel
           .updateMany(validFilter, { $set: { isActive: true } })
           .exec();
         success = res.matchedCount;
         break;
       }
       case BulkAction.DEACTIVATE: {
-        const res = await this.subscriptionModel
+        const res = await this.recurringModel
           .updateMany(validFilter, { $set: { isActive: false } })
           .exec();
         success = res.matchedCount;
@@ -338,8 +398,15 @@ export class SubscriptionsService {
             'Category is required for changeCategory action',
           );
         }
-        const res = await this.subscriptionModel
-          .updateMany(validFilter, { $set: { category: dto.category } })
+        // Store the verbatim string and re-link the budgeting category.
+        const categoryId = await this.resolveCategoryId(
+          householdId,
+          dto.category,
+        );
+        const res = await this.recurringModel
+          .updateMany(validFilter, {
+            $set: { subscriptionCategory: dto.category, categoryId },
+          })
           .exec();
         success = res.matchedCount;
         break;
@@ -371,10 +438,11 @@ export class SubscriptionsService {
     query: QuerySubscriptionDto,
   ): Promise<string> {
     const { data } = await this.findAll(householdId, { ...query, limit: 0 });
+    const subs = data as unknown as SubscriptionView[];
 
     const header =
       'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With';
-    const rows = data.map((sub) => {
+    const rows = subs.map((sub) => {
       const date = sub.nextBillingDate
         ? new Date(sub.nextBillingDate).toISOString().split('T')[0]
         : '';
@@ -399,17 +467,13 @@ export class SubscriptionsService {
   }
 
   /**
-   * Delete every subscription belonging to a household. The household-scoped
-   * deletion cascade primitive (e.g. for household teardown). User deletion no
-   * longer cascades here — household data is shared and outlives a single
-   * member (see UsersService.remove).
+   * Delete every subscription belonging to a household (the household-teardown
+   * cascade primitive). Scoped to the `isSubscription` slice so it never touches
+   * ordinary recurring schedules.
    */
   async removeAllByHouseholdId(householdId: string): Promise<number> {
-    const result = await this.subscriptionModel
-      .deleteMany({ householdId: new Types.ObjectId(householdId) } as Record<
-        string,
-        unknown
-      >)
+    const result = await this.recurringModel
+      .deleteMany(this.baseFilter(householdId))
       .exec();
     return result.deletedCount;
   }
