@@ -13,6 +13,7 @@ import { buildAllIndexes } from './database/build-all-indexes';
 import { UsersService } from './users/users.service';
 import { HouseholdsMigrationService } from './households/households-migration.service';
 import { CategoriesService } from './categories/categories.service';
+import { SubscriptionsFoldInService } from './subscriptions/subscriptions-fold-in.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -118,6 +119,15 @@ async function bootstrap() {
     //    households are never re-seeded, so user edits to defaults survive.
     const categoriesService = app.get(CategoriesService);
     await categoriesService.backfillDefaultCategories();
+
+    // 4. Phase 4 fold-in (VEG-469): copy each legacy Subscription into a
+    //    RecurringTransaction (isSubscription: true). Runs after the category
+    //    backfill because it maps the legacy category string to a seeded
+    //    household category. Idempotent (stamps Subscription.migratedAt); a
+    //    re-run folds nothing. From here the Subscriptions API is served over
+    //    the recurring collection.
+    const foldIn = app.get(SubscriptionsFoldInService);
+    await foldIn.foldInSubscriptions();
   } catch (error: unknown) {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);

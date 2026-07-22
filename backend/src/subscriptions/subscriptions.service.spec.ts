@@ -1,1212 +1,297 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
+import { NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { SubscriptionsService } from './subscriptions.service';
-import { Subscription, BillingCycle } from './schemas/subscription.schema';
+import { RecurringTransaction } from '../recurring/schemas/recurring-transaction.schema';
+import { CategoriesService } from '../categories/categories.service';
 import { BulkAction } from './dto/bulk-operation.dto';
 
-function createChainable(resolvedValue: any = null) {
-  const chain: any = {};
-  chain.sort = jest.fn().mockReturnValue(chain);
-  chain.skip = jest.fn().mockReturnValue(chain);
-  chain.limit = jest.fn().mockReturnValue(chain);
-  chain.lean = jest.fn().mockReturnValue(chain);
-  chain.cursor = jest.fn().mockReturnValue({
-    async *[Symbol.asyncIterator]() {
-      const items = Array.isArray(resolvedValue) ? resolvedValue : [];
-      for (const item of items) yield await Promise.resolve(item);
-    },
-  });
-  chain.exec = jest.fn().mockResolvedValue(resolvedValue);
-  return chain;
+// A chainable Mongoose query mock: every builder method returns `this`, and
+// `.exec()` resolves the configured value.
+function chain(resolved: unknown) {
+  const q: any = {};
+  for (const m of ['sort', 'skip', 'limit', 'select', 'find']) {
+    q[m] = jest.fn().mockReturnValue(q);
+  }
+  q.exec = jest.fn().mockResolvedValue(resolved);
+  return q;
 }
 
-describe('SubscriptionsService', () => {
+const HH = new Types.ObjectId().toString();
+const MEMBER = new Types.ObjectId().toString();
+const CAT_STREAMING = new Types.ObjectId();
+const CAT_SUBS = new Types.ObjectId();
+const CAT_FALLBACK = new Types.ObjectId();
+
+// A recurring doc as returned by the model (the subscription slice).
+const recDoc = (overrides: Record<string, any> = {}) => ({
+  _id: new Types.ObjectId(),
+  householdId: new Types.ObjectId(HH),
+  memberId: new Types.ObjectId(MEMBER),
+  type: 'expense',
+  isSubscription: true,
+  amountCents: 1599,
+  payee: 'Netflix',
+  cadence: 'monthly',
+  nextDate: new Date('2026-08-01T00:00:00Z'),
+  categoryId: CAT_STREAMING,
+  subscriptionCategory: 'Streaming',
+  notes: undefined,
+  tags: [],
+  isActive: true,
+  reminderDaysBefore: 3,
+  trialEndDate: undefined,
+  sharedWith: undefined,
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+  updatedAt: new Date('2026-01-01T00:00:00Z'),
+  save: jest.fn().mockImplementation(function (this: any) {
+    return Promise.resolve(this);
+  }),
+  ...overrides,
+});
+
+describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
   let service: SubscriptionsService;
-  let mockSubModel: any;
-
-  const householdId = '507f1f77bcf86cd799439011';
-  const memberId = '507f1f77bcf86cd799439044';
-  const subId = '507f1f77bcf86cd799439022';
-
-  const mockSubscription = {
-    _id: subId,
-    householdId: new Types.ObjectId(householdId),
-    memberId: new Types.ObjectId(memberId),
-    name: 'Netflix',
-    cost: 15.99,
-    billingCycle: BillingCycle.MONTHLY,
-    nextBillingDate: new Date('2025-06-01'),
-    category: 'Streaming',
-    isActive: true,
-    save: jest.fn(),
-  };
+  let model: any;
+  let savedDocs: Record<string, any>[];
 
   beforeEach(async () => {
-    mockSubModel = jest.fn().mockImplementation((dto) => ({
-      ...dto,
-      save: jest.fn().mockResolvedValue({ _id: 'new-id', ...dto }),
-    }));
-    mockSubModel.find = jest.fn().mockReturnValue(createChainable([]));
-    mockSubModel.findById = jest.fn().mockReturnValue(createChainable(null));
-    mockSubModel.findByIdAndDelete = jest
-      .fn()
-      .mockReturnValue(createChainable(null));
-    mockSubModel.findOneAndDelete = jest
-      .fn()
-      .mockReturnValue(createChainable(null));
-    mockSubModel.countDocuments = jest.fn().mockReturnValue(createChainable(0));
-    mockSubModel.bulkWrite = jest.fn().mockResolvedValue({ modifiedCount: 0 });
-    mockSubModel.updateMany = jest
-      .fn()
-      .mockReturnValue(createChainable({ modifiedCount: 0 }));
-    mockSubModel.deleteMany = jest
-      .fn()
-      .mockReturnValue(createChainable({ deletedCount: 0 }));
+    savedDocs = [];
 
-    const module: TestingModule = await Test.createTestingModule({
+    // The model is both a constructor (for create) and a static query API.
+    model = jest.fn().mockImplementation((doc: Record<string, any>) => {
+      const captured: Record<string, any> = {
+        ...doc,
+        _id: new Types.ObjectId(),
+        createdAt: new Date('2026-03-01T00:00:00Z'),
+        updatedAt: new Date('2026-03-01T00:00:00Z'),
+      };
+      captured.save = jest.fn().mockImplementation(() => {
+        savedDocs.push(captured);
+        return Promise.resolve(captured);
+      });
+      return captured;
+    });
+    model.find = jest.fn().mockReturnValue(chain([]));
+    model.findById = jest.fn().mockReturnValue(chain(null));
+    model.findOneAndDelete = jest.fn().mockReturnValue(chain(recDoc()));
+    model.countDocuments = jest.fn().mockReturnValue(chain(0));
+    model.deleteMany = jest.fn().mockReturnValue(chain({ deletedCount: 0 }));
+    model.updateMany = jest.fn().mockReturnValue(chain({ matchedCount: 0 }));
+
+    const categoriesService = {
+      resolveImportCategories: jest.fn().mockResolvedValue({
+        byName: new Map<string, Types.ObjectId>([
+          ['streaming', CAT_STREAMING],
+          ['subscriptions', CAT_SUBS],
+        ]),
+        fallbackId: CAT_FALLBACK,
+      }),
+    };
+
+    const moduleRef = await Test.createTestingModule({
       providers: [
         SubscriptionsService,
-        {
-          provide: getModelToken(Subscription.name),
-          useValue: mockSubModel,
-        },
+        { provide: getModelToken(RecurringTransaction.name), useValue: model },
+        { provide: CategoriesService, useValue: categoriesService },
       ],
     }).compile();
 
-    service = module.get<SubscriptionsService>(SubscriptionsService);
-  });
-
-  afterEach(() => {
-    jest.clearAllMocks();
+    service = moduleRef.get(SubscriptionsService);
   });
 
   describe('create', () => {
-    it('should create a subscription stamped with householdId + memberId and log', async () => {
-      const dto = {
+    it('writes a recurring subscription and returns the legacy view shape', async () => {
+      const view = await service.create(HH, MEMBER, {
         name: 'Netflix',
         cost: 15.99,
-        billingCycle: BillingCycle.MONTHLY,
-        nextBillingDate: '2025-06-01',
+        billingCycle: 'monthly' as any,
+        nextBillingDate: '2026-08-01',
         category: 'Streaming',
-      };
-      const saveMock = jest.fn().mockResolvedValue({
-        _id: { toString: () => 'new-id' },
-        ...dto,
-        householdId,
-        memberId,
       });
-      mockSubModel.mockImplementation((data: any) => ({
-        ...data,
-        save: saveMock,
-      }));
-      const logSpy = jest.spyOn(Logger.prototype, 'log');
 
-      await service.create(householdId, memberId, dto);
+      expect(savedDocs).toHaveLength(1);
+      const doc = savedDocs[0];
+      expect(doc.type).toBe('expense');
+      expect(doc.isSubscription).toBe(true);
+      expect(doc.amountCents).toBe(1599);
+      expect(doc.payee).toBe('Netflix');
+      expect(doc.cadence).toBe('monthly');
+      expect(doc.subscriptionCategory).toBe('Streaming');
+      expect(doc.categoryId).toBe(CAT_STREAMING);
 
-      // Assert the actual id values (not just `expect.any`) so a householdId/
-      // memberId transposition — the most error-prone mapping in the PR — is
-      // caught at the unit level.
-      const built = mockSubModel.mock.calls[0][0];
-      expect(built.householdId).toBeInstanceOf(Types.ObjectId);
-      expect(built.householdId.equals(new Types.ObjectId(householdId))).toBe(
-        true,
-      );
-      expect(built.memberId).toBeInstanceOf(Types.ObjectId);
-      expect(built.memberId.equals(new Types.ObjectId(memberId))).toBe(true);
-      expect(built.name).toBe('Netflix');
-      expect(saveMock).toHaveBeenCalled();
-      expect(logSpy).toHaveBeenCalledWith(
-        { householdId, memberId, subscriptionId: 'new-id' },
-        'Subscription created',
-      );
-    });
-  });
-
-  describe('advanceOverdueDates', () => {
-    it('should advance a monthly subscription one month via bulkWrite', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2025-07-01'),
-        billingCycle: BillingCycle.MONTHLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      expect(mockSubModel.bulkWrite).toHaveBeenCalledWith(
-        [
-          {
-            updateOne: {
-              filter: {
-                _id: subId,
-                nextBillingDate: { $lte: expect.any(Date) },
-              },
-              update: { $set: { nextBillingDate: expect.any(Date) } },
-            },
-          },
-        ],
-        { ordered: false },
-      );
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCMonth()).toBe(7); // August
-      expect(newDate.getUTCDate()).toBe(1);
-
-      jest.useRealTimers();
+      // The view is dollars / billingCycle / category-string.
+      expect(view.cost).toBe(15.99);
+      expect(view.billingCycle).toBe('monthly');
+      expect(view.category).toBe('Streaming');
+      expect(view.name).toBe('Netflix');
     });
 
-    it('flushes bulkWrite in batches of ADVANCE_BATCH_SIZE and sums modified counts', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
-
-      const overdue = Array.from({ length: 1001 }, (_, i) => ({
-        ...mockSubscription,
-        _id: `sub${i}`,
-        nextBillingDate: new Date('2025-07-01'),
-        billingCycle: BillingCycle.MONTHLY,
-      }));
-      mockSubModel.find.mockReturnValueOnce(createChainable(overdue));
-      mockSubModel.bulkWrite
-        .mockResolvedValueOnce({ modifiedCount: 500 })
-        .mockResolvedValueOnce({ modifiedCount: 500 })
-        .mockResolvedValueOnce({ modifiedCount: 1 });
-
-      const advanced = await service.advanceOverdueDates();
-
-      // 1001 ops → batches of 500, 500, 1
-      expect(mockSubModel.bulkWrite).toHaveBeenCalledTimes(3);
-      expect(mockSubModel.bulkWrite.mock.calls[0][0]).toHaveLength(500);
-      expect(mockSubModel.bulkWrite.mock.calls[1][0]).toHaveLength(500);
-      expect(mockSubModel.bulkWrite.mock.calls[2][0]).toHaveLength(1);
-      // modifiedCount summed across every flushed batch
-      expect(advanced).toBe(1001);
-
-      jest.useRealTimers();
-    });
-
-    it('should advance a monthly subscription multiple months when needed', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2025-03-01'),
-        billingCycle: BillingCycle.MONTHLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCMonth()).toBe(7); // August
-      expect(newDate.getUTCFullYear()).toBe(2025);
-
-      jest.useRealTimers();
-    });
-
-    it('should advance a yearly subscription', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2024-06-01'),
-        billingCycle: BillingCycle.YEARLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      // June 2024 → June 2025 (still <= July 15) → June 2026
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCFullYear()).toBe(2026);
-      expect(newDate.getUTCMonth()).toBe(5); // June
-
-      jest.useRealTimers();
-    });
-
-    it('should handle month-end edge case (Jan 31 -> Feb 28)', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-02-15T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2025-01-31'),
-        billingCycle: BillingCycle.MONTHLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCMonth()).toBe(1); // February
-      expect(newDate.getUTCDate()).toBe(28);
-
-      jest.useRealTimers();
-    });
-
-    it('should restore original day-of-month when month supports it (Jan 31 -> Feb 28 -> Mar 31)', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-03-15T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2025-01-31'),
-        billingCycle: BillingCycle.MONTHLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      // Jan 31 → Feb 28 (still <= Mar 15) → Mar 31 (> Mar 15, stop)
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCMonth()).toBe(2); // March
-      expect(newDate.getUTCDate()).toBe(31);
-
-      jest.useRealTimers();
-    });
-
-    it('should handle leap year edge case (Feb 29 -> Feb 28 next year)', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-03-01T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2024-02-29'),
-        billingCycle: BillingCycle.YEARLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      // Feb 29, 2024 → Feb 28, 2025 (still <= Mar 1) → Feb 28, 2026
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCMonth()).toBe(1); // February
-      expect(newDate.getUTCDate()).toBe(28);
-      expect(newDate.getUTCFullYear()).toBe(2026);
-
-      jest.useRealTimers();
-    });
-
-    it('should advance a weekly subscription by 7 days', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2025-07-10'),
-        billingCycle: BillingCycle.WEEKLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      expect(mockSubModel.bulkWrite).toHaveBeenCalled();
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCDate()).toBe(17);
-      expect(newDate.getUTCMonth()).toBe(6); // July
-
-      jest.useRealTimers();
-    });
-
-    it('should advance a weekly subscription multiple weeks when needed', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2025-06-15'),
-        billingCycle: BillingCycle.WEEKLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      // June 15 + (4*7=28) = July 13 (still <= July 15), + 7 = July 20
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCDate()).toBe(20);
-      expect(newDate.getUTCMonth()).toBe(6); // July
-
-      jest.useRealTimers();
-    });
-
-    it('should advance weekly subscription across month boundary', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-08-03T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2025-07-28'),
-        billingCycle: BillingCycle.WEEKLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      // July 28 + 7 = August 4
-      const newDate =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.update.$set
-          .nextBillingDate;
-      expect(newDate.getUTCDate()).toBe(4);
-      expect(newDate.getUTCMonth()).toBe(7); // August
-
-      jest.useRealTimers();
-    });
-
-    it('should not call bulkWrite when no overdue subscriptions exist', async () => {
-      mockSubModel.find.mockReturnValueOnce(createChainable([]));
-
-      await service.advanceOverdueDates();
-
-      expect(mockSubModel.bulkWrite).not.toHaveBeenCalled();
-    });
-
-    it('should only query active subscriptions with past billing dates', async () => {
-      mockSubModel.find.mockReturnValueOnce(createChainable([]));
-
-      await service.advanceOverdueDates();
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          isActive: true,
-          nextBillingDate: { $lte: expect.any(Date) },
-        }),
-      );
-    });
-
-    it('should include atomic guard in bulkWrite filter', async () => {
-      jest.useFakeTimers();
-      jest.setSystemTime(new Date('2025-07-15T12:00:00Z'));
-
-      const overdueSub = {
-        ...mockSubscription,
-        _id: subId,
-        nextBillingDate: new Date('2025-07-01'),
-        billingCycle: BillingCycle.MONTHLY,
-      };
-      mockSubModel.find.mockReturnValueOnce(createChainable([overdueSub]));
-
-      await service.advanceOverdueDates();
-
-      const filter =
-        mockSubModel.bulkWrite.mock.calls[0][0][0].updateOne.filter;
-      expect(filter._id).toBe(subId);
-      expect(filter.nextBillingDate).toEqual({ $lte: expect.any(Date) });
-
-      jest.useRealTimers();
+    it('maps an unknown category to the seeded Subscriptions category id', async () => {
+      await service.create(HH, MEMBER, {
+        name: 'X',
+        cost: 1,
+        billingCycle: 'monthly' as any,
+        nextBillingDate: '2026-08-01',
+        category: 'Nope',
+      });
+      expect(savedDocs[0].categoryId).toBe(CAT_SUBS);
+      expect(savedDocs[0].subscriptionCategory).toBe('Nope');
     });
   });
 
   describe('findAll', () => {
-    it('should filter by householdId', async () => {
-      const chain = createChainable([mockSubscription]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
-
-      await service.findAll(householdId, {});
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          householdId: expect.any(Types.ObjectId),
-        }),
-      );
+    it('hard-scopes every query to the isSubscription slice', async () => {
+      model.countDocuments.mockReturnValue(chain(0));
+      model.find.mockReturnValue(chain([]));
+      await service.findAll(HH, {});
+      const filter = model.find.mock.calls[0][0];
+      expect(filter.isSubscription).toBe(true);
+      expect(filter.householdId).toBeDefined();
     });
 
-    it('should add category filter when provided', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { category: 'Streaming' });
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({ category: 'Streaming' }),
-      );
-    });
-
-    it('should add billingCycle filter when provided', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, {
-        billingCycle: BillingCycle.MONTHLY,
+    it('translates legacy filters to recurring fields', async () => {
+      model.countDocuments.mockReturnValue(chain(0));
+      model.find.mockReturnValue(chain([]));
+      await service.findAll(HH, {
+        category: 'Streaming',
+        billingCycle: 'monthly' as any,
+        search: 'net',
       });
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({ billingCycle: BillingCycle.MONTHLY }),
-      );
-    });
-
-    it('should filter by tags when provided', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { tags: 'shared,essential' });
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({ tags: { $in: ['shared', 'essential'] } }),
-      );
-    });
-
-    it('should add a case-insensitive $or search over name and notes when provided', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { search: 'Netflix' });
-
-      const filter = mockSubModel.find.mock.calls[0][0];
-      expect(filter.$or).toHaveLength(2);
-      expect(filter.$or[0].name).toBeInstanceOf(RegExp);
-      expect(filter.$or[0].name.source).toBe('Netflix');
-      expect(filter.$or[0].name.flags).toContain('i');
-      expect(filter.$or[1].notes).toBeInstanceOf(RegExp);
-    });
-
-    it('should escape regex metacharacters in the search term', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { search: 'a.b*c+' });
-
-      const filter = mockSubModel.find.mock.calls[0][0];
-      // Metacharacters are escaped so they match literally (no ReDoS/injection)
-      expect(filter.$or[0].name.source).toBe('a\\.b\\*c\\+');
-    });
-
-    it('should not add a search filter for a blank/whitespace term', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { search: '   ' });
-
-      const filter = mockSubModel.find.mock.calls[0][0];
-      expect(filter.$or).toBeUndefined();
-    });
-
-    it('should filter shared subscriptions when shared=shared', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { shared: 'shared' });
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({ sharedWith: { $gte: 2 } }),
-      );
-    });
-
-    it('should filter individual subscriptions when shared=individual', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { shared: 'individual' });
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({ sharedWith: { $in: [null, undefined] } }),
-      );
-    });
-
-    it('should filter by weekly billingCycle when provided', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { billingCycle: BillingCycle.WEEKLY });
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({ billingCycle: BillingCycle.WEEKLY }),
-      );
-    });
-
-    it('should default to sort by createdAt descending', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, {});
-
-      expect(chain.sort).toHaveBeenCalledWith({ createdAt: -1 });
-    });
-
-    it('should sort by normalized monthly cost ascending', async () => {
-      const weeklySub = {
-        ...mockSubscription,
-        name: 'Weekly',
-        cost: 10,
-        billingCycle: BillingCycle.WEEKLY,
-      };
-      const monthlySub = {
-        ...mockSubscription,
-        name: 'Monthly',
-        cost: 30,
-        billingCycle: BillingCycle.MONTHLY,
-      };
-      const yearlySub = {
-        ...mockSubscription,
-        name: 'Yearly',
-        cost: 600,
-        billingCycle: BillingCycle.YEARLY,
-      };
-
-      const chain = createChainable([monthlySub, weeklySub, yearlySub]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(3));
-
-      const result = await service.findAll(householdId, {
-        sortBy: 'cost',
-        sortOrder: 'asc',
-      });
-
-      // Monthly costs: monthly=30, weekly=10*4.33=43.30, yearly=600/12=50
-      expect(result.data.map((s: any) => s.name)).toEqual([
-        'Monthly',
-        'Weekly',
-        'Yearly',
-      ]);
-      expect(chain.sort).not.toHaveBeenCalled();
-    });
-
-    it('should sort by normalized monthly cost descending', async () => {
-      const weeklySub = {
-        ...mockSubscription,
-        name: 'Weekly',
-        cost: 10,
-        billingCycle: BillingCycle.WEEKLY,
-      };
-      const monthlySub = {
-        ...mockSubscription,
-        name: 'Monthly',
-        cost: 30,
-        billingCycle: BillingCycle.MONTHLY,
-      };
-      const yearlySub = {
-        ...mockSubscription,
-        name: 'Yearly',
-        cost: 600,
-        billingCycle: BillingCycle.YEARLY,
-      };
-
-      const chain = createChainable([monthlySub, weeklySub, yearlySub]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(3));
-
-      const result = await service.findAll(householdId, {
-        sortBy: 'cost',
-        sortOrder: 'desc',
-      });
-
-      // Descending: yearly=50, weekly=43.30, monthly=30
-      expect(result.data.map((s: any) => s.name)).toEqual([
-        'Yearly',
-        'Weekly',
-        'Monthly',
+      const filter = model.find.mock.calls[0][0];
+      expect(filter.subscriptionCategory).toBe('Streaming');
+      expect(filter.cadence).toBe('monthly');
+      expect(filter.$or).toEqual([
+        { payee: expect.any(RegExp) },
+        { notes: expect.any(RegExp) },
       ]);
     });
 
-    it('should use MongoDB sort for non-cost fields', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, { sortBy: 'name', sortOrder: 'asc' });
-
-      expect(chain.sort).toHaveBeenCalledWith({ name: 1 });
-    });
-
-    it('should not advance overdue dates from the read path', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.findAll(householdId, {});
-
-      // findAll must query exactly once (the household's list) and never write.
-      expect(mockSubModel.find).toHaveBeenCalledTimes(1);
-      expect(mockSubModel.bulkWrite).not.toHaveBeenCalled();
-    });
-
-    it('should return paginated envelope with correct meta', async () => {
-      const chain = createChainable([mockSubscription]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
-
-      const result = await service.findAll(householdId, {});
-
-      expect(result.data).toEqual([mockSubscription]);
-      expect(result.meta).toEqual({
+    it('returns the paginated {data, meta} envelope with mapped views', async () => {
+      model.countDocuments.mockReturnValue(chain(1));
+      model.find.mockReturnValue(chain([recDoc({ amountCents: 999 })]));
+      const res = await service.findAll(HH, { page: 1, limit: 20 });
+      expect(res.meta).toEqual({
         total: 1,
         page: 1,
         limit: 20,
         totalPages: 1,
         hasNextPage: false,
       });
+      expect((res.data[0] as any).cost).toBe(9.99);
     });
 
-    it('should apply skip and limit for non-cost sort', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(25));
+    it('sorts by normalized monthly cost in memory', async () => {
+      const yearly = recDoc({ amountCents: 12000, cadence: 'yearly' }); // $10/mo
+      const monthly = recDoc({ amountCents: 500, cadence: 'monthly' }); // $5/mo
+      model.countDocuments.mockReturnValue(chain(2));
+      model.find.mockReturnValue(chain([yearly, monthly]));
 
-      const result = await service.findAll(householdId, { page: 2, limit: 10 });
-
-      expect(chain.skip).toHaveBeenCalledWith(10);
-      expect(chain.limit).toHaveBeenCalledWith(10);
-      expect(result.meta).toEqual({
-        total: 25,
-        page: 2,
-        limit: 10,
-        totalPages: 3,
-        hasNextPage: true,
-      });
-    });
-
-    it('should compute hasNextPage correctly on last page', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(25));
-
-      const result = await service.findAll(householdId, { page: 3, limit: 10 });
-
-      expect(result.meta.hasNextPage).toBe(false);
-    });
-
-    it('should return all results when limit=0', async () => {
-      const subs = [mockSubscription, { ...mockSubscription, _id: 'sub2' }];
-      const chain = createChainable(subs);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(2));
-
-      const result = await service.findAll(householdId, { limit: 0 });
-
-      expect(chain.skip).not.toHaveBeenCalled();
-      expect(chain.limit).not.toHaveBeenCalled();
-      expect(result.data).toHaveLength(2);
-      expect(result.meta).toEqual({
-        total: 2,
-        page: 1,
-        limit: 0,
-        totalPages: 1,
-        hasNextPage: false,
-      });
-    });
-
-    it('should paginate cost-sorted results', async () => {
-      const subs = Array.from({ length: 5 }, (_, i) => ({
-        ...mockSubscription,
-        _id: `sub${i}`,
-        name: `Sub${i}`,
-        cost: (i + 1) * 10,
-        billingCycle: BillingCycle.MONTHLY,
-      }));
-      const chain = createChainable(subs);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(5));
-
-      const result = await service.findAll(householdId, {
+      const res = await service.findAll(HH, {
         sortBy: 'cost',
         sortOrder: 'asc',
-        page: 2,
-        limit: 2,
       });
-
-      expect(result.data.map((s: any) => s.name)).toEqual(['Sub2', 'Sub3']);
-      expect(result.meta.total).toBe(5);
+      const costs = (res.data as any[]).map((s) => s.cost);
+      expect(costs).toEqual([5, 120]); // monthly ($5/mo) before yearly ($10/mo)
     });
   });
 
   describe('findOne', () => {
-    it('should return subscription when householdId matches', async () => {
-      mockSubModel.findById.mockReturnValue(createChainable(mockSubscription));
-
-      const result = await service.findOne(householdId, subId);
-
-      expect(mockSubModel.findById).toHaveBeenCalledWith(subId);
-      expect(result).toEqual(mockSubscription);
-    });
-
-    it('should throw NotFoundException when subscription is not found', async () => {
-      mockSubModel.findById.mockReturnValue(createChainable(null));
-
-      await expect(service.findOne(householdId, 'nonexistent')).rejects.toThrow(
+    it('404s when the id is not a subscription in this household', async () => {
+      model.findById.mockReturnValue(chain(recDoc({ isSubscription: false })));
+      await expect(service.findOne(HH, 'x')).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
 
-    it('should throw NotFoundException when householdId does not match', async () => {
-      const otherHouseholdSub = {
-        ...mockSubscription,
-        householdId: new Types.ObjectId('507f1f77bcf86cd799439099'),
-      };
-      mockSubModel.findById.mockReturnValue(createChainable(otherHouseholdSub));
-
-      await expect(service.findOne(householdId, subId)).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-
-    it('should throw NotFoundException when subscription has no householdId', async () => {
-      const noScopeSub = { ...mockSubscription, householdId: null };
-      mockSubModel.findById.mockReturnValue(createChainable(noScopeSub));
-
-      await expect(service.findOne(householdId, subId)).rejects.toThrow(
-        NotFoundException,
-      );
+    it('returns the mapped view for a household subscription', async () => {
+      model.findById.mockReturnValue(chain(recDoc({ amountCents: 2500 })));
+      const view = await service.findOne(HH, 'x');
+      expect(view.cost).toBe(25);
     });
   });
 
   describe('update', () => {
-    it('should update fields, save, and log', async () => {
-      const existingSub = {
-        ...mockSubscription,
-        save: jest.fn().mockResolvedValue({
-          ...mockSubscription,
-          name: 'Netflix Premium',
-        }),
-      };
-      mockSubModel.findById.mockReturnValue(createChainable(existingSub));
-      const logSpy = jest.spyOn(Logger.prototype, 'log');
+    it('maps cost→cents and category→(string + re-resolved id) then saves', async () => {
+      const doc = recDoc();
+      model.findById.mockReturnValue(chain(doc));
 
-      const result = await service.update(householdId, subId, {
-        name: 'Netflix Premium',
-      });
+      await service.update(HH, doc._id.toString(), {
+        cost: 20,
+        category: 'Streaming',
+      } as any);
 
-      expect(existingSub.name).toBe('Netflix Premium');
-      expect(existingSub.save).toHaveBeenCalled();
-      expect(result).toBeDefined();
-      expect(logSpy).toHaveBeenCalledWith(
-        { householdId, subscriptionId: subId },
-        'Subscription updated',
-      );
+      expect(doc.amountCents).toBe(2000);
+      expect(doc.subscriptionCategory).toBe('Streaming');
+      expect(doc.categoryId).toBe(CAT_STREAMING);
+      expect(doc.save).toHaveBeenCalled();
     });
   });
 
   describe('remove', () => {
-    it('should atomically delete by id and householdId and log', async () => {
-      mockSubModel.findOneAndDelete.mockReturnValue(
-        createChainable(mockSubscription),
-      );
-      const logSpy = jest.spyOn(Logger.prototype, 'log');
-
-      await service.remove(householdId, subId);
-
-      expect(mockSubModel.findOneAndDelete).toHaveBeenCalledWith({
-        _id: expect.any(Types.ObjectId),
-        householdId: expect.any(Types.ObjectId),
-      });
-      expect(logSpy).toHaveBeenCalledWith(
-        { householdId, subscriptionId: subId },
-        'Subscription deleted',
-      );
+    it('deletes only within the isSubscription slice', async () => {
+      model.findOneAndDelete.mockReturnValue(chain(recDoc()));
+      await service.remove(HH, new Types.ObjectId().toString());
+      expect(model.findOneAndDelete.mock.calls[0][0].isSubscription).toBe(true);
     });
 
-    it('should throw NotFoundException if subscription not found or not in household', async () => {
-      mockSubModel.findOneAndDelete.mockReturnValue(createChainable(null));
-
-      await expect(service.remove(householdId, subId)).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-  });
-
-  describe('removeAllByHouseholdId', () => {
-    it('should delete all subscriptions for the given householdId', async () => {
-      mockSubModel.deleteMany.mockReturnValue(
-        createChainable({ deletedCount: 3 }),
-      );
-
-      const result = await service.removeAllByHouseholdId(householdId);
-
-      const filter = mockSubModel.deleteMany.mock.calls[0][0];
-      expect(filter.householdId.equals(new Types.ObjectId(householdId))).toBe(
-        true,
-      );
-      expect(result).toBe(3);
-    });
-
-    it('should return 0 when the household has no subscriptions', async () => {
-      mockSubModel.deleteMany.mockReturnValue(
-        createChainable({ deletedCount: 0 }),
-      );
-
-      const result = await service.removeAllByHouseholdId(householdId);
-
-      expect(result).toBe(0);
+    it('404s when nothing was deleted', async () => {
+      model.findOneAndDelete.mockReturnValue(chain(null));
+      await expect(
+        service.remove(HH, new Types.ObjectId().toString()),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
   describe('bulkOperation', () => {
-    const subId2 = '507f1f77bcf86cd799439033';
+    it('changeCategory sets the verbatim string and re-links the category id', async () => {
+      const id = new Types.ObjectId();
+      model.find.mockReturnValue(chain([{ _id: id }]));
+      model.updateMany.mockReturnValue(chain({ matchedCount: 1 }));
 
-    it('should call deleteMany with correct filter for delete action', async () => {
-      const validDoc = { _id: new Types.ObjectId(subId) };
-      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
-      mockSubModel.deleteMany.mockReturnValueOnce(
-        createChainable({ deletedCount: 1 }),
-      );
-
-      const result = await service.bulkOperation(householdId, {
-        ids: [subId],
-        action: BulkAction.DELETE,
-      });
-
-      expect(mockSubModel.deleteMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          _id: { $in: [validDoc._id] },
-        }),
-      );
-      expect(result).toEqual({ success: 1, failed: 0 });
-    });
-
-    it('should call updateMany with isActive true for activate action', async () => {
-      const validDoc = { _id: new Types.ObjectId(subId) };
-      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
-      mockSubModel.updateMany.mockReturnValueOnce(
-        createChainable({ matchedCount: 1, modifiedCount: 1 }),
-      );
-
-      const result = await service.bulkOperation(householdId, {
-        ids: [subId],
-        action: BulkAction.ACTIVATE,
-      });
-
-      expect(mockSubModel.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          _id: { $in: [validDoc._id] },
-        }),
-        { $set: { isActive: true } },
-      );
-      expect(result).toEqual({ success: 1, failed: 0 });
-    });
-
-    it('should call updateMany with isActive false for deactivate action', async () => {
-      const validDoc = { _id: new Types.ObjectId(subId) };
-      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
-      mockSubModel.updateMany.mockReturnValueOnce(
-        createChainable({ matchedCount: 1, modifiedCount: 1 }),
-      );
-
-      const result = await service.bulkOperation(householdId, {
-        ids: [subId],
-        action: BulkAction.DEACTIVATE,
-      });
-
-      expect(mockSubModel.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          _id: { $in: [validDoc._id] },
-        }),
-        { $set: { isActive: false } },
-      );
-      expect(result).toEqual({ success: 1, failed: 0 });
-    });
-
-    it('should call updateMany with category for changeCategory action', async () => {
-      const validDoc = { _id: new Types.ObjectId(subId) };
-      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
-      mockSubModel.updateMany.mockReturnValueOnce(
-        createChainable({ matchedCount: 1, modifiedCount: 1 }),
-      );
-
-      const result = await service.bulkOperation(householdId, {
-        ids: [subId],
+      const res = await service.bulkOperation(HH, {
+        ids: [id.toString()],
         action: BulkAction.CHANGE_CATEGORY,
-        category: 'Gaming',
+        category: 'Streaming',
       });
 
-      expect(mockSubModel.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          _id: { $in: [validDoc._id] },
-        }),
-        { $set: { category: 'Gaming' } },
-      );
-      expect(result).toEqual({ success: 1, failed: 0 });
+      const update = model.updateMany.mock.calls[0][1].$set;
+      expect(update.subscriptionCategory).toBe('Streaming');
+      expect(update.categoryId).toBe(CAT_STREAMING);
+      expect(res).toEqual({ success: 1, failed: 0 });
     });
 
-    it('should throw BadRequestException for changeCategory without category', async () => {
-      const validDoc = { _id: new Types.ObjectId(subId) };
-      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
-
-      await expect(
-        service.bulkOperation(householdId, {
-          ids: [subId],
-          action: BulkAction.CHANGE_CATEGORY,
-        }),
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('should return correct success/failed counts for mixed valid/invalid IDs', async () => {
-      const validDoc = { _id: new Types.ObjectId(subId) };
-      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
-      mockSubModel.deleteMany.mockReturnValueOnce(
-        createChainable({ deletedCount: 1 }),
-      );
-
-      const result = await service.bulkOperation(householdId, {
-        ids: [subId, subId2],
+    it('reports all failed when no ids belong to the household slice', async () => {
+      model.find.mockReturnValue(chain([]));
+      const res = await service.bulkOperation(HH, {
+        ids: [new Types.ObjectId().toString()],
         action: BulkAction.DELETE,
       });
-
-      expect(result).toEqual({ success: 1, failed: 1 });
-    });
-
-    it('should return early when no valid IDs found', async () => {
-      mockSubModel.find.mockReturnValueOnce(createChainable([]));
-
-      const result = await service.bulkOperation(householdId, {
-        ids: [subId],
-        action: BulkAction.DELETE,
-      });
-
-      expect(result).toEqual({ success: 0, failed: 1 });
-      expect(mockSubModel.deleteMany).not.toHaveBeenCalled();
-    });
-
-    it('reports matchedCount (not modifiedCount) so no-op updates still count', async () => {
-      const validDoc = { _id: new Types.ObjectId(subId) };
-      mockSubModel.find.mockReturnValueOnce(createChainable([validDoc]));
-      // Already active → Mongo matches the doc but modifies nothing.
-      mockSubModel.updateMany.mockReturnValueOnce(
-        createChainable({ matchedCount: 1, modifiedCount: 0 }),
-      );
-
-      const result = await service.bulkOperation(householdId, {
-        ids: [subId],
-        action: BulkAction.ACTIVATE,
-      });
-
-      expect(result).toEqual({ success: 1, failed: 0 });
-    });
-
-    it('reports the real deletedCount when a concurrent delete already removed some', async () => {
-      const validDoc = { _id: new Types.ObjectId(subId) };
-      const validDoc2 = { _id: new Types.ObjectId(subId2) };
-      mockSubModel.find.mockReturnValueOnce(
-        createChainable([validDoc, validDoc2]),
-      );
-      // Both matched the pre-write read, but only one was actually deleted.
-      mockSubModel.deleteMany.mockReturnValueOnce(
-        createChainable({ deletedCount: 1 }),
-      );
-
-      const result = await service.bulkOperation(householdId, {
-        ids: [subId, subId2],
-        action: BulkAction.DELETE,
-      });
-
-      expect(result).toEqual({ success: 1, failed: 1 });
-    });
-
-    it('should filter by householdId for household scoping', async () => {
-      mockSubModel.find.mockReturnValueOnce(createChainable([]));
-
-      await service.bulkOperation(householdId, {
-        ids: [subId],
-        action: BulkAction.DELETE,
-      });
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          householdId: expect.any(Types.ObjectId),
-        }),
-      );
+      expect(res).toEqual({ success: 0, failed: 1 });
     });
   });
 
   describe('exportCsv', () => {
-    it('should return CSV with header and data rows', async () => {
-      const sub = {
-        ...mockSubscription,
-        nextBillingDate: new Date('2025-06-01'),
-        notes: 'My notes',
-        tags: ['shared', 'essential'],
-      };
-      const chain = createChainable([sub]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
-
-      const csv = await service.exportCsv(householdId, {});
-
-      const lines = csv.split('\n');
-      expect(lines[0]).toBe(
+    it('emits the legacy CSV header and dollar costs', async () => {
+      model.countDocuments.mockReturnValue(chain(1));
+      model.find.mockReturnValue(chain([recDoc({ amountCents: 1599 })]));
+      const csv = await service.exportCsv(HH, {});
+      const [header, row] = csv.split('\n');
+      expect(header).toBe(
         'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With',
       );
-      expect(lines[1]).toBe(
-        'Netflix,15.99,monthly,Streaming,2025-06-01,Active,My notes,shared; essential,,',
-      );
-    });
-
-    it('should escape fields with commas and quotes', async () => {
-      const sub = {
-        ...mockSubscription,
-        name: 'Netflix, Premium',
-        notes: 'Has "special" chars',
-      };
-      const chain = createChainable([sub]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
-
-      const csv = await service.exportCsv(householdId, {});
-
-      const lines = csv.split('\n');
-      expect(lines[1]).toContain('"Netflix, Premium"');
-      expect(lines[1]).toContain('"Has ""special"" chars"');
-    });
-
-    it('should include tags in CSV export', async () => {
-      const sub = {
-        ...mockSubscription,
-        nextBillingDate: new Date('2025-06-01'),
-        notes: '',
-        tags: ['work', 'team'],
-      };
-      const chain = createChainable([sub]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
-
-      const csv = await service.exportCsv(householdId, {});
-
-      const lines = csv.split('\n');
-      expect(lines[1]).toContain('work; team');
-    });
-
-    it('should include trialEndDate in CSV when set', async () => {
-      const sub = {
-        ...mockSubscription,
-        nextBillingDate: new Date('2025-06-01'),
-        notes: '',
-        tags: [],
-        trialEndDate: new Date('2025-07-15'),
-      };
-      const chain = createChainable([sub]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
-
-      const csv = await service.exportCsv(householdId, {});
-
-      const lines = csv.split('\n');
-      expect(lines[1]).toContain(',2025-07-15');
-    });
-
-    it('should include sharedWith value in CSV when set', async () => {
-      const sub = {
-        ...mockSubscription,
-        nextBillingDate: new Date('2025-06-01'),
-        notes: '',
-        tags: [],
-        sharedWith: 3,
-      };
-      const chain = createChainable([sub]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
-
-      const csv = await service.exportCsv(householdId, {});
-
-      const lines = csv.split('\n');
-      const fields = lines[1].split(',');
-      expect(fields[fields.length - 1]).toBe('3');
-    });
-
-    it('should have empty trialEndDate field when unset', async () => {
-      const sub = {
-        ...mockSubscription,
-        nextBillingDate: new Date('2025-06-01'),
-        notes: '',
-        tags: [],
-      };
-      const chain = createChainable([sub]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(1));
-
-      const csv = await service.exportCsv(householdId, {});
-
-      const lines = csv.split('\n');
-      // Last field should be empty (trailing comma produces empty string)
-      const fields = lines[1].split(',');
-      expect(fields[fields.length - 1]).toBe('');
-    });
-
-    it('should return header only for empty list', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      const csv = await service.exportCsv(householdId, {});
-
-      const lines = csv.split('\n');
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toBe(
-        'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With',
-      );
-    });
-
-    it('should pass filter params through with limit=0', async () => {
-      const chain = createChainable([]);
-      mockSubModel.find.mockReturnValueOnce(chain);
-      mockSubModel.countDocuments.mockReturnValueOnce(createChainable(0));
-
-      await service.exportCsv(householdId, {
-        category: 'Streaming',
-        sortBy: 'name',
-        sortOrder: 'asc',
-      });
-
-      expect(mockSubModel.find).toHaveBeenCalledWith(
-        expect.objectContaining({ category: 'Streaming' }),
-      );
+      expect(row).toContain('Netflix');
+      expect(row).toContain('15.99');
     });
   });
 
-  describe('getMonthlyCost', () => {
-    it('should return cost as-is for monthly billing', () => {
-      expect(
-        SubscriptionsService['getMonthlyCost'](15, BillingCycle.MONTHLY),
-      ).toBe(15);
-    });
-
-    it('should multiply by 4.33 for weekly billing', () => {
-      expect(
-        SubscriptionsService['getMonthlyCost'](10, BillingCycle.WEEKLY),
-      ).toBeCloseTo(43.3, 1);
-    });
-
-    it('should divide by 12 for yearly billing', () => {
-      expect(
-        SubscriptionsService['getMonthlyCost'](120, BillingCycle.YEARLY),
-      ).toBe(10);
+  describe('removeAllByHouseholdId', () => {
+    it('deletes only the household subscription slice', async () => {
+      model.deleteMany.mockReturnValue(chain({ deletedCount: 3 }));
+      const n = await service.removeAllByHouseholdId(HH);
+      expect(model.deleteMany.mock.calls[0][0].isSubscription).toBe(true);
+      expect(n).toBe(3);
     });
   });
 });

@@ -3,7 +3,7 @@ import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { NotificationsCronService } from './notifications-cron.service';
 import { NotificationsService } from './notifications.service';
-import { Subscription } from '../subscriptions/schemas/subscription.schema';
+import { RecurringTransaction } from '../recurring/schemas/recurring-transaction.schema';
 import { CronLockService } from '../common/cron-lock/cron-lock.service';
 
 function cursorOf(items: any[] = []) {
@@ -19,27 +19,29 @@ function cursorOf(items: any[] = []) {
 
 describe('NotificationsCronService', () => {
   let cronService: NotificationsCronService;
-  let mockSubModel: any;
+  let mockRecurringModel: any;
   let mockNotificationsService: any;
   let mockCronLock: any;
 
   const householdId = '507f1f77bcf86cd799439011';
   const subId = '507f1f77bcf86cd799439022';
 
+  // A recurring subscription-slice row (VEG-469): payee/nextDate/isSubscription.
   function makeSub(overrides: Record<string, any> = {}) {
     return {
       _id: new Types.ObjectId(subId),
       householdId: new Types.ObjectId(householdId),
-      name: 'Netflix',
-      nextBillingDate: new Date('2026-03-19'),
+      payee: 'Netflix',
+      nextDate: new Date('2026-03-19'),
       reminderDaysBefore: 3,
       isActive: true,
+      isSubscription: true,
       ...overrides,
     };
   }
 
   beforeEach(async () => {
-    mockSubModel = {
+    mockRecurringModel = {
       find: jest.fn().mockReturnValue(cursorOf([])),
     };
     mockNotificationsService = {
@@ -52,7 +54,10 @@ describe('NotificationsCronService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationsCronService,
-        { provide: getModelToken(Subscription.name), useValue: mockSubModel },
+        {
+          provide: getModelToken(RecurringTransaction.name),
+          useValue: mockRecurringModel,
+        },
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: CronLockService, useValue: mockCronLock },
       ],
@@ -70,11 +75,11 @@ describe('NotificationsCronService', () => {
 
   it('skips the run when another instance holds the daily lock', async () => {
     mockCronLock.tryAcquire.mockResolvedValue(false);
-    mockSubModel.find.mockReturnValue(cursorOf([makeSub()]));
+    mockRecurringModel.find.mockReturnValue(cursorOf([makeSub()]));
 
     await cronService.handleRenewalReminders();
 
-    expect(mockSubModel.find).not.toHaveBeenCalled();
+    expect(mockRecurringModel.find).not.toHaveBeenCalled();
     expect(
       mockNotificationsService.createRenewalReminder,
     ).not.toHaveBeenCalled();
@@ -92,20 +97,27 @@ describe('NotificationsCronService', () => {
     );
   });
 
-  it('streams subscriptions with a lean cursor', async () => {
+  it('scans only the active subscription slice due within the window', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
     const chain = cursorOf([]);
-    mockSubModel.find.mockReturnValue(chain);
+    mockRecurringModel.find.mockReturnValue(chain);
 
     await cronService.handleRenewalReminders();
 
+    const filter = mockRecurringModel.find.mock.calls[0][0];
+    expect(filter.isActive).toBe(true);
+    expect(filter.isSubscription).toBe(true);
+    expect(filter.reminderDaysBefore).toEqual({ $gt: 0 });
+    expect(filter.nextDate).toBeDefined();
     expect(chain.lean).toHaveBeenCalled();
     expect(chain.cursor).toHaveBeenCalled();
   });
 
-  it('should create notifications for subscriptions in the reminder window', async () => {
+  it('creates a reminder for a subscription in the window (keyed on the preserved _id)', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
-    mockSubModel.find.mockReturnValue(cursorOf([makeSub()]));
+    mockRecurringModel.find.mockReturnValue(cursorOf([makeSub()]));
 
     await cronService.handleRenewalReminders();
 
@@ -118,23 +130,22 @@ describe('NotificationsCronService', () => {
     );
   });
 
-  it('should not create notifications for subscriptions outside the reminder window', async () => {
+  it('does not create a reminder outside the reminder window', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-10T10:00:00Z'));
-    mockSubModel.find.mockReturnValue(
-      cursorOf([makeSub({ nextBillingDate: new Date('2026-03-20') })]),
+    mockRecurringModel.find.mockReturnValue(
+      cursorOf([makeSub({ nextDate: new Date('2026-03-20') })]),
     );
 
     await cronService.handleRenewalReminders();
 
-    // Reminder date would be March 17, but now is March 10 so no notification
     expect(
       mockNotificationsService.createRenewalReminder,
     ).not.toHaveBeenCalled();
   });
 
-  it('should handle empty subscription list', async () => {
-    mockSubModel.find.mockReturnValue(cursorOf([]));
+  it('handles an empty list', async () => {
+    mockRecurringModel.find.mockReturnValue(cursorOf([]));
 
     await cronService.handleRenewalReminders();
 
@@ -143,15 +154,15 @@ describe('NotificationsCronService', () => {
     ).not.toHaveBeenCalled();
   });
 
-  it('continues processing after a per-item failure (one bad sub does not drop the run)', async () => {
+  it('continues after a per-item failure (one bad sub does not drop the run)', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
-    mockSubModel.find.mockReturnValue(
+    mockRecurringModel.find.mockReturnValue(
       cursorOf([
-        makeSub({ name: 'Bad' }),
+        makeSub({ payee: 'Bad' }),
         makeSub({
           _id: new Types.ObjectId('507f1f77bcf86cd799439044'),
-          name: 'Good',
+          payee: 'Good',
         }),
       ]),
     );
@@ -161,22 +172,21 @@ describe('NotificationsCronService', () => {
 
     await expect(cronService.handleRenewalReminders()).resolves.toBeUndefined();
 
-    // The second subscription is still attempted despite the first throwing.
     expect(
       mockNotificationsService.createRenewalReminder,
     ).toHaveBeenCalledTimes(2);
   });
 
-  it('should process multiple subscriptions', async () => {
+  it('processes multiple subscriptions', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
-    mockSubModel.find.mockReturnValue(
+    mockRecurringModel.find.mockReturnValue(
       cursorOf([
         makeSub(),
         makeSub({
           _id: new Types.ObjectId('507f1f77bcf86cd799439044'),
-          name: 'Spotify',
-          nextBillingDate: new Date('2026-03-18'),
+          payee: 'Spotify',
+          nextDate: new Date('2026-03-18'),
           reminderDaysBefore: 2,
         }),
       ]),
@@ -189,26 +199,23 @@ describe('NotificationsCronService', () => {
     ).toHaveBeenCalledTimes(2);
   });
 
-  it('skips a subscription with no householdId instead of aborting the run', async () => {
+  it('skips a row with no householdId instead of aborting the run', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
-    // First sub is an un-stamped legacy orphan (no householdId); the second is
-    // healthy. The orphan must be skipped without throwing so the run completes.
-    const orphan = makeSub({ name: 'Orphan' });
+    const orphan = makeSub({ payee: 'Orphan' });
     delete (orphan as { householdId?: unknown }).householdId;
-    mockSubModel.find.mockReturnValue(
+    mockRecurringModel.find.mockReturnValue(
       cursorOf([
         orphan,
         makeSub({
           _id: new Types.ObjectId('507f1f77bcf86cd799439044'),
-          name: 'Healthy',
+          payee: 'Healthy',
         }),
       ]),
     );
 
     await expect(cronService.handleRenewalReminders()).resolves.toBeUndefined();
 
-    // Only the healthy subscription produces a reminder.
     expect(
       mockNotificationsService.createRenewalReminder,
     ).toHaveBeenCalledTimes(1);

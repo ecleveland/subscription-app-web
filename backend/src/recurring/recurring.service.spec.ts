@@ -312,17 +312,27 @@ describe('RecurringService', () => {
   });
 
   describe('findAll', () => {
-    it('scopes to the household and sorts by nextDate ascending', async () => {
+    it('scopes to the household, excludes subscriptions by default, sorts by nextDate asc', async () => {
       const chain = createChainable([recDoc()]);
       mockModel.find.mockReturnValue(chain);
 
       const result = await service.findAll(HOUSEHOLD_ID, {});
 
+      // Subscriptions are excluded from the Bills view unless explicitly asked
+      // for (VEG-469) — they have their own /api/subscriptions endpoint.
       expect(mockModel.find).toHaveBeenCalledWith({
         householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        isSubscription: false,
       });
       expect(chain.sort).toHaveBeenCalledWith({ nextDate: 1 });
       expect(result).toHaveLength(1);
+    });
+
+    it('opts subscriptions back in with isSubscription: true', async () => {
+      await service.findAll(HOUSEHOLD_ID, { isSubscription: true });
+      expect(mockModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ isSubscription: true }),
+      );
     });
 
     it('applies the type filter', async () => {

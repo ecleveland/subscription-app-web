@@ -5,8 +5,8 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 import { userIdFromToken } from './helpers/jwt';
-import { SubscriptionsService } from '../src/subscriptions/subscriptions.service';
-import { SubscriptionsCronService } from '../src/subscriptions/subscriptions-cron.service';
+import { RecurringService } from '../src/recurring/recurring.service';
+import { RecurringCronService } from '../src/recurring/recurring-cron.service';
 import { HouseholdsService } from '../src/households/households.service';
 import { UsersService } from '../src/users/users.service';
 import {
@@ -361,9 +361,10 @@ describe('Subscriptions (e2e)', () => {
   });
 
   describe('Billing date advancement', () => {
-    // Advancement now runs from the scheduled cron, never the read path. These
-    // tests invoke the service/cron directly (the GET endpoint no longer writes).
-    let subsService: SubscriptionsService;
+    // Subscriptions are the isSubscription slice of RecurringTransaction now
+    // (VEG-469); their (account-less) dates roll forward via the recurring
+    // scheduler's advance-only path — never the read path.
+    let recurringService: RecurringService;
 
     const createSub = async (
       body: Record<string, unknown>,
@@ -385,7 +386,7 @@ describe('Subscriptions (e2e)', () => {
     };
 
     beforeAll(() => {
-      subsService = app.get(SubscriptionsService);
+      recurringService = app.get(RecurringService);
     });
 
     it('does not advance overdue dates from the read path (GET /subscriptions)', async () => {
@@ -416,7 +417,7 @@ describe('Subscriptions (e2e)', () => {
         category: 'Software',
       });
 
-      await subsService.advanceOverdueDates();
+      await recurringService.materializeDue();
 
       const updated = await getSub(subId);
       expect(updated).toBeDefined();
@@ -437,7 +438,7 @@ describe('Subscriptions (e2e)', () => {
         isActive: false,
       });
 
-      await subsService.advanceOverdueDates();
+      await recurringService.materializeDue();
 
       const unchanged = await getSub(subId);
       expect(unchanged).toBeDefined();
@@ -457,7 +458,7 @@ describe('Subscriptions (e2e)', () => {
         category: 'Other',
       });
 
-      await subsService.advanceOverdueDates();
+      await recurringService.materializeDue();
 
       const updated = await getSub(subId);
       expect(updated).toBeDefined();
@@ -478,7 +479,7 @@ describe('Subscriptions (e2e)', () => {
         category: 'Software',
       });
 
-      await subsService.advanceOverdueDates();
+      await recurringService.materializeDue();
 
       const updated = await getSub(subId);
       expect(updated).toBeDefined();
@@ -488,7 +489,7 @@ describe('Subscriptions (e2e)', () => {
     });
 
     it('runs via the scheduled cron under a daily leader lock', async () => {
-      const cron = app.get(SubscriptionsCronService);
+      const cron = app.get(RecurringCronService);
       const pastDate = new Date();
       pastDate.setMonth(pastDate.getMonth() - 3);
       const subId = await createSub({
@@ -500,14 +501,14 @@ describe('Subscriptions (e2e)', () => {
       });
 
       // First run wins the lock and advances the overdue subscription.
-      await cron.handleOverdueAdvancement();
+      await cron.handleMaterialization();
       const updated = await getSub(subId);
       expect(new Date(updated.nextBillingDate).getTime()).toBeGreaterThan(
         Date.now(),
       );
 
       // Second run the same day finds the lock held and is a no-op (no throw).
-      await expect(cron.handleOverdueAdvancement()).resolves.toBeUndefined();
+      await expect(cron.handleMaterialization()).resolves.toBeUndefined();
     });
   });
 

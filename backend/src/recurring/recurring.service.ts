@@ -200,9 +200,12 @@ export class RecurringService {
     if (query.categoryId) {
       filter.categoryId = new Types.ObjectId(query.categoryId);
     }
-    if (query.isSubscription !== undefined) {
-      filter.isSubscription = query.isSubscription;
-    }
+    // Exclude subscriptions by default (VEG-469): they are surfaced by the
+    // Subscriptions page via /api/subscriptions, not the Bills view. An explicit
+    // ?isSubscription=true opts them back in. Defaulting to include them would
+    // leak migrated subscriptions onto the Bills list — and a migrated (account-
+    // less) row edited there would silently gain an account and start posting.
+    filter.isSubscription = query.isSubscription ?? false;
     if (query.isActive !== undefined) {
       filter.isActive = query.isActive;
     }

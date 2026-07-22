@@ -8,9 +8,9 @@ import {
   NotificationSchema,
 } from './schemas/notification.schema';
 import {
-  Subscription,
-  SubscriptionSchema,
-} from '../subscriptions/schemas/subscription.schema';
+  RecurringTransaction,
+  RecurringTransactionSchema,
+} from '../recurring/schemas/recurring-transaction.schema';
 import { CronLockModule } from '../common/cron-lock/cron-lock.module';
 import { HouseholdsModule } from '../households/households.module';
 
@@ -18,7 +18,8 @@ import { HouseholdsModule } from '../households/households.module';
   imports: [
     MongooseModule.forFeature([
       { name: Notification.name, schema: NotificationSchema },
-      { name: Subscription.name, schema: SubscriptionSchema },
+      // Renewal reminders now read the subscription slice of recurring (VEG-469).
+      { name: RecurringTransaction.name, schema: RecurringTransactionSchema },
     ]),
     CronLockModule,
     // Provides HouseholdGuard (+ HouseholdsService it depends on) for the
