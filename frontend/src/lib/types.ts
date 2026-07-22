@@ -146,6 +146,41 @@ export interface Transaction {
   updatedAt: string;
 }
 
+// --- Recurring & bills (Phase 4) --------------------------------------------
+// A recurring schedule (bill or scheduled income). Materializes into ledger
+// Transactions when due; a subscription is the `isSubscription: true` slice.
+
+export type RecurringType = 'income' | 'expense';
+export type RecurringCadence = 'weekly' | 'monthly' | 'yearly';
+
+export interface RecurringTransaction {
+  _id: string;
+  householdId: string;
+  // Optional: legacy migrated subscriptions may lack an account, though the
+  // create API requires one.
+  accountId?: string;
+  categoryId: string;
+  memberId?: string;
+  type: RecurringType;
+  amountCents: number;
+  payee: string;
+  notes?: string;
+  // Always present in the response (schema default []).
+  tags: string[];
+  cadence: RecurringCadence;
+  nextDate: string;
+  cadenceAnchorDay?: number;
+  reminderDaysBefore: number;
+  // Absent when the schedule runs indefinitely (a null-clear is stored unset).
+  endDate?: string;
+  isActive: boolean;
+  // Expenses only — the server rejects an income schedule flagged true.
+  isSubscription: boolean;
+  sharedWith?: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // A named grouping of budgeting categories (e.g. "Housing", "Food") used for
 // display ordering on the category management page.
 export interface CategoryGroup {

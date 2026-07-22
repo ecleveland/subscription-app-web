@@ -1,12 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 import { userIdFromToken } from './helpers/jwt';
 import { HouseholdsService } from '../src/households/households.service';
 import { Category } from '../src/categories/schemas/category.schema';
+import { Transaction } from '../src/transactions/schemas/transaction.schema';
 
 /** Decode the `sub` (userId) claim from a JWT access token. */
 async function createAccount(
@@ -39,6 +40,7 @@ describe('Transactions (e2e)', () => {
   let tokenA: string;
   let tokenB: string;
   let categoryModel: Model<Category>;
+  let transactionModel: Model<Transaction>;
 
   // Household A fixtures.
   let householdIdA: string;
@@ -65,6 +67,9 @@ describe('Transactions (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
     categoryModel = app.get<Model<Category>>(getModelToken(Category.name));
+    transactionModel = app.get<Model<Transaction>>(
+      getModelToken(Transaction.name),
+    );
     const households = app.get(HouseholdsService);
 
     const resA = await request(app.getHttpServer())
@@ -356,6 +361,72 @@ describe('Transactions (e2e)', () => {
       expect(
         res.body.data.every((t: { cleared: boolean }) => t.cleared === false),
       ).toBe(true);
+    });
+
+    it('filters by recurringId to a schedule’s materialized transactions', async () => {
+      // The HTTP create path strips recurringId (whitelist), so seed the
+      // materialized rows directly the way the scheduler does.
+      const recurringId = new Types.ObjectId();
+      const otherRecurringId = new Types.ObjectId();
+      await transactionModel.create([
+        {
+          householdId: new Types.ObjectId(householdIdA),
+          accountId: new Types.ObjectId(checkingA),
+          categoryId: new Types.ObjectId(expenseCatA),
+          type: 'expense',
+          amountCents: 1500,
+          date: new Date('2026-06-20'),
+          payee: 'Netflix',
+          recurringId,
+        },
+        {
+          householdId: new Types.ObjectId(householdIdA),
+          accountId: new Types.ObjectId(checkingA),
+          categoryId: new Types.ObjectId(expenseCatA),
+          type: 'expense',
+          amountCents: 900,
+          date: new Date('2026-06-21'),
+          payee: 'Spotify',
+          recurringId: otherRecurringId,
+        },
+      ]);
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/transactions?recurringId=${recurringId.toString()}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      expect(res.body.data.length).toBe(1);
+      expect(res.body.data[0].payee).toBe('Netflix');
+      expect(res.body.data[0].recurringId).toBe(recurringId.toString());
+    });
+
+    it('rejects a malformed recurringId filter', async () => {
+      await request(app.getHttpServer())
+        .get('/api/transactions?recurringId=not-an-id')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+    });
+
+    it('does not leak another household’s rows via recurringId (scoping ANDs)', async () => {
+      const recurringId = new Types.ObjectId();
+      await transactionModel.create({
+        householdId: new Types.ObjectId(householdIdA),
+        accountId: new Types.ObjectId(checkingA),
+        categoryId: new Types.ObjectId(expenseCatA),
+        type: 'expense',
+        amountCents: 1200,
+        date: new Date('2026-06-22'),
+        payee: 'A-only recurring',
+        recurringId,
+      });
+
+      // Household B queries A's recurringId — scoping must yield nothing.
+      const res = await request(app.getHttpServer())
+        .get(`/api/transactions?recurringId=${recurringId.toString()}`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+      expect(res.body.data).toHaveLength(0);
     });
   });
 
