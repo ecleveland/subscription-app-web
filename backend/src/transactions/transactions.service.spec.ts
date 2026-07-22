@@ -78,6 +78,9 @@ describe('TransactionsService', () => {
       .fn()
       .mockImplementation((docs) => Promise.resolve(docs));
     mockModel.aggregate = jest.fn().mockReturnValue(createChainable([]));
+    // sumLedgerDeltasByAccount references the collection name for its
+    // $unionWith self-join; the real Mongoose model exposes it here.
+    mockModel.collection = { name: 'transactions' };
 
     accountsService = {
       findOne: jest.fn().mockResolvedValue({ _id: new Types.ObjectId(ACC_A) }),
@@ -1019,6 +1022,77 @@ describe('TransactionsService', () => {
       expect(result).toEqual([
         { categoryId: CAT_EXP, type: TransactionType.EXPENSE, totalCents: 100 },
       ]);
+    });
+  });
+
+  describe('sumLedgerDeltasByAccount', () => {
+    // Pull a stage out of the built pipeline by its top-level operator key.
+    function stage(pipeline: any[], op: string): any {
+      return pipeline.find((s) => Object.prototype.hasOwnProperty.call(s, op));
+    }
+
+    it('encodes the same signed arithmetic as balanceDeltas for all three types', async () => {
+      mockModel.aggregate.mockReturnValue(createChainable([]));
+
+      await service.sumLedgerDeltasByAccount(HOUSEHOLD_ID);
+
+      const pipeline = mockModel.aggregate.mock.calls[0][0];
+
+      // Household scoping.
+      expect(stage(pipeline, '$match').$match.householdId.toString()).toBe(
+        HOUSEHOLD_ID,
+      );
+
+      // Source-leg signs: income +amount, expense/transfer −amount.
+      const branches = stage(pipeline, '$project').$project.delta.$switch
+        .branches;
+      const byType = (t: string) =>
+        branches.find((b: any) => b.case.$eq[1] === t).then;
+      expect(byType(TransactionType.INCOME)).toBe('$amountCents');
+      expect(byType(TransactionType.EXPENSE)).toEqual({
+        $multiply: ['$amountCents', -1],
+      });
+      expect(byType(TransactionType.TRANSFER)).toEqual({
+        $multiply: ['$amountCents', -1],
+      });
+
+      // Destination leg: transfers add +amount to transferAccountId.
+      const union = stage(pipeline, '$unionWith').$unionWith;
+      expect(union.pipeline[0].$match.type).toBe(TransactionType.TRANSFER);
+      expect(union.pipeline[1].$project).toEqual({
+        account: '$transferAccountId',
+        delta: '$amountCents',
+      });
+
+      // Final grouping sums the signed deltas per account.
+      expect(stage(pipeline, '$group').$group).toEqual({
+        _id: '$account',
+        deltaCents: { $sum: '$delta' },
+      });
+    });
+
+    it('folds the aggregation rows into an account-keyed map', async () => {
+      mockModel.aggregate.mockReturnValue(
+        createChainable([
+          { _id: new Types.ObjectId(ACC_A), deltaCents: 4200 },
+          { _id: new Types.ObjectId(ACC_B), deltaCents: -1500 },
+        ]),
+      );
+
+      const deltas = await service.sumLedgerDeltasByAccount(HOUSEHOLD_ID);
+
+      expect(deltas.get(ACC_A)).toBe(4200);
+      expect(deltas.get(ACC_B)).toBe(-1500);
+      expect(deltas.size).toBe(2);
+    });
+
+    it('omits the household filter when scanning every household', async () => {
+      mockModel.aggregate.mockReturnValue(createChainable([]));
+
+      await service.sumLedgerDeltasByAccount();
+
+      const pipeline = mockModel.aggregate.mock.calls[0][0];
+      expect(stage(pipeline, '$match').$match).toEqual({});
     });
   });
 });

@@ -50,6 +50,28 @@ export class Account {
   })
   balanceCents: number;
 
+  // The immutable opening-balance anchor, in integer minor units (cents). Seeded
+  // at create from the same opening balance as `balanceCents`, then never
+  // changed by the ledger. It exists so `balanceCents` is fully re-derivable:
+  // the reconciliation invariant is `balanceCents === openingBalanceCents +
+  // Σ(ledger deltas)` (VEG-478). Without it, a reconcile that summed only the
+  // ledger would wipe every account's opening balance and flag clean accounts as
+  // drifted. `default: 0` is a schema-layer guarantee for new documents; legacy
+  // accounts created before this field are stamped once at boot by
+  // ReconciliationService.backfillOpeningBalances (via a `$exists: false` query,
+  // which the hydration default does not mask). Integer-validated at the schema
+  // layer — like `balanceCents` — so the reconcile write path, which bypasses
+  // the DTO, cannot persist a float.
+  @Prop({
+    required: true,
+    default: 0,
+    validate: {
+      validator: Number.isInteger,
+      message: 'openingBalanceCents must be an integer (minor units)',
+    },
+  })
+  openingBalanceCents: number;
+
   @Prop({ required: true, default: false })
   isArchived: boolean;
 }

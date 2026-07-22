@@ -382,6 +382,88 @@ export class TransactionsService {
       }));
   }
 
+  /**
+   * Sum each account's signed balance effect from the ledger, for balance
+   * reconciliation (VEG-478). Scoped to one household when `householdId` is
+   * given, otherwise every household (the weekly sweep) — account ids are
+   * globally unique, so grouping by account across households never collides.
+   *
+   * The signed arithmetic is the exact twin of `balanceDeltas` (income +amount,
+   * expense −amount, transfer −amount at the source): whenever that write-path
+   * mapping changes, the `$switch` here must change with it. A transfer touches
+   * TWO accounts, and its destination `+amount` leg lives on a different field
+   * (`transferAccountId`), which a single group-by-`accountId` cannot capture —
+   * so a `$unionWith` folds in the destination legs before the final group. One
+   * pipeline, one consistent snapshot. Returns a Map keyed by stringified
+   * account id.
+   */
+  async sumLedgerDeltasByAccount(
+    householdId?: string,
+  ): Promise<Map<string, number>> {
+    const match: Record<string, unknown> = {};
+    if (householdId) {
+      match.householdId = new Types.ObjectId(householdId);
+    }
+    const pipeline: PipelineStage[] = [
+      { $match: match },
+      {
+        $project: {
+          account: '$accountId',
+          delta: {
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ['$type', TransactionType.INCOME] },
+                  then: '$amountCents',
+                },
+                {
+                  case: { $eq: ['$type', TransactionType.EXPENSE] },
+                  then: { $multiply: ['$amountCents', -1] },
+                },
+                {
+                  case: { $eq: ['$type', TransactionType.TRANSFER] },
+                  then: { $multiply: ['$amountCents', -1] },
+                },
+              ],
+              default: 0,
+            },
+          },
+        },
+      },
+      {
+        $unionWith: {
+          coll: this.transactionModel.collection.name,
+          pipeline: [
+            {
+              $match: {
+                ...match,
+                type: TransactionType.TRANSFER,
+                transferAccountId: { $ne: null },
+              },
+            },
+            {
+              $project: {
+                account: '$transferAccountId',
+                delta: '$amountCents',
+              },
+            },
+          ],
+        },
+      },
+      { $group: { _id: '$account', deltaCents: { $sum: '$delta' } } },
+    ];
+
+    const rows = (await this.transactionModel
+      .aggregate(pipeline)
+      .exec()) as unknown as { _id: Types.ObjectId; deltaCents: number }[];
+
+    const deltas = new Map<string, number>();
+    for (const row of rows) {
+      deltas.set(row._id.toString(), row.deltaCents);
+    }
+    return deltas;
+  }
+
   async findOne(householdId: string, id: string): Promise<TransactionDocument> {
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException(`Transaction with ID "${id}" not found`);
