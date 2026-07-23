@@ -5,6 +5,33 @@ import { Account, AccountDocument } from './schemas/account.schema';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 
+// A lean projection of the fields balance reconciliation (VEG-478) needs: the
+// cached balance to compare against and the opening-balance anchor to recompute
+// from. Ids are stringified so callers key plain Maps without ObjectId identity
+// pitfalls, mirroring the aggregation helpers elsewhere.
+export interface AccountBalanceView {
+  id: string;
+  householdId: string;
+  name: string;
+  balanceCents: number;
+  // Deliberately `| undefined`: this is read with `.lean()`, which bypasses
+  // Mongoose hydration and so does NOT apply the schema's `default: 0`. A legacy
+  // account that predates the anchor (before its boot backfill) genuinely yields
+  // `undefined` here. Typing it honestly forces every consumer to guard the
+  // anchor before arithmetic (a missing anchor must be skipped, never treated
+  // as 0 — that would wipe the opening balance).
+  openingBalanceCents: number | undefined;
+}
+
+// A legacy account still missing the opening-balance anchor, plus the inputs the
+// one-time backfill needs to derive it (`openingBalanceCents = balanceCents −
+// Σ ledger`).
+export interface AccountMissingOpeningBalance {
+  id: string;
+  householdId: string;
+  balanceCents: number;
+}
+
 @Injectable()
 export class AccountsService {
   private readonly logger = new Logger(AccountsService.name);
@@ -23,11 +50,15 @@ export class AccountsService {
     householdId: string,
     dto: CreateAccountDto,
   ): Promise<AccountDocument> {
+    const openingBalanceCents = dto.balanceCents ?? 0;
     const account = new this.accountModel({
       householdId: new Types.ObjectId(householdId),
       name: dto.name,
       type: dto.type,
-      balanceCents: dto.balanceCents ?? 0,
+      balanceCents: openingBalanceCents,
+      // The opening balance is the immutable anchor for balance reconciliation
+      // (VEG-478): at create there is no ledger, so it equals the cached balance.
+      openingBalanceCents,
     });
     const saved = await account.save();
     this.logger.log(
@@ -134,6 +165,113 @@ export class AccountsService {
         'applyBalanceDelta matched no account; cached balance is now drifted',
       );
     }
+  }
+
+  /**
+   * Project the accounts balance reconciliation (VEG-478) needs. Scoped to one
+   * household when `householdId` is given (the household-scoped ops run),
+   * otherwise every account across every household (the weekly sweep). Archived
+   * accounts are included — they still carry a ledger and a cached balance that
+   * can drift, so they must be reconciled. Lean read: this is a bulk scan.
+   */
+  async findForReconcile(householdId?: string): Promise<AccountBalanceView[]> {
+    const filter: Record<string, unknown> = {};
+    if (householdId) {
+      filter.householdId = new Types.ObjectId(householdId);
+    }
+    const docs = await this.accountModel
+      .find(filter)
+      .select('_id householdId name balanceCents openingBalanceCents')
+      .lean()
+      .exec();
+    return docs.map((doc) => ({
+      id: doc._id.toString(),
+      householdId: (doc.householdId as unknown as Types.ObjectId).toString(),
+      name: doc.name,
+      balanceCents: doc.balanceCents,
+      openingBalanceCents: doc.openingBalanceCents,
+    }));
+  }
+
+  /**
+   * Optimistic compare-and-set of an account's cached balance, scoped to the
+   * household. Writes `newCents` only if the stored balance still equals
+   * `expectedCents` (the value reconciliation derived its correction against);
+   * returns whether the write landed. This is how reconciliation corrects drift
+   * without a multi-document transaction (which this codebase deliberately
+   * avoids): if a legitimate ledger write raced in after the balance was read,
+   * the CAS misses and the caller defers the account to the next run rather than
+   * clobbering that write. Integer cents only — a non-integer target is an
+   * upstream bug, so throw loudly rather than persist a corrupt cache.
+   */
+  async compareAndSetBalance(
+    householdId: string,
+    accountId: string,
+    expectedCents: number,
+    newCents: number,
+  ): Promise<boolean> {
+    if (!Number.isInteger(newCents)) {
+      throw new Error(
+        `Refusing to set non-integer balance ${newCents} on account ${accountId}`,
+      );
+    }
+    const result = await this.accountModel
+      .updateOne(
+        {
+          _id: new Types.ObjectId(accountId),
+          householdId: new Types.ObjectId(householdId),
+          balanceCents: expectedCents,
+        } as Record<string, unknown>,
+        { $set: { balanceCents: newCents } },
+      )
+      .exec();
+    return result.matchedCount === 1;
+  }
+
+  /**
+   * The legacy accounts that predate the `openingBalanceCents` anchor (VEG-478)
+   * and still need it stamped. Queried by `$exists: false` against raw
+   * documents, which the schema's hydration default does not affect. Returns the
+   * inputs the one-time boot backfill derives the anchor from.
+   */
+  async findAccountsMissingOpeningBalance(): Promise<
+    AccountMissingOpeningBalance[]
+  > {
+    const docs = await this.accountModel
+      .find({ openingBalanceCents: { $exists: false } } as Record<
+        string,
+        unknown
+      >)
+      .select('_id householdId balanceCents')
+      .lean()
+      .exec();
+    return docs.map((doc) => ({
+      id: doc._id.toString(),
+      householdId: (doc.householdId as unknown as Types.ObjectId).toString(),
+      balanceCents: doc.balanceCents,
+    }));
+  }
+
+  /**
+   * Stamp the opening-balance anchor on a legacy account, but only if it is
+   * still unset. The `$exists: false` guard in the filter makes concurrent-boot
+   * backfills race-safe (the loser no-ops) and keeps the backfill idempotent —
+   * a re-run matches nothing. Returns whether this call did the stamping.
+   */
+  async setOpeningBalanceIfUnset(
+    accountId: string,
+    valueCents: number,
+  ): Promise<boolean> {
+    const result = await this.accountModel
+      .updateOne(
+        {
+          _id: new Types.ObjectId(accountId),
+          openingBalanceCents: { $exists: false },
+        } as Record<string, unknown>,
+        { $set: { openingBalanceCents: valueCents } },
+      )
+      .exec();
+    return result.modifiedCount === 1;
   }
 
   /**

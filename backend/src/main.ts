@@ -14,6 +14,7 @@ import { UsersService } from './users/users.service';
 import { HouseholdsMigrationService } from './households/households-migration.service';
 import { CategoriesService } from './categories/categories.service';
 import { SubscriptionsFoldInService } from './subscriptions/subscriptions-fold-in.service';
+import { ReconciliationService } from './reconciliation/reconciliation.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -128,6 +129,14 @@ async function bootstrap() {
     //    the recurring collection.
     const foldIn = app.get(SubscriptionsFoldInService);
     await foldIn.foldInSubscriptions();
+
+    // 5. VEG-478: stamp openingBalanceCents = balanceCents − Σ(ledger) on every
+    //    account created before the anchor existed, so balance reconciliation
+    //    can re-derive balances without wiping opening balances. Idempotent
+    //    (queries $exists:false; a re-run stamps none). Runs before traffic so
+    //    the field is populated ahead of any write path or the weekly sweep.
+    const reconciliation = app.get(ReconciliationService);
+    await reconciliation.backfillOpeningBalances();
   } catch (error: unknown) {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
