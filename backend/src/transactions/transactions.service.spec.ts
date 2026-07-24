@@ -438,6 +438,26 @@ describe('TransactionsService', () => {
           categoryId: CAT_ID,
         }),
       ).rejects.toBeInstanceOf(ConflictException);
+      // The rejection genuinely originates at the balance apply, not upstream.
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalled();
+    });
+
+    it('create rejects when the SECOND leg of a transfer conflicts', async () => {
+      // Source leg applies, destination leg's account has vanished → the
+      // second applyBalanceDelta throws and must still propagate.
+      accountsService.applyBalanceDelta
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new ConflictException('destination gone'));
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          accountId: ACC_A,
+          date: '2026-06-17',
+          amountCents: 10000,
+          type: TransactionType.TRANSFER,
+          transferAccountId: ACC_B,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalledTimes(2);
     });
 
     it('update rejects when the balance apply conflicts', async () => {
@@ -448,6 +468,7 @@ describe('TransactionsService', () => {
       await expect(
         service.update(HOUSEHOLD_ID, TXN_ID, { amountCents: 5000 }),
       ).rejects.toBeInstanceOf(ConflictException);
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalled();
     });
 
     it('remove rejects when the balance reversal conflicts', async () => {
@@ -458,6 +479,7 @@ describe('TransactionsService', () => {
       await expect(service.remove(HOUSEHOLD_ID, TXN_ID)).rejects.toBeInstanceOf(
         ConflictException,
       );
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalled();
     });
 
     it('importTransactions rejects when the batch balance apply conflicts', async () => {
@@ -469,6 +491,7 @@ describe('TransactionsService', () => {
           rows: [{ Date: '2026-06-01', Amount: '-42.00' }],
         }),
       ).rejects.toBeInstanceOf(ConflictException);
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalled();
     });
   });
 
