@@ -125,6 +125,26 @@ describe('Accounts (e2e)', () => {
       expect(res.body).toHaveLength(2);
     });
 
+    it('excludes archived accounts when includeArchived=false (raw string, not coerced truthy)', async () => {
+      // The bug this guards (VEG-475): under enableImplicitConversion, "false"
+      // was coerced to boolean true, so ?includeArchived=false wrongly included
+      // archived accounts. checkingId is archived here; only savings must show.
+      const res = await request(app.getHttpServer())
+        .get('/api/accounts?includeArchived=false')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0]._id).toBe(savingsId);
+    });
+
+    it('rejects a non-boolean includeArchived param with 400', async () => {
+      await request(app.getHttpServer())
+        .get('/api/accounts?includeArchived=banana')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+    });
+
     it('restores an archived account via PATCH isArchived=false', async () => {
       await request(app.getHttpServer())
         .patch(`/api/accounts/${checkingId}`)

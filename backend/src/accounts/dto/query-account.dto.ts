@@ -1,6 +1,6 @@
 import { IsBoolean, IsOptional } from 'class-validator';
-import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { TransformBooleanParam } from '../../common/validation/transform-raw-value';
 
 export class QueryAccountDto {
   @ApiPropertyOptional({
@@ -9,9 +9,10 @@ export class QueryAccountDto {
     default: false,
   })
   @IsOptional()
-  // Query params arrive as strings; coerce explicitly so "false" doesn't become
-  // a truthy boolean under implicit conversion.
-  @Transform(({ value }) => value === true || value === 'true')
+  // Reads the raw pre-coercion value: under the global pipe's
+  // enableImplicitConversion, a bare value-based transform sees "false" already
+  // coerced to boolean true, inverting ?includeArchived=false (VEG-475).
+  @TransformBooleanParam
   @IsBoolean()
   includeArchived?: boolean;
 }
