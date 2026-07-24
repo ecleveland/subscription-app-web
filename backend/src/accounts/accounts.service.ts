@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Account, AccountDocument } from './schemas/account.schema';
@@ -137,6 +142,16 @@ export class AccountsService {
    * to the household. Used by the transaction ledger to keep `balanceCents` in
    * sync on every write (create applies the effect, delete reverses it, update
    * reverses-old-then-applies-new). A no-op delta is skipped. Integer cents only.
+   *
+   * Throws ConflictException when the `$inc` matches no account (VEG-479). The
+   * caller has already validated the account belongs to the household, so a zero
+   * match means it vanished underneath us (a concurrent hard delete — accounts
+   * are normally archived, not deleted, so this is a should-never-happen guard).
+   * The `$inc` silently no-ops, so returning normally would drop the delta and
+   * report a false success — the worst failure category for a ledger. Throwing
+   * turns silent money drift into a loud, failing signal: user-facing writes
+   * surface a 409 instead of a wrong balance, and the recurring scheduler demotes
+   * the occurrence to `failed` (and does not advance past it).
    */
   async applyBalanceDelta(
     householdId: string,
@@ -155,14 +170,13 @@ export class AccountsService {
         { $inc: { balanceCents: deltaCents } },
       )
       .exec();
-    // The caller has already validated the account belongs to the household, so
-    // a zero match means the account vanished underneath us (concurrent hard
-    // delete). The $inc silently no-ops, leaving the cached balance drifted —
-    // surface it loudly rather than letting it pass unnoticed.
     if (result.matchedCount === 0) {
       this.logger.error(
         { householdId, accountId, deltaCents },
-        'applyBalanceDelta matched no account; cached balance is now drifted',
+        'applyBalanceDelta matched no account; cached balance would drift',
+      );
+      throw new ConflictException(
+        'Account was modified concurrently and no longer exists; the operation was not applied',
       );
     }
   }

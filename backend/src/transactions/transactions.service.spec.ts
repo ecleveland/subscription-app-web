@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { TransactionsService } from './transactions.service';
@@ -408,6 +413,62 @@ describe('TransactionsService', () => {
         ACC_B,
         -10000,
       );
+    });
+  });
+
+  // VEG-479: applyBalanceDelta now throws (ConflictException) when the account
+  // vanished mid-write. Each user-facing caller must PROPAGATE that — surfacing
+  // a failure — rather than swallow it and report a false success. (The
+  // scheduler path is covered from the scheduler's side in
+  // recurring.service.spec.ts, where the run demotes the occurrence to `failed`.)
+  describe('propagates a balance-apply conflict (VEG-479)', () => {
+    const conflict = () =>
+      accountsService.applyBalanceDelta.mockRejectedValue(
+        new ConflictException('account gone'),
+      );
+
+    it('create rejects when the balance apply conflicts', async () => {
+      conflict();
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          accountId: ACC_A,
+          date: '2026-06-17',
+          amountCents: 4200,
+          type: TransactionType.EXPENSE,
+          categoryId: CAT_ID,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('update rejects when the balance apply conflicts', async () => {
+      mockModel.findById.mockReturnValue(
+        createChainable(txnDoc({ amountCents: 4200 })),
+      );
+      conflict();
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, { amountCents: 5000 }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('remove rejects when the balance reversal conflicts', async () => {
+      mockModel.findById.mockReturnValue(
+        createChainable(txnDoc({ amountCents: 4200 })),
+      );
+      conflict();
+      await expect(service.remove(HOUSEHOLD_ID, TXN_ID)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('importTransactions rejects when the batch balance apply conflicts', async () => {
+      conflict();
+      await expect(
+        service.importTransactions(HOUSEHOLD_ID, MEMBER_ID, {
+          accountId: ACC_A,
+          mapping: { date: 'Date', amount: 'Amount' },
+          rows: [{ Date: '2026-06-01', Amount: '-42.00' }],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
