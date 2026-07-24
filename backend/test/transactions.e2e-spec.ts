@@ -352,15 +352,62 @@ describe('Transactions (e2e)', () => {
       }
     });
 
-    it('filters by cleared=false without treating the string as truthy', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/api/transactions?cleared=false')
+    it('filters by cleared, reading the raw string so "false" is not coerced truthy', async () => {
+      // Seed one cleared and one uncleared transaction on a fresh account, then
+      // scope each query to it so the assertions are exact (not vacuous). The
+      // bug this guards (VEG-475): under enableImplicitConversion, "false" was
+      // coerced to boolean true, so ?cleared=false returned cleared rows.
+      const acct = await createAccount(app, tokenA, {
+        name: 'Cleared Filter',
+        type: 'checking',
+      });
+      await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: acct,
+          type: 'expense',
+          amountCents: 100,
+          date: '2026-06-20',
+          categoryId: expenseCatA,
+          cleared: true,
+        })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: acct,
+          type: 'expense',
+          amountCents: 200,
+          date: '2026-06-20',
+          categoryId: expenseCatA,
+          cleared: false,
+        })
+        .expect(201);
+
+      const uncleared = await request(app.getHttpServer())
+        .get(`/api/transactions?accountId=${acct}&cleared=false`)
         .set('Authorization', `Bearer ${tokenA}`)
         .expect(200);
+      expect(uncleared.body.data).toHaveLength(1);
+      expect(uncleared.body.data[0].cleared).toBe(false);
+      expect(uncleared.body.data[0].amountCents).toBe(200);
 
-      expect(
-        res.body.data.every((t: { cleared: boolean }) => t.cleared === false),
-      ).toBe(true);
+      const cleared = await request(app.getHttpServer())
+        .get(`/api/transactions?accountId=${acct}&cleared=true`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(cleared.body.data).toHaveLength(1);
+      expect(cleared.body.data[0].cleared).toBe(true);
+      expect(cleared.body.data[0].amountCents).toBe(100);
+    });
+
+    it('rejects a non-boolean cleared param with 400', async () => {
+      await request(app.getHttpServer())
+        .get('/api/transactions?cleared=banana')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
     });
 
     it('filters by recurringId to a schedule’s materialized transactions', async () => {

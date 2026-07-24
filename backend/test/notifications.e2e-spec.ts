@@ -7,6 +7,10 @@ import { createTestApp, closeTestApp } from './helpers/test-app';
 import { userIdFromToken } from './helpers/jwt';
 import { NotificationsCronService } from '../src/notifications/notifications-cron.service';
 import { NotificationsService } from '../src/notifications/notifications.service';
+import {
+  Notification,
+  NotificationType,
+} from '../src/notifications/schemas/notification.schema';
 import { HouseholdsService } from '../src/households/households.service';
 import {
   HouseholdMember,
@@ -21,10 +25,14 @@ describe('Notifications (e2e)', () => {
   let tokenA: string;
   let tokenB: string;
   let cronService: NotificationsCronService;
+  let notificationModel: Model<Notification>;
 
   beforeAll(async () => {
     app = await createTestApp();
     cronService = app.get(NotificationsCronService);
+    notificationModel = app.get<Model<Notification>>(
+      getModelToken(Notification.name),
+    );
 
     const resA = await request(app.getHttpServer())
       .post('/api/auth/register')
@@ -179,6 +187,66 @@ describe('Notifications (e2e)', () => {
           .set('Authorization', `Bearer ${tokenB}`)
           .expect(404);
       }
+    });
+  });
+
+  describe('read filter (boolean query-param coercion, VEG-475)', () => {
+    // Seed a read and an unread notification directly into user B's household
+    // (kept clean by the isolation tests above). The bug this guards: under
+    // enableImplicitConversion "false" coerced to boolean true, so ?read=false
+    // returned READ notifications instead of unread.
+    beforeAll(async () => {
+      const membershipB = await app
+        .get(HouseholdsService)
+        .findMembershipByUser(userIdFromToken(tokenB));
+      const householdIdB = membershipB!.householdId as Types.ObjectId;
+      await notificationModel.create([
+        {
+          householdId: householdIdB,
+          type: NotificationType.RENEWAL_REMINDER,
+          title: 'Read one',
+          message: 'already read',
+          billingDate: new Date('2026-06-01'),
+          read: true,
+        },
+        {
+          householdId: householdIdB,
+          type: NotificationType.RENEWAL_REMINDER,
+          title: 'Unread one',
+          message: 'still unread',
+          billingDate: new Date('2026-06-02'),
+          read: false,
+        },
+      ]);
+    });
+
+    it('?read=false returns only unread (raw string, not coerced truthy)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/notifications?read=false')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].read).toBe(false);
+      expect(res.body.data[0].title).toBe('Unread one');
+    });
+
+    it('?read=true returns only read', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/notifications?read=true')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(200);
+
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.data[0].read).toBe(true);
+      expect(res.body.data[0].title).toBe('Read one');
+    });
+
+    it('rejects a non-boolean read param with 400', async () => {
+      await request(app.getHttpServer())
+        .get('/api/notifications?read=banana')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(400);
     });
   });
 

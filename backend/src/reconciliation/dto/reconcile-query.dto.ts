@@ -1,6 +1,6 @@
 import { IsBoolean, IsMongoId, IsOptional } from 'class-validator';
-import { Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { TransformBooleanParam } from '../../common/validation/transform-raw-value';
 
 export class ReconcileQueryDto {
   @ApiPropertyOptional({
@@ -19,9 +19,11 @@ export class ReconcileQueryDto {
     default: false,
   })
   @IsOptional()
-  // Query params arrive as strings; coerce explicitly so "false" doesn't become
-  // a truthy boolean under implicit conversion (cf. VEG-475).
-  @Transform(({ value }) => value === true || value === 'true')
+  // Reads the raw pre-coercion value: under the global pipe's
+  // enableImplicitConversion, a bare value-based transform sees "false" already
+  // coerced to boolean true, which would turn ?dryRun=false into a dry run and
+  // silently skip real corrections (VEG-475).
+  @TransformBooleanParam
   @IsBoolean()
   dryRun?: boolean;
 }

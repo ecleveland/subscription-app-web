@@ -281,6 +281,36 @@ describe('Balance reconciliation (e2e)', () => {
         .expect(200);
       expect(await getBalance(app, userToken, checking)).toBe(CHECKING_TRUE);
     });
+
+    it('dryRun=false performs a real correction (raw string, not coerced truthy)', async () => {
+      // VEG-475: under enableImplicitConversion, "false" coerced to boolean
+      // true, so ?dryRun=false would wrongly run dry and skip the correction.
+      await accountModel
+        .updateOne(
+          { _id: new Types.ObjectId(checking) } as Record<string, unknown>,
+          { $inc: { balanceCents: -400 } },
+        )
+        .exec();
+
+      const res = await request(app.getHttpServer())
+        .post('/api/admin/reconciliation/balances')
+        .query({ householdId, dryRun: 'false' })
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(res.body.dryRun).toBe(false);
+      expect(res.body.corrected).toBe(1);
+      // The correction was actually written.
+      expect(await getBalance(app, userToken, checking)).toBe(CHECKING_TRUE);
+    });
+
+    it('rejects a non-boolean dryRun param with 400', async () => {
+      await request(app.getHttpServer())
+        .post('/api/admin/reconciliation/balances')
+        .query({ householdId, dryRun: 'banana' })
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(400);
+    });
   });
 
   describe('household scoping', () => {
