@@ -8,6 +8,7 @@ import { userIdFromToken } from './helpers/jwt';
 import { HouseholdsService } from '../src/households/households.service';
 import { Category } from '../src/categories/schemas/category.schema';
 import { Transaction } from '../src/transactions/schemas/transaction.schema';
+import { Account } from '../src/accounts/schemas/account.schema';
 
 /** Decode the `sub` (userId) claim from a JWT access token. */
 async function createAccount(
@@ -41,6 +42,7 @@ describe('Transactions (e2e)', () => {
   let tokenB: string;
   let categoryModel: Model<Category>;
   let transactionModel: Model<Transaction>;
+  let accountModel: Model<Account>;
 
   // Household A fixtures.
   let householdIdA: string;
@@ -67,6 +69,7 @@ describe('Transactions (e2e)', () => {
   beforeAll(async () => {
     app = await createTestApp();
     categoryModel = app.get<Model<Category>>(getModelToken(Category.name));
+    accountModel = app.get<Model<Account>>(getModelToken(Account.name));
     transactionModel = app.get<Model<Transaction>>(
       getModelToken(Transaction.name),
     );
@@ -757,6 +760,62 @@ describe('Transactions (e2e)', () => {
   describe('auth', () => {
     it('returns 401 without a token', async () => {
       await request(app.getHttpServer()).get('/api/transactions').expect(401);
+    });
+  });
+
+  // VEG-479: if the account is hard-deleted between a write's validation and its
+  // balance $inc, applyBalanceDelta throws (ConflictException) instead of
+  // dropping the delta and reporting a false success. Two paths reverse an
+  // account WITHOUT re-validating it, so hard-deleting the account doc makes the
+  // race deterministic — the reversal $inc matches nothing → 409:
+  //   - DELETE reverses the deleted transaction's effect on its account;
+  //   - PATCH that MOVES the transaction to another account reverses the OLD
+  //     account (validateReferences only checks the new one).
+  // create, import, and a same-account amount PATCH all re-validate the account
+  // first (a missing account 400s before the balance write), so their
+  // matchedCount===0 race isn't reproducible over serial HTTP; that propagation
+  // is covered at the unit layer in transactions.service.spec.
+  describe('balance-apply conflict surfaces as 409 (VEG-479)', () => {
+    async function seedTxnThenDeleteAccount(): Promise<string> {
+      const acct = await createAccount(app, tokenA, {
+        name: 'Vanishing',
+        type: 'checking',
+      });
+      const txnRes = await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: acct,
+          type: 'expense',
+          amountCents: 500,
+          date: '2027-01-01',
+          categoryId: expenseCatA,
+        })
+        .expect(201);
+      // Simulate a concurrent hard delete of the account.
+      await accountModel
+        .deleteOne({ _id: new Types.ObjectId(acct) } as Record<string, unknown>)
+        .exec();
+      return txnRes.body._id as string;
+    }
+
+    it('DELETE returns 409 when the account was removed mid-write', async () => {
+      const txnId = await seedTxnThenDeleteAccount();
+      await request(app.getHttpServer())
+        .delete(`/api/transactions/${txnId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(409);
+    });
+
+    it('PATCH moving the transaction to another account returns 409 when the old account was removed', async () => {
+      const txnId = await seedTxnThenDeleteAccount();
+      // savingsA is a valid account, so validateReferences passes on the NEW
+      // account; the reversal of the deleted OLD account is what 409s.
+      await request(app.getHttpServer())
+        .patch(`/api/transactions/${txnId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ accountId: savingsA })
+        .expect(409);
     });
   });
 });

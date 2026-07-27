@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, Logger } from '@nestjs/common';
+import { NotFoundException, ConflictException, Logger } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { AccountsService } from './accounts.service';
@@ -227,7 +227,9 @@ describe('AccountsService', () => {
     beforeEach(() => {
       mockAccountModel.updateOne = jest
         .fn()
-        .mockReturnValue(createChainable({ modifiedCount: 1 }));
+        .mockReturnValue(
+          createChainable({ matchedCount: 1, modifiedCount: 1 }),
+        );
     });
 
     it('atomically $inc the household-scoped account by the delta', async () => {
@@ -244,7 +246,7 @@ describe('AccountsService', () => {
       expect(mockAccountModel.updateOne).not.toHaveBeenCalled();
     });
 
-    it('logs an error when no account matched (drift)', async () => {
+    it('throws ConflictException (and logs) when no account matched (VEG-479)', async () => {
       const errorSpy = jest
         .spyOn(Logger.prototype, 'error')
         .mockImplementation(() => undefined);
@@ -252,8 +254,11 @@ describe('AccountsService', () => {
         createChainable({ matchedCount: 0 }),
       );
 
-      await service.applyBalanceDelta(HOUSEHOLD_ID, ACCOUNT_ID, -4200);
-
+      // Throwing turns a dropped delta (silent money drift) into a loud failure
+      // instead of a false success — the worst failure category for a ledger.
+      await expect(
+        service.applyBalanceDelta(HOUSEHOLD_ID, ACCOUNT_ID, -4200),
+      ).rejects.toBeInstanceOf(ConflictException);
       expect(errorSpy).toHaveBeenCalledTimes(1);
     });
   });
