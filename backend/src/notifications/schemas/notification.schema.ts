@@ -44,7 +44,7 @@ export class Notification {
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
 
-// Idempotency key for the reminder cron: one reminder per schedule per
+// Idempotency key for the reminder cron. One reminder per schedule per
 // billing date, scoped to the owning household.
 NotificationSchema.index(
   { householdId: 1, subscriptionId: 1, billingDate: 1 },

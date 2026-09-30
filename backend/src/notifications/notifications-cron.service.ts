@@ -57,7 +57,7 @@ export class NotificationsCronService {
 
     this.logger.log('Running reminder cron job');
 
-    // Day granularity: anything due today was already posted by the midnight
+    // Day granularity. Anything due today was already posted by the midnight
     // materializer, so the scan starts at tomorrow's UTC midnight.
     const startOfTomorrowUtc = new Date(utcDay(now) + DAY_MS);
     const maxWindow = new Date(
