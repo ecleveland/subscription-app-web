@@ -105,7 +105,12 @@ export default function NotificationBell() {
       }
     }
     setOpen(false);
-    router.push(`/subscriptions/${n.subscriptionId}/edit`);
+    // A bill reminder's subscriptionId is a recurring schedule id, not a subscription id.
+    router.push(
+      n.type === 'bill_reminder'
+        ? '/recurring'
+        : `/subscriptions/${n.subscriptionId}/edit`,
+    );
   }
 
   async function handleMarkAllRead() {

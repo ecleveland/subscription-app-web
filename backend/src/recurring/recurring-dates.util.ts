@@ -3,6 +3,7 @@
 // cadence-independent UTC helpers live in ../common/utc-date.util.
 
 import { RecurringCadence } from './schemas/recurring-transaction.schema';
+import { utcDay } from '../common/utc-date.util';
 
 /**
  * Step a date forward by exactly ONE period, preserving time-of-day.
@@ -50,4 +51,31 @@ export function addCadence(
   ).getUTCDate();
   result.setUTCDate(Math.min(anchor, daysInTargetMonth));
   return result;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whole UTC calendar days from `now`'s day to `nextDate`'s day. Time-of-day on
+ * either side is ignored, so a bill dated late tonight is still 0 days away.
+ * Negative for a date already past.
+ */
+export function daysUntil(nextDate: Date, now: Date): number {
+  return (utcDay(nextDate) - utcDay(now)) / DAY_MS;
+}
+
+/**
+ * Whether today falls in a schedule's reminder window: from
+ * `reminderDaysBefore` days out up to, but not including, the due day. The
+ * due day itself is excluded because the midnight materializer has already
+ * posted that occurrence, so a "due soon" nudge would arrive after the fact.
+ */
+export function isInReminderWindow(
+  nextDate: Date,
+  reminderDaysBefore: number,
+  now: Date,
+): boolean {
+  if (reminderDaysBefore <= 0) return false;
+  const days = daysUntil(nextDate, now);
+  return days > 0 && days <= reminderDaysBefore;
 }

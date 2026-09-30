@@ -8,6 +8,27 @@ import {
 } from './schemas/notification.schema';
 import { QueryNotificationDto } from './dto/query-notification.dto';
 
+const usd = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+});
+
+// Integer cents to "$1,234.56".
+function formatMoney(amountCents: number): string {
+  return usd.format(amountCents / 100);
+}
+
+// Schedule dates are stored at UTC midnight, so format in UTC or a server west
+// of Greenwich would print the day before.
+function formatDueDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -130,6 +151,47 @@ export class NotificationsService {
       this.logger.log(
         { householdId, subscriptionId, billingDate },
         'Renewal reminder created',
+      );
+    }
+  }
+
+  /**
+   * Upsert a "due soon" reminder for a non-subscription schedule (bill or
+   * income, VEG-468). Shares the { householdId, subscriptionId, billingDate }
+   * unique key with renewal reminders, so each schedule gets at most one
+   * reminder per occurrence whichever path wrote it.
+   */
+  async createBillReminder(
+    householdId: string,
+    recurringId: string,
+    payee: string,
+    amountCents: number,
+    billingDate: Date,
+    daysUntilDue: number,
+  ): Promise<void> {
+    const result = await this.notificationModel
+      .updateOne(
+        {
+          householdId: new Types.ObjectId(householdId),
+          subscriptionId: new Types.ObjectId(recurringId),
+          billingDate,
+        } as Record<string, unknown>,
+        {
+          $setOnInsert: {
+            type: NotificationType.BILL_REMINDER,
+            title: `${payee} due in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`,
+            message: `${payee} — ${formatMoney(amountCents)} due on ${formatDueDate(billingDate)}`,
+            read: false,
+          },
+        },
+        { upsert: true },
+      )
+      .exec();
+
+    if (result.upsertedCount > 0) {
+      this.logger.log(
+        { householdId, recurringId, billingDate },
+        'Bill reminder created',
       );
     }
   }

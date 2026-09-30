@@ -18,6 +18,8 @@ import {
   HouseholdRole,
   MembershipStatus,
 } from '../src/households/schemas/household-member.schema';
+import { Category } from '../src/categories/schemas/category.schema';
+import { CronLock } from '../src/common/cron-lock/cron-lock.schema';
 
 /** Decode the `sub` (userId) claim from a JWT access token. */
 describe('Notifications (e2e)', () => {
@@ -71,7 +73,7 @@ describe('Notifications (e2e)', () => {
     });
 
     it('should create notifications when cron runs', async () => {
-      await cronService.handleRenewalReminders();
+      await cronService.handleReminders();
 
       const res = await request(app.getHttpServer())
         .get('/api/notifications')
@@ -126,7 +128,7 @@ describe('Notifications (e2e)', () => {
           reminderDaysBefore: 5,
         });
 
-      await cronService.handleRenewalReminders();
+      await cronService.handleReminders();
 
       await request(app.getHttpServer())
         .post('/api/notifications/mark-all-read')
@@ -272,7 +274,7 @@ describe('Notifications (e2e)', () => {
   describe('Duplicate prevention', () => {
     it('should not create duplicate notifications on repeated cron runs', async () => {
       // Run cron first to ensure all pending notifications are created
-      await cronService.handleRenewalReminders();
+      await cronService.handleReminders();
 
       const before = await request(app.getHttpServer())
         .get('/api/notifications')
@@ -280,7 +282,7 @@ describe('Notifications (e2e)', () => {
         .expect(200);
 
       // Run cron again — should not create duplicates
-      await cronService.handleRenewalReminders();
+      await cronService.handleReminders();
 
       const after = await request(app.getHttpServer())
         .get('/api/notifications')
@@ -359,6 +361,143 @@ describe('Notifications (e2e)', () => {
       expect(outsider.body.data.map((n: any) => n.title)).not.toContain(
         'Household Reminder Sub renewing soon',
       );
+    });
+  });
+  describe('Bill reminders (VEG-468)', () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const plusDays = (n: number) =>
+      new Date(Date.now() + n * DAY_MS).toISOString().slice(0, 10);
+    const formatDue = (isoDate: string) =>
+      new Date(isoDate).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'UTC',
+      });
+
+    let cronLockModel: Model<CronLock>;
+
+    async function billRemindersFor(token: string): Promise<any[]> {
+      const res = await request(app.getHttpServer())
+        .get('/api/notifications')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      return res.body.data.filter(
+        (n: any) => n.type === NotificationType.BILL_REMINDER,
+      );
+    }
+
+    // The cron takes a once-per-UTC-day lock, and earlier tests in this file
+    // already took today's. Clear it so the real cron path runs each time.
+    async function runCron(): Promise<void> {
+      await cronLockModel.deleteMany({}).exec();
+      await cronService.handleReminders();
+    }
+
+    beforeAll(async () => {
+      cronLockModel = app.get<Model<CronLock>>(getModelToken(CronLock.name));
+      const categoryModel = app.get<Model<Category>>(
+        getModelToken(Category.name),
+      );
+      const membershipA = await app
+        .get(HouseholdsService)
+        .findMembershipByUser(userIdFromToken(tokenA));
+      const householdIdA = (
+        membershipA!.householdId as { toString(): string }
+      ).toString();
+      const seeded = async (isIncome: boolean) => {
+        const cat = await categoryModel
+          .findOne({ householdId: householdIdA, isIncome } as Record<
+            string,
+            unknown
+          >)
+          .exec();
+        return (cat!._id as { toString(): string }).toString();
+      };
+      const expenseCat = await seeded(false);
+      const incomeCat = await seeded(true);
+
+      const accountRes = await request(app.getHttpServer())
+        .post('/api/accounts')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Checking', type: 'checking' })
+        .expect(201);
+      const accountId = accountRes.body._id;
+
+      const schedules = [
+        {
+          categoryId: expenseCat,
+          type: 'expense',
+          amountCents: 12345,
+          payee: 'Electric Co',
+          nextDate: plusDays(2),
+          reminderDaysBefore: 3,
+        },
+        {
+          categoryId: incomeCat,
+          type: 'income',
+          amountCents: 250000,
+          payee: 'Paycheck',
+          nextDate: plusDays(1),
+          reminderDaysBefore: 2,
+        },
+        {
+          categoryId: expenseCat,
+          type: 'expense',
+          amountCents: 100000,
+          payee: 'Far Away Rent',
+          nextDate: plusDays(20),
+          reminderDaysBefore: 3,
+        },
+      ];
+      for (const schedule of schedules) {
+        await request(app.getHttpServer())
+          .post('/api/recurring')
+          .set('Authorization', `Bearer ${tokenA}`)
+          .send({ accountId, cadence: 'monthly', ...schedule })
+          .expect(201);
+      }
+
+      await runCron();
+    });
+
+    it('creates exactly one reminder per in-window schedule, bills and income alike', async () => {
+      const reminders = await billRemindersFor(tokenA);
+
+      const electric = reminders.filter((n) => n.title.startsWith('Electric'));
+      expect(electric).toHaveLength(1);
+      expect(electric[0].title).toBe('Electric Co due in 2 days');
+      expect(electric[0].message).toBe(
+        `Electric Co \u2014 $123.45 due on ${formatDue(plusDays(2))}`,
+      );
+
+      const paycheck = reminders.filter((n) => n.title.startsWith('Paycheck'));
+      expect(paycheck).toHaveLength(1);
+      expect(paycheck[0].title).toBe('Paycheck due in 1 day');
+      expect(paycheck[0].message).toBe(
+        `Paycheck \u2014 $2,500.00 due on ${formatDue(plusDays(1))}`,
+      );
+    });
+
+    it('does not remind for a schedule outside its window', async () => {
+      const reminders = await billRemindersFor(tokenA);
+      expect(reminders.some((n) => n.title.startsWith('Far Away Rent'))).toBe(
+        false,
+      );
+    });
+
+    it('does not duplicate on a second cron run', async () => {
+      const before = await billRemindersFor(tokenA);
+      expect(before).toHaveLength(2);
+
+      await runCron();
+
+      const after = await billRemindersFor(tokenA);
+      expect(after).toHaveLength(before.length);
+    });
+
+    it('is household-scoped: another household sees none', async () => {
+      expect(await billRemindersFor(tokenB)).toHaveLength(0);
     });
   });
 });

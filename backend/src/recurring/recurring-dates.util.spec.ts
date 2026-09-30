@@ -1,4 +1,8 @@
-import { addCadence } from './recurring-dates.util';
+import {
+  addCadence,
+  daysUntil,
+  isInReminderWindow,
+} from './recurring-dates.util';
 import { RecurringCadence } from './schemas/recurring-transaction.schema';
 
 describe('addCadence', () => {
@@ -138,5 +142,88 @@ describe('addCadence', () => {
     const input = new Date('2026-08-01T00:00:00Z');
     addCadence(input, RecurringCadence.MONTHLY);
     expect(input.toISOString()).toBe('2026-08-01T00:00:00.000Z');
+  });
+});
+
+describe('daysUntil', () => {
+  it('counts whole UTC calendar days, ignoring time-of-day', () => {
+    expect(
+      daysUntil(
+        new Date('2026-10-03T00:00:00Z'),
+        new Date('2026-09-30T23:59:00Z'),
+      ),
+    ).toBe(3);
+  });
+
+  it('is 0 for the same UTC day', () => {
+    expect(
+      daysUntil(
+        new Date('2026-10-03T23:59:00Z'),
+        new Date('2026-10-03T00:01:00Z'),
+      ),
+    ).toBe(0);
+  });
+
+  it('is negative for a past date', () => {
+    expect(
+      daysUntil(
+        new Date('2026-09-28T00:00:00Z'),
+        new Date('2026-09-30T09:00:00Z'),
+      ),
+    ).toBe(-2);
+  });
+});
+
+describe('isInReminderWindow', () => {
+  const due = new Date('2026-10-10T00:00:00Z');
+
+  it('is true the day before the due date', () => {
+    expect(isInReminderWindow(due, 3, new Date('2026-10-09T09:00:00Z'))).toBe(
+      true,
+    );
+  });
+
+  it('is true on the first day of the window', () => {
+    expect(isInReminderWindow(due, 3, new Date('2026-10-07T09:00:00Z'))).toBe(
+      true,
+    );
+  });
+
+  it('is false on the due date itself (the materializer handles it)', () => {
+    expect(isInReminderWindow(due, 3, new Date('2026-10-10T09:00:00Z'))).toBe(
+      false,
+    );
+  });
+
+  it('is false one day before the window opens', () => {
+    expect(isInReminderWindow(due, 3, new Date('2026-10-06T09:00:00Z'))).toBe(
+      false,
+    );
+  });
+
+  it('is false when reminderDaysBefore is 0, even the day before', () => {
+    expect(isInReminderWindow(due, 0, new Date('2026-10-09T09:00:00Z'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores time-of-day: 23:59Z due vs 00:01Z now on the same day is still due today', () => {
+    expect(
+      isInReminderWindow(
+        new Date('2026-10-10T23:59:00Z'),
+        3,
+        new Date('2026-10-10T00:01:00Z'),
+      ),
+    ).toBe(false);
+  });
+
+  it('spans a month boundary', () => {
+    expect(
+      isInReminderWindow(
+        new Date('2026-04-02T00:00:00Z'),
+        3,
+        new Date('2026-03-31T09:00:00Z'),
+      ),
+    ).toBe(true);
   });
 });

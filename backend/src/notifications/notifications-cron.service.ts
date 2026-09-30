@@ -8,17 +8,29 @@ import {
 } from '../recurring/schemas/recurring-transaction.schema';
 import { NotificationsService } from './notifications.service';
 import { CronLockService } from '../common/cron-lock/cron-lock.service';
+import { utcDay } from '../common/utc-date.util';
+import {
+  daysUntil,
+  isInReminderWindow,
+} from '../recurring/recurring-dates.util';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Upper bound on reminderDaysBefore we bother scanning for.
+const MAX_WINDOW_DAYS = 30;
 
 @Injectable()
 export class NotificationsCronService {
   private readonly logger = new Logger(NotificationsCronService.name);
+  // Kept from when this cron only sent subscription renewals, so a deploy
+  // mid-day still sees the lock the previous build took.
   static readonly LOCK_KEY = 'renewal-reminders';
 
-  // Reads the subscription slice of RecurringTransaction (VEG-469). Because the
-  // fold-in preserved each subscription's _id, the Notification dedup key
-  // { householdId, subscriptionId, billingDate } stays byte-stable across the
-  // cutover — no double reminders, no schema change. Reminders for
-  // non-subscription bills are VEG-468 (a wider filter + copy), out of scope here.
+  // The daily reminder pass for every active RecurringTransaction with a
+  // reminder set: subscriptions and bills/income alike (VEG-468). Subscriptions
+  // keep their renewal copy; everything else gets a "due soon" bill reminder.
+  // Because the VEG-469 fold-in preserved each subscription's _id, the
+  // Notification dedup key { householdId, subscriptionId, billingDate } stays
+  // byte-stable across the cutover, so no double reminders and no schema change.
   constructor(
     @InjectModel(RecurringTransaction.name)
     private recurringModel: Model<RecurringTransactionDocument>,
@@ -27,7 +39,7 @@ export class NotificationsCronService {
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
-  async handleRenewalReminders(): Promise<void> {
+  async handleReminders(): Promise<void> {
     const now = new Date();
     const runDate = CronLockService.runDateKey(now);
 
@@ -38,23 +50,26 @@ export class NotificationsCronService {
     );
     if (!acquired) {
       this.logger.log(
-        'Renewal reminder cron already handled by another instance; skipping',
+        'Reminder cron already handled by another instance; skipping',
       );
       return;
     }
 
-    this.logger.log('Running renewal reminder cron job');
+    this.logger.log('Running reminder cron job');
 
-    const maxWindow = new Date(now);
-    maxWindow.setDate(maxWindow.getDate() + 30);
+    // Day granularity: anything due today was already posted by the midnight
+    // materializer, so the scan starts at tomorrow's UTC midnight.
+    const startOfTomorrowUtc = new Date(utcDay(now) + DAY_MS);
+    const maxWindow = new Date(
+      startOfTomorrowUtc.getTime() + MAX_WINDOW_DAYS * DAY_MS,
+    );
 
-    // Stream matching subscriptions rather than loading them all into memory.
+    // Stream matching schedules rather than loading them all into memory.
     const cursor = this.recurringModel
       .find({
         isActive: true,
-        isSubscription: true,
         reminderDaysBefore: { $gt: 0 },
-        nextDate: { $gte: now, $lte: maxWindow },
+        nextDate: { $gte: startOfTomorrowUtc, $lte: maxWindow },
       } as Record<string, unknown>)
       .lean()
       .cursor();
@@ -63,57 +78,66 @@ export class NotificationsCronService {
     let created = 0;
     let failed = 0;
     let skipped = 0;
-    for await (const sub of cursor) {
+    for await (const row of cursor) {
       checked++;
-      const billingDate = new Date(sub.nextDate);
-      const reminderDate = new Date(billingDate);
-      reminderDate.setDate(reminderDate.getDate() - sub.reminderDaysBefore);
+      const billingDate = new Date(row.nextDate);
+      if (!isInReminderWindow(billingDate, row.reminderDaysBefore, now)) {
+        continue;
+      }
 
-      if (reminderDate <= now) {
-        const docId = (
-          sub._id as unknown as { toHexString(): string }
-        ).toHexString();
-        // A subscription should always carry a householdId, but a legacy doc
-        // left un-stamped by the migration (e.g. an owner with no active
-        // membership) could slip through this unscoped query. Skip it rather
-        // than dereferencing undefined, which would abort the whole run.
-        if (!sub.householdId) {
-          skipped++;
-          this.logger.warn(
-            { subscriptionId: docId },
-            'Skipping renewal reminder: subscription has no householdId',
-          );
-          continue;
-        }
-        const householdId = (
-          sub.householdId as unknown as { toHexString(): string }
-        ).toHexString();
-        // Isolate per-subscription failures so one bad write doesn't drop
-        // reminders for everyone after it (the daily lock prevents a retry).
-        try {
+      const docId = (
+        row._id as unknown as { toHexString(): string }
+      ).toHexString();
+      // A schedule should always carry a householdId, but a legacy doc left
+      // un-stamped by the migration (e.g. an owner with no active membership)
+      // could slip through this unscoped query. Skip it rather than
+      // dereferencing undefined, which would abort the whole run.
+      if (!row.householdId) {
+        skipped++;
+        this.logger.warn(
+          { recurringId: docId },
+          'Skipping reminder: schedule has no householdId',
+        );
+        continue;
+      }
+      const householdId = (
+        row.householdId as unknown as { toHexString(): string }
+      ).toHexString();
+      // Isolate per-schedule failures so one bad write doesn't drop reminders
+      // for everyone after it (the daily lock prevents a retry).
+      try {
+        if (row.isSubscription) {
           await this.notificationsService.createRenewalReminder(
             householdId,
             docId,
-            sub.payee,
+            row.payee,
             billingDate,
-            sub.reminderDaysBefore,
+            row.reminderDaysBefore,
           );
-          created++;
-        } catch (error: unknown) {
-          failed++;
-          const message =
-            error instanceof Error ? error.message : String(error);
-          this.logger.error(
-            { subscriptionId: docId, householdId },
-            `Failed to create renewal reminder: ${message}`,
+        } else {
+          await this.notificationsService.createBillReminder(
+            householdId,
+            docId,
+            row.payee,
+            row.amountCents,
+            billingDate,
+            daysUntil(billingDate, now),
           );
         }
+        created++;
+      } catch (error: unknown) {
+        failed++;
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          { recurringId: docId, householdId },
+          `Failed to create reminder: ${message}`,
+        );
       }
     }
 
     this.logger.log(
       { checked, created, failed, skipped },
-      'Renewal reminder cron job complete',
+      'Reminder cron job complete',
     );
   }
 }
