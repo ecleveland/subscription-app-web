@@ -146,7 +146,27 @@ describe('NotificationsCronService', () => {
       subId,
       'Netflix',
       new Date('2026-03-19'),
-      3,
+      2,
+    );
+  });
+
+  it('passes the days left, not the configured lead, as the renewal day count (VEG-572)', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-03-17T10:00:00Z'));
+    mockRecurringModel.find.mockReturnValue(
+      cursorOf([
+        makeSub({ nextDate: new Date('2026-03-18'), reminderDaysBefore: 3 }),
+      ]),
+    );
+
+    await cronService.handleReminders();
+
+    expect(mockNotificationsService.createRenewalReminder).toHaveBeenCalledWith(
+      householdId,
+      subId,
+      'Netflix',
+      new Date('2026-03-18'),
+      1,
     );
   });
 
@@ -244,7 +264,7 @@ describe('NotificationsCronService', () => {
       '507f1f77bcf86cd799439044',
       'Healthy',
       new Date('2026-03-19'),
-      3,
+      2,
     );
   });
   describe('bill and income schedules (VEG-468)', () => {

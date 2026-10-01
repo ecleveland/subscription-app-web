@@ -103,6 +103,7 @@ export class NotificationsCronService {
       const householdId = (
         row.householdId as unknown as { toHexString(): string }
       ).toHexString();
+      const daysUntilDue = daysUntil(billingDate, now);
       // Isolate per-schedule failures so one bad write doesn't drop reminders
       // for everyone after it (the daily lock prevents a retry).
       try {
@@ -112,7 +113,7 @@ export class NotificationsCronService {
             docId,
             row.payee,
             billingDate,
-            row.reminderDaysBefore,
+            daysUntilDue,
           );
         } else {
           await this.notificationsService.createBillReminder(
@@ -121,7 +122,7 @@ export class NotificationsCronService {
             row.payee,
             row.amountCents,
             billingDate,
-            daysUntil(billingDate, now),
+            daysUntilDue,
           );
         }
         created++;

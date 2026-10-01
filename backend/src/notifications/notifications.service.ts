@@ -123,7 +123,7 @@ export class NotificationsService {
     subscriptionId: string,
     subscriptionName: string,
     billingDate: Date,
-    daysBefore: number,
+    daysUntilDue: number,
   ): Promise<void> {
     // Idempotent upsert keyed on the unique { householdId, subscriptionId,
     // billingDate } index. Concurrent or repeated cron runs converge on a
@@ -139,7 +139,7 @@ export class NotificationsService {
           $setOnInsert: {
             type: NotificationType.RENEWAL_REMINDER,
             title: `${subscriptionName} renewing soon`,
-            message: `Your ${subscriptionName} subscription renews in ${daysBefore} day${daysBefore === 1 ? '' : 's'}.`,
+            message: `Your ${subscriptionName} subscription renews in ${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}.`,
             read: false,
           },
         },
