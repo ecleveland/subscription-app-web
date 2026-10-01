@@ -1,13 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { safeRedirectPath } from './lib/safe-redirect';
-
-const PUBLIC_PATHS = [
-  '/login',
-  '/register',
-  '/forgot-password',
-  '/reset-password',
-];
+import { PUBLIC_AUTH_PATHS, safeRedirectPath } from './lib/safe-redirect';
 
 /**
  * Best-effort gate to avoid flashing authed pages. Real authorization is the
@@ -35,7 +28,7 @@ export function middleware(request: NextRequest) {
   const isAuthenticated = hasValidAccessToken(token);
   const { pathname } = request.nextUrl;
 
-  const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+  const isPublicPath = PUBLIC_AUTH_PATHS.some((p) => pathname.startsWith(p));
 
   if (!isAuthenticated && !isPublicPath) {
     // Keep the requested deep link so login can send the user back to it.

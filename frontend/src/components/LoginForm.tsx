@@ -4,6 +4,7 @@ import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { withRedirect } from '@/lib/safe-redirect';
 
 export default function LoginForm() {
   const { login } = useAuth();
@@ -61,7 +62,7 @@ export default function LoginForm() {
       </div>
       <div className="text-right">
         <Link
-          href="/forgot-password"
+          href={withRedirect('/forgot-password', redirectTo)}
           className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
         >
           Forgot password?
@@ -80,11 +81,7 @@ export default function LoginForm() {
       <p className="text-sm text-gray-500 dark:text-gray-400">
         Don&apos;t have an account?{' '}
         <Link
-          href={
-            redirectTo
-              ? `/register?redirect=${encodeURIComponent(redirectTo)}`
-              : '/register'
-          }
+          href={withRedirect('/register', redirectTo)}
           className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
         >
           Create one

@@ -7,6 +7,13 @@ let mockSearchParams = new URLSearchParams();
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  useParams: () => ({}),
 }));
 
 vi.mock('@/lib/auth-context', () => ({
@@ -52,6 +59,18 @@ describe('LoginForm', () => {
     expect(
       screen.getByRole('link', { name: 'Forgot password?' }),
     ).toHaveAttribute('href', '/forgot-password');
+  });
+
+  it('should carry the ?redirect target on the "Forgot password?" link', () => {
+    mockSearchParams = new URLSearchParams('redirect=/household/accept?token=abc');
+    render(<LoginForm />);
+
+    expect(
+      screen.getByRole('link', { name: 'Forgot password?' }),
+    ).toHaveAttribute(
+      'href',
+      '/forgot-password?redirect=%2Fhousehold%2Faccept%3Ftoken%3Dabc',
+    );
   });
 
   it('should call login with username and password on submit', async () => {

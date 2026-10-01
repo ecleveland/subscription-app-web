@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import ForgotPasswordForm from '@/components/ForgotPasswordForm';
 import ThemeToggle from '@/components/ThemeToggle';
 
@@ -11,7 +12,9 @@ export default function ForgotPasswordPage() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
           Forgot Password
         </h1>
-        <ForgotPasswordForm />
+        <Suspense fallback={<p className="text-gray-500 dark:text-gray-400">Loading…</p>}>
+          <ForgotPasswordForm />
+        </Suspense>
       </div>
     </div>
   );

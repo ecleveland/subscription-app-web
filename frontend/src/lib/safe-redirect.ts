@@ -8,6 +8,14 @@
  */
 const BASE = 'http://safe-redirect.invalid';
 
+/** Pages reachable without a session. Middleware matches them by prefix. */
+export const PUBLIC_AUTH_PATHS = [
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+] as const;
+
 export function safeRedirectPath(value: string | null | undefined): string {
   // Bare words like `household` resolve on-origin but aren't valid targets.
   if (!value || value[0] !== '/') return '/';
@@ -22,4 +30,26 @@ export function safeRedirectPath(value: string | null | undefined): string {
   // becomes //evil.com), which the next resolve would treat as a host.
   if (url.pathname.startsWith('//')) return '/';
   return url.pathname + url.search + url.hash;
+}
+
+/** Appends `?redirect=` so links between auth pages keep the deep link. */
+export function withRedirect(
+  path: string,
+  target: string | null | undefined,
+): string {
+  return target ? `${path}?redirect=${encodeURIComponent(target)}` : path;
+}
+
+/**
+ * Login URL for a session that died on `currentPath` (pathname + search). A
+ * protected page becomes the target. An auth page passes through the redirect
+ * it already carries, so a stale token on /login?redirect=X still returns to X.
+ */
+export function loginUrlFor(currentPath: string): string {
+  const url = new URL(currentPath, BASE);
+  const onAuthPage = PUBLIC_AUTH_PATHS.some((p) => url.pathname.startsWith(p));
+  const target = safeRedirectPath(
+    onAuthPage ? url.searchParams.get('redirect') : url.pathname + url.search,
+  );
+  return target === '/' ? '/login' : withRedirect('/login', target);
 }

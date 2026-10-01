@@ -1,3 +1,5 @@
+import { loginUrlFor } from './safe-redirect';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 // Readable cookie mirroring the access token, used only by the Next.js
@@ -24,7 +26,9 @@ export function clearStoredAuth(): void {
 
 function clearAuthStateAndRedirect(): void {
   clearStoredAuth();
-  window.location.href = '/login';
+  window.location.href = loginUrlFor(
+    window.location.pathname + window.location.search,
+  );
 }
 
 async function refreshAccessToken(): Promise<string> {
