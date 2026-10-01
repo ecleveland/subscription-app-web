@@ -185,6 +185,43 @@ describe('NotificationBell', () => {
     expect(mockPush).toHaveBeenCalledWith('/subscriptions/s1/edit');
   });
 
+  it('should mark a bill reminder as read and navigate to /recurring on click', async () => {
+    mockApiFetch
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            _id: 'n2',
+            subscriptionId: 'r1',
+            type: 'bill_reminder',
+            title: 'Rent due soon',
+            message: 'Rent is due in 3 days.',
+            read: false,
+            billingDate: '2026-03-20',
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        unreadCount: 1,
+      })
+      .mockResolvedValueOnce({ read: true }); // mark as read response
+
+    const user = userEvent.setup();
+    render(<NotificationBell />);
+
+    await user.click(screen.getByLabelText('Notifications'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Rent due soon')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText('Rent due soon'));
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/notifications/n2/read', {
+      method: 'PATCH',
+    });
+    expect(mockPush).toHaveBeenCalledWith('/recurring');
+  });
+
   it('should mark all as read', async () => {
     mockApiFetch
       .mockResolvedValueOnce({ count: 2 })

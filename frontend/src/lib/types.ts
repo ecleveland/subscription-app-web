@@ -221,7 +221,7 @@ export interface AppNotification {
   _id: string;
   userId: string;
   subscriptionId: string;
-  type: 'renewal_reminder';
+  type: 'renewal_reminder' | 'bill_reminder';
   title: string;
   message: string;
   read: boolean;

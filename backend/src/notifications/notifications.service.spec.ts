@@ -301,4 +301,100 @@ describe('NotificationsService', () => {
       ).rejects.toThrow('Some other error');
     });
   });
+  describe('createBillReminder', () => {
+    const recurringId = '507f1f77bcf86cd799439055';
+
+    beforeEach(() => {
+      mockModel.updateOne = jest
+        .fn()
+        .mockReturnValue(createChainable({ upsertedCount: 1 }));
+    });
+
+    it('upserts a bill reminder on the { householdId, subscriptionId, billingDate } key', async () => {
+      await service.createBillReminder(
+        householdId,
+        recurringId,
+        'Acme Power',
+        123456,
+        new Date('2026-10-03'),
+        3,
+      );
+
+      const [filter, update, options] = mockModel.updateOne.mock.calls[0];
+      expect(filter.householdId.equals(new Types.ObjectId(householdId))).toBe(
+        true,
+      );
+      expect(
+        filter.subscriptionId.equals(new Types.ObjectId(recurringId)),
+      ).toBe(true);
+      expect(filter.billingDate).toEqual(new Date('2026-10-03'));
+      expect(update).toEqual({
+        $setOnInsert: {
+          type: NotificationType.BILL_REMINDER,
+          title: 'Acme Power due in 3 days',
+          message: 'Acme Power — $1,234.56 due on Oct 3, 2026',
+          read: false,
+        },
+      });
+      expect(options).toEqual({ upsert: true });
+    });
+
+    it('should handle singular day text', async () => {
+      await service.createBillReminder(
+        householdId,
+        recurringId,
+        'Acme Power',
+        1599,
+        new Date('2026-10-03'),
+        1,
+      );
+
+      expect(mockModel.updateOne).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          $setOnInsert: expect.objectContaining({
+            title: 'Acme Power due in 1 day',
+            message: 'Acme Power — $15.99 due on Oct 3, 2026',
+          }),
+        }),
+        { upsert: true },
+      );
+    });
+
+    it('is idempotent: an already-existing reminder is matched, not duplicated', async () => {
+      mockModel.updateOne = jest
+        .fn()
+        .mockReturnValue(createChainable({ upsertedCount: 0 }));
+
+      await expect(
+        service.createBillReminder(
+          householdId,
+          recurringId,
+          'Acme Power',
+          123456,
+          new Date('2026-10-03'),
+          3,
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(mockModel.updateOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('propagates unexpected errors', async () => {
+      mockModel.updateOne = jest.fn().mockReturnValue({
+        exec: jest.fn().mockRejectedValue(new Error('Some other error')),
+      });
+
+      await expect(
+        service.createBillReminder(
+          householdId,
+          recurringId,
+          'Acme Power',
+          123456,
+          new Date('2026-10-03'),
+          3,
+        ),
+      ).rejects.toThrow('Some other error');
+    });
+  });
 });
