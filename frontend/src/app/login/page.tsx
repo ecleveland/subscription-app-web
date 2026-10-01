@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import LoginForm from '@/components/LoginForm';
 import ThemeToggle from '@/components/ThemeToggle';
 
@@ -11,7 +12,9 @@ export default function LoginPage() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
           Subscription Tracker
         </h1>
-        <LoginForm />
+        <Suspense fallback={<p className="text-gray-500 dark:text-gray-400">Loading…</p>}>
+          <LoginForm />
+        </Suspense>
       </div>
     </div>
   );

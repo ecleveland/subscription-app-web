@@ -2,10 +2,12 @@
 
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 
 export default function RegisterForm() {
   const { register } = useAuth();
+  const redirectTo = useSearchParams().get('redirect');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -31,12 +33,15 @@ export default function RegisterForm() {
     setLoading(true);
 
     try {
-      await register({
-        username,
-        password,
-        displayName: displayName || undefined,
-        email: email || undefined,
-      });
+      await register(
+        {
+          username,
+          password,
+          displayName: displayName || undefined,
+          email: email || undefined,
+        },
+        redirectTo,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
@@ -132,7 +137,11 @@ export default function RegisterForm() {
       <p className="text-sm text-gray-500 dark:text-gray-400">
         Already have an account?{' '}
         <Link
-          href="/login"
+          href={
+            redirectTo
+              ? `/login?redirect=${encodeURIComponent(redirectTo)}`
+              : '/login'
+          }
           className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
         >
           Sign in

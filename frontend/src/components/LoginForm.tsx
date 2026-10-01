@@ -2,10 +2,12 @@
 
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 
 export default function LoginForm() {
   const { login } = useAuth();
+  const redirectTo = useSearchParams().get('redirect');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -17,7 +19,7 @@ export default function LoginForm() {
     setLoading(true);
 
     try {
-      await login(username, password);
+      await login(username, password, redirectTo);
     } catch {
       setError('Invalid credentials. Please try again.');
     } finally {
@@ -78,7 +80,11 @@ export default function LoginForm() {
       <p className="text-sm text-gray-500 dark:text-gray-400">
         Don&apos;t have an account?{' '}
         <Link
-          href="/register"
+          href={
+            redirectTo
+              ? `/register?redirect=${encodeURIComponent(redirectTo)}`
+              : '/register'
+          }
           className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
         >
           Create one
