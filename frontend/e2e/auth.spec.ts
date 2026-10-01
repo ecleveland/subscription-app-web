@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { USER } from './helpers';
 
 // These flows must start logged out, so override the project's saved auth state.
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -41,5 +42,21 @@ test.describe('Authentication', () => {
     await logout.click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole('button', { name: 'Logout' })).toHaveCount(0);
+  });
+
+  test('login returns the user to the protected deep link they asked for', async ({
+    page,
+  }) => {
+    await page.goto('/household/accept?token=abc');
+    await expect(page).toHaveURL(/\/login\?redirect=/);
+
+    await page.getByLabel('Username').fill(USER.username);
+    await page.getByLabel('Password').fill(USER.password);
+    await page.getByRole('button', { name: 'Sign In' }).click();
+
+    await expect(page).toHaveURL(/\/household\/accept\?token=abc$/);
+    await expect(
+      page.getByRole('button', { name: 'Accept Invitation' }),
+    ).toBeVisible();
   });
 });

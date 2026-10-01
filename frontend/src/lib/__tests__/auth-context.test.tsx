@@ -264,6 +264,68 @@ describe('useAuth', () => {
     expect(result.current.isAuthenticated).toBe(true);
   });
 
+  function mockAuthFetches() {
+    const mockToken = createMockJwt({
+      sub: '123',
+      username: 'testuser',
+      role: 'user',
+    });
+    (global.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ access_token: mockToken }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ displayName: 'Test User' }),
+      });
+  }
+
+  it('should push the redirect target after login', async () => {
+    mockAuthFetches();
+    const { result } = renderAuthHook();
+    await waitFor(() => expect(result.current.isHydrated).toBe(true));
+
+    await act(async () => {
+      await result.current.login(
+        'testuser',
+        'password',
+        '/household/accept?token=abc',
+      );
+    });
+
+    expect(mockPush).toHaveBeenCalledWith('/household/accept?token=abc');
+  });
+
+  it('should push / when the login redirect target is off-site', async () => {
+    mockAuthFetches();
+    const { result } = renderAuthHook();
+    await waitFor(() => expect(result.current.isHydrated).toBe(true));
+
+    await act(async () => {
+      await result.current.login('testuser', 'password', '//evil.com');
+    });
+
+    expect(mockPush).toHaveBeenCalledWith('/');
+    expect(mockPush).not.toHaveBeenCalledWith('//evil.com');
+  });
+
+  it('should push the redirect target after register', async () => {
+    mockAuthFetches();
+    const { result } = renderAuthHook();
+    await waitFor(() => expect(result.current.isHydrated).toBe(true));
+
+    await act(async () => {
+      await result.current.register(
+        { username: 'newuser', password: 'Password123' },
+        '/household/accept?token=abc',
+      );
+    });
+
+    expect(mockPush).toHaveBeenCalledWith('/household/accept?token=abc');
+  });
+
   it('should throw on failed login', async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: false,

@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch, setAccessToken, clearStoredAuth } from './api';
+import { safeRedirectPath } from './safe-redirect';
 import type { User } from './types';
 
 interface UserInfo {
@@ -27,13 +28,20 @@ interface AuthContextType {
   isHydrated: boolean;
   user: UserInfo | null;
   isAdmin: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (data: {
-    username: string;
-    password: string;
-    displayName?: string;
-    email?: string;
-  }) => Promise<void>;
+  login: (
+    username: string,
+    password: string,
+    redirectTo?: string | null,
+  ) => Promise<void>;
+  register: (
+    data: {
+      username: string;
+      password: string;
+      displayName?: string;
+      email?: string;
+    },
+    redirectTo?: string | null,
+  ) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -111,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const login = useCallback(
-    async (username: string, password: string) => {
+    async (username: string, password: string, redirectTo?: string | null) => {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,18 +137,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const payload = parseJwt(data.access_token);
       await fetchAndStoreProfile(payload);
-      router.push('/');
+      router.push(safeRedirectPath(redirectTo));
     },
     [router, fetchAndStoreProfile],
   );
 
   const register = useCallback(
-    async (data: {
-      username: string;
-      password: string;
-      displayName?: string;
-      email?: string;
-    }) => {
+    async (
+      data: {
+        username: string;
+        password: string;
+        displayName?: string;
+        email?: string;
+      },
+      redirectTo?: string | null,
+    ) => {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -159,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const payload = parseJwt(responseData.access_token);
       await fetchAndStoreProfile(payload);
-      router.push('/');
+      router.push(safeRedirectPath(redirectTo));
     },
     [router, fetchAndStoreProfile],
   );

@@ -3,6 +3,11 @@ import userEvent from '@testing-library/user-event';
 import LoginForm from '../LoginForm';
 
 const mockLogin = vi.fn();
+let mockSearchParams = new URLSearchParams();
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => mockSearchParams,
+}));
 
 vi.mock('@/lib/auth-context', () => ({
   useAuth: () => ({
@@ -19,6 +24,7 @@ vi.mock('@/lib/auth-context', () => ({
 describe('LoginForm', () => {
   afterEach(() => {
     mockLogin.mockClear();
+    mockSearchParams = new URLSearchParams();
   });
 
   it('should render username and password inputs', () => {
@@ -59,7 +65,7 @@ describe('LoginForm', () => {
     await user.click(screen.getByRole('button', { name: 'Sign In' }));
 
     await waitFor(() => {
-      expect(mockLogin).toHaveBeenCalledWith('testuser', 'password123');
+      expect(mockLogin).toHaveBeenCalledWith('testuser', 'password123', null);
     });
   });
 
@@ -95,5 +101,38 @@ describe('LoginForm', () => {
     expect(
       screen.getByRole('button', { name: 'Signing in...' }),
     ).toBeDisabled();
+  });
+
+  it('should pass the ?redirect target to login on submit', async () => {
+    mockSearchParams = new URLSearchParams({
+      redirect: '/household/accept?token=abc',
+    });
+    const user = userEvent.setup();
+    mockLogin.mockResolvedValue(undefined);
+
+    render(<LoginForm />);
+
+    await user.type(screen.getByLabelText('Username'), 'testuser');
+    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.click(screen.getByRole('button', { name: 'Sign In' }));
+
+    await waitFor(() => {
+      expect(mockLogin).toHaveBeenCalledWith(
+        'testuser',
+        'password123',
+        '/household/accept?token=abc',
+      );
+    });
+  });
+
+  it('should carry the ?redirect target on the register link', () => {
+    mockSearchParams = new URLSearchParams({
+      redirect: '/household/accept?token=abc',
+    });
+    render(<LoginForm />);
+    expect(screen.getByRole('link', { name: 'Create one' })).toHaveAttribute(
+      'href',
+      '/register?redirect=%2Fhousehold%2Faccept%3Ftoken%3Dabc',
+    );
   });
 });

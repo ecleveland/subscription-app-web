@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { safeRedirectPath } from './lib/safe-redirect';
 
 const PUBLIC_PATHS = [
   '/login',
@@ -37,11 +38,20 @@ export function middleware(request: NextRequest) {
   const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
   if (!isAuthenticated && !isPublicPath) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    // Keep the requested deep link so login can send the user back to it.
+    const loginUrl = new URL('/login', request.url);
+    const target = pathname + request.nextUrl.search;
+    if (target !== '/') loginUrl.searchParams.set('redirect', target);
+    return NextResponse.redirect(loginUrl);
   }
 
   if (isAuthenticated && isPublicPath) {
-    return NextResponse.redirect(new URL('/', request.url));
+    return NextResponse.redirect(
+      new URL(
+        safeRedirectPath(request.nextUrl.searchParams.get('redirect')),
+        request.url,
+      ),
+    );
   }
 
   return NextResponse.next();

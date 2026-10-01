@@ -3,6 +3,11 @@ import userEvent from '@testing-library/user-event';
 import RegisterForm from '../RegisterForm';
 
 const mockRegister = vi.fn();
+let mockSearchParams = new URLSearchParams();
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => mockSearchParams,
+}));
 
 vi.mock('@/lib/auth-context', () => ({
   useAuth: () => ({
@@ -19,6 +24,7 @@ vi.mock('@/lib/auth-context', () => ({
 describe('RegisterForm', () => {
   afterEach(() => {
     mockRegister.mockClear();
+    mockSearchParams = new URLSearchParams();
   });
 
   it('should render all required fields', () => {
@@ -73,12 +79,15 @@ describe('RegisterForm', () => {
     await user.click(screen.getByRole('button', { name: 'Create Account' }));
 
     await waitFor(() => {
-      expect(mockRegister).toHaveBeenCalledWith({
-        username: 'newuser',
-        password: 'password123',
-        displayName: 'New User',
-        email: 'new@example.com',
-      });
+      expect(mockRegister).toHaveBeenCalledWith(
+        {
+          username: 'newuser',
+          password: 'password123',
+          displayName: 'New User',
+          email: 'new@example.com',
+        },
+        null,
+      );
     });
   });
 
@@ -94,12 +103,15 @@ describe('RegisterForm', () => {
     await user.click(screen.getByRole('button', { name: 'Create Account' }));
 
     await waitFor(() => {
-      expect(mockRegister).toHaveBeenCalledWith({
-        username: 'newuser',
-        password: 'password123',
-        displayName: undefined,
-        email: undefined,
-      });
+      expect(mockRegister).toHaveBeenCalledWith(
+        {
+          username: 'newuser',
+          password: 'password123',
+          displayName: undefined,
+          email: undefined,
+        },
+        null,
+      );
     });
   });
 
@@ -124,6 +136,44 @@ describe('RegisterForm', () => {
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
       '/login',
+    );
+  });
+
+  it('should pass the ?redirect target to register on submit', async () => {
+    mockSearchParams = new URLSearchParams({
+      redirect: '/household/accept?token=abc',
+    });
+    const user = userEvent.setup();
+    mockRegister.mockResolvedValue(undefined);
+
+    render(<RegisterForm />);
+
+    await user.type(screen.getByLabelText('Username'), 'newuser');
+    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.type(screen.getByLabelText('Confirm Password'), 'password123');
+    await user.click(screen.getByRole('button', { name: 'Create Account' }));
+
+    await waitFor(() => {
+      expect(mockRegister).toHaveBeenCalledWith(
+        {
+          username: 'newuser',
+          password: 'password123',
+          displayName: undefined,
+          email: undefined,
+        },
+        '/household/accept?token=abc',
+      );
+    });
+  });
+
+  it('should carry the ?redirect target on the login link', () => {
+    mockSearchParams = new URLSearchParams({
+      redirect: '/household/accept?token=abc',
+    });
+    render(<RegisterForm />);
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+      'href',
+      '/login?redirect=%2Fhousehold%2Faccept%3Ftoken%3Dabc',
     );
   });
 });

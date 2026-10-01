@@ -61,4 +61,43 @@ describe('middleware', () => {
     const res = middleware(makeRequest('/', 'not.a.jwt'));
     expect(redirectLocation(res)).toContain('/login');
   });
+
+  it('carries the requested path and query to /login as ?redirect', () => {
+    const res = middleware(makeRequest('/household/accept?token=abc'));
+    expect(redirectLocation(res)).toContain(
+      '/login?redirect=%2Fhousehold%2Faccept%3Ftoken%3Dabc',
+    );
+  });
+
+  it('omits ?redirect when the requested path is the root', () => {
+    const location = redirectLocation(middleware(makeRequest('/')));
+    expect(location).toMatch(/\/login$/);
+    expect(location).not.toContain('redirect');
+  });
+
+  it('sends an authenticated user on a public path to its ?redirect target', () => {
+    const res = middleware(makeRequest('/login?redirect=%2Fhousehold', jwt(900)));
+    expect(redirectLocation(res)).toMatch(/\/household$/);
+  });
+
+  it('ignores an off-site ?redirect target and sends the user to /', () => {
+    const res = middleware(
+      makeRequest('/login?redirect=%2F%2Fevil.com', jwt(900)),
+    );
+    expect(redirectLocation(res)).toMatch(/localhost:3000\/$/);
+  });
+
+  it('ignores a ?redirect target that hides // behind an encoded tab', () => {
+    const res = middleware(
+      makeRequest('/login?redirect=%2F%09%2Fevil.com', jwt(900)),
+    );
+    expect(redirectLocation(res)).toMatch(/localhost:3000\/$/);
+  });
+
+  it('ignores a ?redirect target that hides // behind a dot segment', () => {
+    const res = middleware(
+      makeRequest('/login?redirect=%2F..%2F%2Fevil.com', jwt(900)),
+    );
+    expect(redirectLocation(res)).toMatch(/localhost:3000\/$/);
+  });
 });
