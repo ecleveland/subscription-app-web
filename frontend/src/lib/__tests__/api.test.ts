@@ -110,6 +110,44 @@ describe('apiFetch', () => {
     expect(window.localStorage.getItem('user')).toBeNull();
   });
 
+  describe('login redirect after a failed refresh', () => {
+    const realLocation = window.location;
+
+    afterEach(() => {
+      Object.defineProperty(window, 'location', {
+        value: realLocation,
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    function stubLocation(pathname: string, search: string) {
+      Object.defineProperty(window, 'location', {
+        value: { pathname, search, href: '', protocol: 'http:' },
+        writable: true,
+        configurable: true,
+      });
+    }
+
+    it.each([
+      ['/subscriptions', '', '/login?redirect=%2Fsubscriptions'],
+      ['/login', '?redirect=%2Fhousehold', '/login?redirect=%2Fhousehold'],
+    ])(
+      'sends the user on %s%s to %s',
+      async (pathname, search, expected) => {
+        stubLocation(pathname, search);
+        window.localStorage.setItem('token', 'expired-jwt');
+        mockFetch.mockResolvedValue({ ok: false, status: 401 });
+
+        await expect(apiFetch('/subscriptions')).rejects.toThrow(
+          'Session expired. Please log in again.',
+        );
+
+        expect(window.location.href).toBe(expected);
+      },
+    );
+  });
+
   it('surfaces a real error on the retried request without logging out', async () => {
     window.localStorage.setItem('token', 'expired-jwt');
     window.localStorage.setItem('user', '{}');

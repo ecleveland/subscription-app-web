@@ -2,10 +2,13 @@
 
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { withRedirect } from '@/lib/safe-redirect';
 import { showErrorToast } from '@/lib/toast';
 
 export default function ForgotPasswordForm() {
+  const redirectTo = useSearchParams().get('redirect');
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -39,7 +42,7 @@ export default function ForgotPasswordForm() {
           If an account with that email exists, a reset link has been sent.
         </p>
         <Link
-          href="/login"
+          href={withRedirect('/login', redirectTo)}
           className="text-blue-600 hover:text-blue-700 dark:text-blue-400 text-sm"
         >
           Back to login
@@ -76,7 +79,7 @@ export default function ForgotPasswordForm() {
       </button>
       <p className="text-sm text-gray-500 dark:text-gray-400">
         <Link
-          href="/login"
+          href={withRedirect('/login', redirectTo)}
           className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
         >
           Back to login
