@@ -57,9 +57,8 @@ export class BudgetsService {
     this.assertValidMonth(month);
     const { start, end } = monthToUtcRange(month);
 
-    const budget = await this.findBudget(householdId, month);
     const [plannedByCat, actuals, categories] = await Promise.all([
-      this.loadPlannedByCategory(budget),
+      this.getPlannedByCategory(householdId, month),
       this.transactionsService.aggregateMonthlyActualsByCategory(
         householdId,
         start,
@@ -285,6 +284,19 @@ export class BudgetsService {
         );
       }
     }
+  }
+
+  /**
+   * The month's planned amounts keyed by category-id string. Read-only. Empty
+   * when the household has no Budget document for the month. A category with
+   * no row is absent from the map, which callers keep distinct from a planned 0.
+   */
+  async getPlannedByCategory(
+    householdId: string,
+    month: string,
+  ): Promise<Map<string, number>> {
+    const budget = await this.findBudget(householdId, month);
+    return this.loadPlannedByCategory(budget);
   }
 
   private async findBudget(

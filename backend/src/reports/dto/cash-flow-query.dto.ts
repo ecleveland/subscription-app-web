@@ -54,7 +54,9 @@ class MaxMonthsConstraint implements ValidatorConstraintInterface {
   }
 }
 
-const MONTH_FORMAT = { message: '$property must be a month in YYYY-MM format' };
+export const MONTH_FORMAT = {
+  message: '$property must be a month in YYYY-MM format',
+};
 
 export class CashFlowQueryDto {
   @ApiProperty({

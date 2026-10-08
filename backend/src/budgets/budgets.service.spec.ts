@@ -105,6 +105,39 @@ describe('BudgetsService', () => {
     );
   }
 
+  describe('getPlannedByCategory', () => {
+    it('returns an empty map without reading rows when the month has no budget', async () => {
+      const planned = await service.getPlannedByCategory(HH, '2026-06');
+      expect(planned.size).toBe(0);
+      expect(budgetCategoryModel.find).not.toHaveBeenCalled();
+    });
+
+    it('looks up the budget by household and month', async () => {
+      await service.getPlannedByCategory(HH, '2026-06');
+      const filter = budgetModel.findOne.mock.calls[0][0];
+      expect(filter.householdId.toString()).toBe(HH);
+      expect(filter.month).toBe('2026-06');
+    });
+
+    it("keys the budget's rows by category id string, keeping a planned 0", async () => {
+      withExistingBudget();
+      withPlanned([
+        { categoryId: CAT_EXP, plannedCents: 5000 },
+        { categoryId: CAT_SPEND_ONLY, plannedCents: 0 },
+      ]);
+
+      const planned = await service.getPlannedByCategory(HH, '2026-06');
+
+      expect(budgetCategoryModel.find).toHaveBeenCalledWith({
+        budgetId: BUDGET_ID,
+      });
+      expect([...planned.entries()]).toEqual([
+        [CAT_EXP, 5000],
+        [CAT_SPEND_ONLY, 0],
+      ]);
+    });
+  });
+
   describe('getBudgetVsActual', () => {
     it('rejects a malformed month before touching the ledger', async () => {
       await expect(service.getBudgetVsActual(HH, '2026-13')).rejects.toThrow(
