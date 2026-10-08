@@ -10,11 +10,17 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { GoalType } from '../schemas/goal.schema';
+import {
+  TransformRawValue,
+  TrimString,
+} from '../../common/validation/transform-raw-value';
 
 // currentCents is deliberately absent. It starts at 0 and only moves through
 // POST /goals/:id/contributions.
 export class CreateGoalDto {
   @ApiProperty({ description: 'Goal name', example: 'Emergency fund' })
+  // Trimmed first so a whitespace-only name is a 400, not a save-time 500.
+  @TrimString
   @IsString()
   @IsNotEmpty()
   name: string;
@@ -34,6 +40,8 @@ export class CreateGoalDto {
     example: 1000000,
     minimum: 1,
   })
+  // Raw value so implicit conversion cannot turn true or "5000" into a number.
+  @TransformRawValue
   @IsInt()
   @Min(1)
   targetCents: number;

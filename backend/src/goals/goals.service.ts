@@ -173,7 +173,9 @@ export class GoalsService {
     return new NotFoundException(`Goal with ID "${id}" not found`);
   }
 
-  // Same check and message as BudgetsService.assertCategoryInHousehold.
+  // Mirrors BudgetsService.assertCategoryInHousehold: a foreign category gets
+  // the same 400 message, and an archived one is rejected because it is hidden
+  // from the category picker.
   private async assertCategoryInHousehold(
     householdId: string,
     categoryId: string,
@@ -185,6 +187,11 @@ export class GoalsService {
     if (!category) {
       throw new BadRequestException(
         'categoryId does not reference a category in this household',
+      );
+    }
+    if (category.isArchived) {
+      throw new BadRequestException(
+        'Cannot link a goal to an archived category',
       );
     }
   }

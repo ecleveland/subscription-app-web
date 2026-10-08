@@ -143,6 +143,24 @@ describe('GoalsService', () => {
       );
       expect(constructed).toHaveLength(0);
     });
+
+    it('rejects an archived category with 400', async () => {
+      categoriesService.findInHousehold.mockResolvedValue({
+        _id: new Types.ObjectId(CAT_ID),
+        isArchived: true,
+      });
+      await expect(
+        service.create(HH, {
+          name: 'Vacation',
+          type: GoalType.SAVINGS,
+          targetCents: 300000,
+          categoryId: CAT_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('Cannot link a goal to an archived category'),
+      );
+      expect(constructed).toHaveLength(0);
+    });
   });
 
   describe('findAll', () => {

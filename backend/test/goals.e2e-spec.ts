@@ -275,6 +275,33 @@ describe('Goals (e2e)', () => {
       );
     });
 
+    it('rejects an archived category on create', async () => {
+      const cats = await api()
+        .get('/api/categories')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const archivedId: string = cats.body[1]._id;
+      await api()
+        .patch(`/api/categories/${archivedId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isArchived: true })
+        .expect(200);
+
+      const res = await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Archived link',
+          type: 'savings',
+          targetCents: 100,
+          categoryId: archivedId,
+        })
+        .expect(400);
+      expect(res.body.message).toBe(
+        'Cannot link a goal to an archived category',
+      );
+    });
+
     it("rejects another household's category on patch", async () => {
       const created = await api()
         .post('/api/goals')
@@ -286,6 +313,75 @@ describe('Goals (e2e)', () => {
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ categoryId: categoryB })
         .expect(400);
+    });
+  });
+
+  describe('input coercion and trimming', () => {
+    let goalId: string;
+
+    beforeAll(async () => {
+      const res = await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Coercion', type: 'savings', targetCents: 1000 })
+        .expect(201);
+      goalId = res.body._id;
+    });
+
+    it('rejects isArchived "false" as a string and leaves the goal active', async () => {
+      await api()
+        .patch(`/api/goals/${goalId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isArchived: 'false' })
+        .expect(400);
+      const res = await api()
+        .get(`/api/goals/${goalId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(res.body.isArchived).toBe(false);
+    });
+
+    it('rejects a whitespace-only name on create and patch with 400', async () => {
+      await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: '   ', type: 'savings', targetCents: 1000 })
+        .expect(400);
+      await api()
+        .patch(`/api/goals/${goalId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: '   ' })
+        .expect(400);
+    });
+
+    it('rejects a boolean or numeric-string targetCents', async () => {
+      for (const targetCents of [true, '5000']) {
+        await api()
+          .post('/api/goals')
+          .set('Authorization', `Bearer ${tokenA}`)
+          .send({ name: 'Coerced', type: 'savings', targetCents })
+          .expect(400);
+        await api()
+          .patch(`/api/goals/${goalId}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .send({ targetCents })
+          .expect(400);
+      }
+    });
+
+    it('rejects a boolean or numeric-string contribution and leaves currentCents alone', async () => {
+      for (const amountCents of [true, '5000']) {
+        await api()
+          .post(`/api/goals/${goalId}/contributions`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .send({ amountCents })
+          .expect(400);
+      }
+      const res = await api()
+        .get(`/api/goals/${goalId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(res.body.currentCents).toBe(0);
     });
   });
 

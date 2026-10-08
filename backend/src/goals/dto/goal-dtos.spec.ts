@@ -9,7 +9,11 @@ function errorsFor<T extends object>(
   cls: new () => T,
   payload: Record<string, unknown>,
 ): string[] {
-  return validateSync(plainToInstance(cls, payload)).map((e) => e.property);
+  // Same transform options as the global ValidationPipe in main.ts, so
+  // implicit conversion runs here exactly as it does in production.
+  return validateSync(
+    plainToInstance(cls, payload, { enableImplicitConversion: true }),
+  ).map((e) => e.property);
 }
 
 const valid = { name: 'Emergency fund', type: 'savings', targetCents: 100000 };
@@ -52,6 +56,21 @@ describe('CreateGoalDto', () => {
     expect(errorsFor(CreateGoalDto, { ...valid, name: '' })).toEqual(['name']);
   });
 
+  it('rejects a whitespace-only name', () => {
+    expect(errorsFor(CreateGoalDto, { ...valid, name: '   ' })).toEqual([
+      'name',
+    ]);
+  });
+
+  it('rejects a boolean or numeric-string targetCents', () => {
+    expect(errorsFor(CreateGoalDto, { ...valid, targetCents: true })).toEqual([
+      'targetCents',
+    ]);
+    expect(errorsFor(CreateGoalDto, { ...valid, targetCents: '5000' })).toEqual(
+      ['targetCents'],
+    );
+  });
+
   it('rejects a malformed categoryId and targetDate', () => {
     expect(
       errorsFor(CreateGoalDto, {
@@ -89,6 +108,26 @@ describe('UpdateGoalDto', () => {
 
   it('accepts the archive flag', () => {
     expect(errorsFor(UpdateGoalDto, { isArchived: true })).toEqual([]);
+    expect(errorsFor(UpdateGoalDto, { isArchived: false })).toEqual([]);
+  });
+
+  it('rejects the string "false" for isArchived instead of coercing it to true', () => {
+    expect(errorsFor(UpdateGoalDto, { isArchived: 'false' })).toEqual([
+      'isArchived',
+    ]);
+  });
+
+  it('rejects a whitespace-only name', () => {
+    expect(errorsFor(UpdateGoalDto, { name: '   ' })).toEqual(['name']);
+  });
+
+  it('rejects a boolean or numeric-string targetCents', () => {
+    expect(errorsFor(UpdateGoalDto, { targetCents: true })).toEqual([
+      'targetCents',
+    ]);
+    expect(errorsFor(UpdateGoalDto, { targetCents: '5000' })).toEqual([
+      'targetCents',
+    ]);
   });
 });
 
@@ -109,6 +148,15 @@ describe('ContributeGoalDto', () => {
 
   it('rejects a non-integer', () => {
     expect(errorsFor(ContributeGoalDto, { amountCents: 1.5 })).toEqual([
+      'amountCents',
+    ]);
+  });
+
+  it('rejects a boolean or numeric-string amount', () => {
+    expect(errorsFor(ContributeGoalDto, { amountCents: true })).toEqual([
+      'amountCents',
+    ]);
+    expect(errorsFor(ContributeGoalDto, { amountCents: '5000' })).toEqual([
       'amountCents',
     ]);
   });
