@@ -8,10 +8,6 @@ import {
   MembershipStatus,
 } from './schemas/household-member.schema';
 import {
-  Subscription,
-  SubscriptionDocument,
-} from '../subscriptions/schemas/subscription.schema';
-import {
   Notification,
   NotificationDocument,
 } from '../notifications/schemas/notification.schema';
@@ -25,8 +21,6 @@ export class HouseholdsMigrationService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(HouseholdMember.name)
     private readonly memberModel: Model<HouseholdMemberDocument>,
-    @InjectModel(Subscription.name)
-    private readonly subscriptionModel: Model<SubscriptionDocument>,
     @InjectModel(Notification.name)
     private readonly notificationModel: Model<NotificationDocument>,
     private readonly householdsService: HouseholdsService,
@@ -92,46 +86,32 @@ export class HouseholdsMigrationService {
   }
 
   /**
-   * Stamp pre-household Subscription and Notification documents with the
-   * `householdId` (and `memberId` for subscriptions) of their original owner's
-   * active household. Maps each active membership's legacy `userId` to its
-   * household and updates only documents that don't yet carry a `householdId`.
+   * Stamp pre-household Notification documents with the `householdId` of their
+   * original owner's active household. Maps each active membership's legacy
+   * `userId` to its household and updates only documents that don't yet carry
+   * a `householdId`.
    *
    * Run after {@link backfillPersonalHouseholds} (which guarantees every legacy
    * user has an active membership). Idempotent: once stamped, a document no
    * longer matches the `householdId: { $exists: false }` filter, so re-runs are
    * no-ops. Returns the counts stamped.
    */
-  async stampExistingData(): Promise<{
-    subscriptions: number;
-    notifications: number;
-  }> {
+  async stampExistingData(): Promise<{ notifications: number }> {
     const members = await this.memberModel
       .find({ status: MembershipStatus.ACTIVE } as Record<string, unknown>)
       .select('_id householdId userId')
       .lean()
       .exec();
 
-    let subscriptions = 0;
     let notifications = 0;
 
     for (const member of members) {
-      // The legacy `userId` field is no longer in the schemas but still lives
+      // The legacy `userId` field is no longer in the schema but still lives
       // on un-migrated documents; filter against the raw value.
       const ownerFilter = {
         userId: member.userId,
         householdId: { $exists: false },
       } as Record<string, unknown>;
-
-      const subResult = await this.subscriptionModel
-        .updateMany(ownerFilter, {
-          $set: {
-            householdId: member.householdId,
-            memberId: member._id,
-          },
-        })
-        .exec();
-      subscriptions += subResult.modifiedCount ?? 0;
 
       const notifResult = await this.notificationModel
         .updateMany(ownerFilter, {
@@ -141,12 +121,12 @@ export class HouseholdsMigrationService {
       notifications += notifResult.modifiedCount ?? 0;
     }
 
-    if (subscriptions > 0 || notifications > 0) {
+    if (notifications > 0) {
       this.logger.log(
-        { subscriptions, notifications },
+        { notifications },
         'Stamped existing data with householdId',
       );
     }
-    return { subscriptions, notifications };
+    return { notifications };
   }
 }

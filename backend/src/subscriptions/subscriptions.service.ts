@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { BillingCycle } from './schemas/subscription.schema';
+import { BillingCycle } from './billing-cycle.enum';
 import {
   RecurringTransaction,
   RecurringTransactionDocument,
@@ -49,10 +49,9 @@ export interface SubscriptionView {
 
 /**
  * The Subscriptions API, served over `RecurringTransaction` (the
- * `isSubscription: true` slice) — VEG-469. The wire contract is unchanged, so
- * the controller, the frontend, and the subscription suites are untouched; only
- * the storage moved. Every query is hard-scoped to `isSubscription: true` so the
- * subscriptions API can never read or mutate an ordinary bill/paycheck.
+ * `isSubscription: true` slice) — VEG-469. Every query is hard-scoped to
+ * `isSubscription: true` so the subscriptions API can never read or mutate an
+ * ordinary bill/paycheck.
  */
 @Injectable()
 export class SubscriptionsService {
@@ -252,9 +251,7 @@ export class SubscriptionsService {
     const hasNextPage = limit === 0 ? false : page < totalPages;
 
     return {
-      // The controller serializes these plain objects identically to the old
-      // Mongoose docs; the interface type is a structural match.
-      data: views as unknown as PaginatedSubscriptions['data'],
+      data: views,
       meta: { total, page, limit, totalPages, hasNextPage },
     };
   }
@@ -437,8 +434,10 @@ export class SubscriptionsService {
     householdId: string,
     query: QuerySubscriptionDto,
   ): Promise<string> {
-    const { data } = await this.findAll(householdId, { ...query, limit: 0 });
-    const subs = data as unknown as SubscriptionView[];
+    const { data: subs } = await this.findAll(householdId, {
+      ...query,
+      limit: 0,
+    });
 
     const header =
       'Name,Cost,Billing Cycle,Category,Next Billing Date,Status,Notes,Tags,Trial End Date,Shared With';

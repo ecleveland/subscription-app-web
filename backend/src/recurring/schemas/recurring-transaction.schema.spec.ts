@@ -4,7 +4,7 @@ import {
   RecurringTransaction,
   RecurringTransactionSchema,
 } from './recurring-transaction.schema';
-import { BillingCycle } from '../../subscriptions/schemas/subscription.schema';
+import { BillingCycle } from '../../subscriptions/billing-cycle.enum';
 
 // A throwaway model so we can exercise schema validators (validateSync) without
 // a live Mongo connection — mirrors the lightweight, DB-free schema specs used
@@ -37,8 +37,8 @@ describe('RecurringTransactionSchema indexes', () => {
   });
 
   it('indexes { isActive, nextDate } for the cross-household cron scan', () => {
-    // Mirrors { isActive, nextBillingDate } on Subscription: the daily
-    // materialization/reminder crons scan active schedules by due date.
+    // Serves the renewal-reminder cron's scan of active subscriptions by next
+    // date, alongside the daily materialization cron.
     expect(indexKeyJson).toContain('{"isActive":1,"nextDate":1}');
   });
 
@@ -75,7 +75,7 @@ describe('cadenceAnchorDay', () => {
 });
 
 describe('RecurringCadence', () => {
-  it('stays value-identical to BillingCycle (the VEG-469 fold-in maps 1:1)', () => {
+  it('stays value-identical to BillingCycle (/api/subscriptions maps 1:1)', () => {
     expect(Object.values(RecurringCadence)).toEqual(
       Object.values(BillingCycle),
     );
@@ -168,8 +168,8 @@ describe('RecurringTransactionSchema validation', () => {
   });
 
   it('allows amountCents 0 on a subscription (a free/$0 subscription, VEG-469)', () => {
-    // Legacy Subscription.cost has min 0; the fold-in must preserve $0 subs
-    // (e.g. free trials) rather than clamping them up to 1 cent.
+    // /api/subscriptions allows cost 0 (CreateSubscriptionDto Min(0)), so $0
+    // subs (e.g. free trials) must not be clamped up to 1 cent.
     expect(
       new RecurringModel({
         ...valid(),

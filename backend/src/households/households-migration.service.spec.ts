@@ -9,7 +9,6 @@ import {
   HouseholdMember,
   MembershipStatus,
 } from './schemas/household-member.schema';
-import { Subscription } from '../subscriptions/schemas/subscription.schema';
 import { Notification } from '../notifications/schemas/notification.schema';
 
 const USER_A = '507f1f77bcf86cd799439011';
@@ -24,7 +23,6 @@ describe('HouseholdsMigrationService', () => {
   let service: HouseholdsMigrationService;
   let mockUserModel: any;
   let mockMemberModel: any;
-  let mockSubModel: any;
   let mockNotificationModel: any;
   let mockHouseholdsService: { createHousehold: jest.Mock };
   let warnSpy: jest.SpyInstance;
@@ -46,11 +44,6 @@ describe('HouseholdsMigrationService', () => {
   beforeEach(async () => {
     mockUserModel = { find: jest.fn() };
     mockMemberModel = { distinct: jest.fn(), find: jest.fn() };
-    mockSubModel = {
-      updateMany: jest.fn().mockReturnValue({
-        exec: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
-      }),
-    };
     mockNotificationModel = {
       updateMany: jest.fn().mockReturnValue({
         exec: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
@@ -68,7 +61,6 @@ describe('HouseholdsMigrationService', () => {
           provide: getModelToken(HouseholdMember.name),
           useValue: mockMemberModel,
         },
-        { provide: getModelToken(Subscription.name), useValue: mockSubModel },
         {
           provide: getModelToken(Notification.name),
           useValue: mockNotificationModel,
@@ -229,12 +221,6 @@ describe('HouseholdsMigrationService', () => {
       });
     }
 
-    function subUpdateResult(modifiedCount: number) {
-      mockSubModel.updateMany.mockReturnValueOnce({
-        exec: jest.fn().mockResolvedValue({ modifiedCount }),
-      });
-    }
-
     function notifUpdateResult(modifiedCount: number) {
       mockNotificationModel.updateMany.mockReturnValueOnce({
         exec: jest.fn().mockResolvedValue({ modifiedCount }),
@@ -251,20 +237,13 @@ describe('HouseholdsMigrationService', () => {
       });
     });
 
-    it('stamps subscriptions with householdId + memberId and notifications with householdId, scoped to the owner', async () => {
+    it('stamps notifications with householdId, scoped to the owner', async () => {
       setActiveMembers([{ _id: MEMBER_A, householdId: HH_A, userId: USER_A }]);
-      subUpdateResult(3);
       notifUpdateResult(2);
 
       const result = await service.stampExistingData();
 
-      expect(result).toEqual({ subscriptions: 3, notifications: 2 });
-
-      const [subFilter, subUpdate] = mockSubModel.updateMany.mock.calls[0];
-      expect(subFilter.householdId).toEqual({ $exists: false });
-      expect(subFilter.userId).toEqual(new Types.ObjectId(USER_A));
-      expect(subUpdate.$set.householdId).toEqual(new Types.ObjectId(HH_A));
-      expect(subUpdate.$set.memberId).toEqual(new Types.ObjectId(MEMBER_A));
+      expect(result).toEqual({ notifications: 2 });
 
       const [notifFilter, notifUpdate] =
         mockNotificationModel.updateMany.mock.calls[0];
@@ -273,22 +252,20 @@ describe('HouseholdsMigrationService', () => {
       expect(notifUpdate.$set).toEqual({
         householdId: new Types.ObjectId(HH_A),
       });
-      expect(notifUpdate.$set.memberId).toBeUndefined();
     });
 
-    it('sums counts across multiple memberships', async () => {
+    it('sums notification counts across multiple memberships', async () => {
       setActiveMembers([
         { _id: MEMBER_A, householdId: HH_A, userId: USER_A },
         { _id: MEMBER_B, householdId: HH_B, userId: USER_B },
       ]);
-      subUpdateResult(2);
       notifUpdateResult(1);
-      subUpdateResult(5);
-      notifUpdateResult(0);
+      notifUpdateResult(4);
 
       const result = await service.stampExistingData();
 
-      expect(result).toEqual({ subscriptions: 7, notifications: 1 });
+      expect(result).toEqual({ notifications: 5 });
+      expect(mockNotificationModel.updateMany).toHaveBeenCalledTimes(2);
     });
 
     it('is idempotent — only matches documents missing a householdId', async () => {
@@ -297,10 +274,10 @@ describe('HouseholdsMigrationService', () => {
       const result = await service.stampExistingData();
 
       // Default mocks report 0 modified (everything already stamped).
-      expect(result).toEqual({ subscriptions: 0, notifications: 0 });
-      expect(mockSubModel.updateMany.mock.calls[0][0].householdId).toEqual({
-        $exists: false,
-      });
+      expect(result).toEqual({ notifications: 0 });
+      expect(
+        mockNotificationModel.updateMany.mock.calls[0][0].householdId,
+      ).toEqual({ $exists: false });
     });
   });
 });
