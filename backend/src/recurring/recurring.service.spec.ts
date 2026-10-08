@@ -421,6 +421,47 @@ describe('RecurringService', () => {
       expect(result).toBe(doc);
     });
 
+    describe('tracked subscription date (VEG-486)', () => {
+      // /api/recurring can attach or reactivate a subscription too, so it
+      // applies the same no-backfill rule as /api/subscriptions.
+      const NOW = new Date('2026-05-10T00:00:00Z');
+      const pastSub = (overrides: Record<string, any> = {}) =>
+        recDoc({
+          isSubscription: true,
+          nextDate: new Date('2026-02-15T00:00:00Z'),
+          cadenceAnchorDay: 15,
+          ...overrides,
+        });
+
+      it('rolls a past date forward when an account is attached', async () => {
+        const doc = pastSub({ accountId: undefined });
+        mockModel.findById.mockReturnValue(createChainable(doc));
+
+        await service.update(HOUSEHOLD_ID, REC_ID, { accountId: ACC_ID }, NOW);
+
+        expect(doc.nextDate).toEqual(new Date('2026-05-15T00:00:00Z'));
+        expect(doc.save).toHaveBeenCalled();
+      });
+
+      it('rolls a past date forward on reactivation', async () => {
+        const doc = pastSub({ isActive: false });
+        mockModel.findById.mockReturnValue(createChainable(doc));
+
+        await service.update(HOUSEHOLD_ID, REC_ID, { isActive: true }, NOW);
+
+        expect(doc.nextDate).toEqual(new Date('2026-05-15T00:00:00Z'));
+      });
+
+      it('leaves an ordinary bill with a past date untouched', async () => {
+        const doc = pastSub({ isSubscription: false, isActive: false });
+        mockModel.findById.mockReturnValue(createChainable(doc));
+
+        await service.update(HOUSEHOLD_ID, REC_ID, { isActive: true }, NOW);
+
+        expect(doc.nextDate).toEqual(new Date('2026-02-15T00:00:00Z'));
+      });
+    });
+
     it('re-anchors cadenceAnchorDay when nextDate moves', async () => {
       const doc = recDoc({ cadenceAnchorDay: 1 });
       mockModel.findById.mockReturnValue(createChainable(doc));
@@ -1176,10 +1217,10 @@ describe('RecurringService', () => {
       });
     });
 
-    describe('tracked subscriptions never backfill (VEG-486)', () => {
-      // A stale nextDate can reach a tracked subscription through
-      // /api/recurring, which bypasses SubscriptionsService. The scheduler
-      // rolls past occurrences without posting and posts only today's.
+    describe('tracked subscriptions replay missed runs like bills (VEG-486)', () => {
+      // A missed midnight run or a transient posting failure must not lose a
+      // renewal. The API keeps a tracked subscription from carrying a stale
+      // date, so anything behind here is a real missed run and replays.
       const behind = (overrides: Record<string, any> = {}) =>
         scanDoc({
           nextDate: new Date('2026-06-15T00:00:00Z'),
@@ -1187,33 +1228,21 @@ describe('RecurringService', () => {
           ...overrides,
         });
 
-      it('skips past occurrences and posts only the one due today', async () => {
-        const warn = jest
-          .spyOn(Logger.prototype, 'warn')
-          .mockImplementation(() => undefined);
+      it('replays missed occurrences of a tracked subscription', async () => {
         scanReturns([behind({ isSubscription: true })]);
 
         const summary = await service.materializeDue(NOW);
 
-        // 06-15 and 07-15 are past; 08-15 is today.
+        // 06-15, 07-15, and 08-15 (today) all post.
         expect(transactionsService.materializeRecurring).toHaveBeenCalledTimes(
-          1,
+          3,
         );
-        expect(
-          transactionsService.materializeRecurring.mock.calls[0][1].date,
-        ).toEqual(new Date('2026-08-15T00:00:00Z'));
-        expect(mockModel.updateOne).toHaveBeenCalledTimes(3);
         expect(advancedTo(2)).toEqual(new Date('2026-09-15T00:00:00Z'));
         expect(summary).toMatchObject({
-          materialized: 1,
-          droppedRenewals: 2,
-          advancedOnly: 2,
+          materialized: 3,
+          droppedRenewals: 0,
+          advancedOnly: 0,
         });
-        const skipWarns = warn.mock.calls.filter(
-          ([ctx]) => ctx?.droppedRenewals !== undefined,
-        );
-        expect(skipWarns).toHaveLength(1);
-        expect(skipWarns[0][0]).toMatchObject({ droppedRenewals: 2 });
       });
 
       it('still backfills every missed period of an ordinary bill', async () => {

@@ -20,7 +20,10 @@ import { QueryRecurringDto } from './dto/query-recurring.dto';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
-import { addCadence } from './recurring-dates.util';
+import {
+  addCadence,
+  settleTrackedSubscriptionDate,
+} from './recurring-dates.util';
 import { parseUtcDate, utcDay } from '../common/utc-date.util';
 
 // The merged, would-be-persisted state of a schedule's cross-field invariants,
@@ -52,8 +55,10 @@ export interface MaterializationSummary {
   advancedOnly: number;
   /**
    * The subset of `advancedOnly` that a tracked subscription rolled past
-   * because its account or category was unusable. Each one is a renewal the
-   * ledger never records, so a nonzero value escalates the cron log to warn.
+   * because its account or category was unusable, so the scheduler fell back
+   * to advance-only. Each one is a renewal the ledger never records, so a
+   * nonzero value escalates the cron log to warn. A tracked subscription with
+   * usable references replays missed runs like any bill and never counts here.
    */
   droppedRenewals: number;
   /** Schedules that hit MAX_CATCHUP_PERIODS and will resume tomorrow. */
@@ -244,6 +249,7 @@ export class RecurringService {
     householdId: string,
     id: string,
     dto: UpdateRecurringDto,
+    now: Date = new Date(),
   ): Promise<RecurringTransactionDocument> {
     const existing = await this.findOne(householdId, id);
 
@@ -356,6 +362,12 @@ export class RecurringService {
     if (dto.sharedWith !== undefined) {
       // Null-to-clear: store as unset rather than a persisted null.
       existing.sharedWith = dto.sharedWith ?? undefined;
+    }
+
+    // Attaching an account or reactivating here bypasses /api/subscriptions,
+    // so a subscription gets the same no-backfill rule at this door too.
+    if (existing.isSubscription) {
+      existing.nextDate = settleTrackedSubscriptionDate(existing, now);
     }
 
     // Save via the document, never findOneAndUpdate: the schema's
@@ -536,130 +548,102 @@ export class RecurringService {
 
     let occurrence = schedule.nextDate;
     let periods = 0;
-    let droppedHere = 0;
 
-    try {
-      for (;;) {
-        // Past its end: nothing more to post, ever.
-        if (schedule.endDate && utcDay(occurrence) > utcDay(schedule.endDate)) {
-          // Count it only if THIS run is the one that deactivated it — a
-          // concurrent run winning the guard would otherwise be double-counted.
-          const deactivated = await this.advanceSchedule(
-            schedule,
-            occurrence,
-            occurrence,
-            false,
-          );
-          if (deactivated) {
-            summary.deactivated += 1;
-          }
-          return;
-        }
-        // Not due yet — the normal exit once the schedule has caught up.
-        if (utcDay(occurrence) > utcDay(now)) {
-          return;
-        }
-        // Cap check sits AFTER the two clean-exit guards, so a schedule that
-        // finishes exactly on the cap leaves via "caught up" rather than being
-        // reported capped — otherwise it would look permanently behind and be
-        // re-scanned as such forever. Reaching here means real work remains.
-        if (periods >= RecurringService.MAX_CATCHUP_PERIODS) {
-          summary.capped += 1;
-          this.logger.warn(
-            {
-              householdId,
-              recurringId,
-              cap: RecurringService.MAX_CATCHUP_PERIODS,
-              nextDate: occurrence.toISOString(),
-              daysBehind: Math.floor(
-                (utcDay(now) - utcDay(occurrence)) / 86_400_000,
-              ),
-            },
-            'Recurring schedule hit the per-run catch-up cap; resuming on the next run',
-          );
-          return;
-        }
-
-        // A subscription's ledger history starts today. Past occurrences are
-        // never backfilled by the scheduler, whichever API wrote the stale
-        // date: they roll forward unposted and count as dropped renewals.
-        // Ordinary bills post every missed period.
-        const dropping =
-          schedule.isSubscription === true && utcDay(occurrence) < utcDay(now);
-        if (!dropping) {
-          await this.postOccurrence(
-            householdId,
-            recurringId,
-            references.accountId,
-            schedule,
-            occurrence,
-            summary,
-          );
-        }
-        const next = addCadence(
-          occurrence,
-          schedule.cadence,
-          schedule.cadenceAnchorDay,
-        );
-
-        // Deactivate in the SAME write as the final advance when the schedule
-        // has now run its course — no extra round trip, and it drops the row out
-        // of the { isActive, nextDate } scan instead of being re-read forever.
-        const finished =
-          schedule.endDate !== undefined &&
-          utcDay(next) > utcDay(schedule.endDate);
-        const advanced = await this.advanceSchedule(
+    for (;;) {
+      // Past its end: nothing more to post, ever.
+      if (schedule.endDate && utcDay(occurrence) > utcDay(schedule.endDate)) {
+        // Count it only if THIS run is the one that deactivated it — a
+        // concurrent run winning the guard would otherwise be double-counted.
+        const deactivated = await this.advanceSchedule(
           schedule,
           occurrence,
-          next,
-          !finished,
+          occurrence,
+          false,
         );
-        if (!advanced) {
-          // Someone else moved nextDate between our read and this write, so the
-          // remaining periods are not ours to post. State what was OBSERVED
-          // rather than guessing a cause: leader election makes a second cron
-          // instance unlikely, and the realistic causes are a concurrent PATCH
-          // or the cursor re-visiting this document — an unsnapshotted scan over
-          // { isActive, nextDate } while the loop pushes nextDate forward within
-          // that same index. The guard makes a re-visit harmless (the insert
-          // dedupes, this advance misses, we stop) but it is not "concurrency".
-          summary.yielded += 1;
-          this.logger.warn(
-            {
-              householdId,
-              recurringId,
-              observedNextDate: occurrence.toISOString(),
-              attemptedNextDate: next.toISOString(),
-            },
-            'Guarded advance matched no schedule (concurrent edit or cursor re-visit); yielding the remaining periods',
-          );
-          return;
-        }
-        if (dropping) {
-          summary.advancedOnly += 1;
-          summary.droppedRenewals += 1;
-          droppedHere += 1;
-        }
-        if (finished) {
+        if (deactivated) {
           summary.deactivated += 1;
-          return;
         }
-
-        occurrence = next;
-        periods += 1;
+        return;
       }
-    } finally {
-      if (droppedHere > 0) {
+      // Not due yet — the normal exit once the schedule has caught up.
+      if (utcDay(occurrence) > utcDay(now)) {
+        return;
+      }
+      // Cap check sits AFTER the two clean-exit guards, so a schedule that
+      // finishes exactly on the cap leaves via "caught up" rather than being
+      // reported capped — otherwise it would look permanently behind and be
+      // re-scanned as such forever. Reaching here means real work remains.
+      if (periods >= RecurringService.MAX_CATCHUP_PERIODS) {
+        summary.capped += 1;
         this.logger.warn(
           {
             householdId,
             recurringId,
-            payee: schedule.payee,
-            droppedRenewals: droppedHere,
+            cap: RecurringService.MAX_CATCHUP_PERIODS,
+            nextDate: occurrence.toISOString(),
+            daysBehind: Math.floor(
+              (utcDay(now) - utcDay(occurrence)) / 86_400_000,
+            ),
           },
-          'Tracked subscription had past occurrences; advanced them without posting',
+          'Recurring schedule hit the per-run catch-up cap; resuming on the next run',
         );
+        return;
       }
+
+      await this.postOccurrence(
+        householdId,
+        recurringId,
+        references.accountId,
+        schedule,
+        occurrence,
+        summary,
+      );
+      const next = addCadence(
+        occurrence,
+        schedule.cadence,
+        schedule.cadenceAnchorDay,
+      );
+
+      // Deactivate in the SAME write as the final advance when the schedule
+      // has now run its course — no extra round trip, and it drops the row out
+      // of the { isActive, nextDate } scan instead of being re-read forever.
+      const finished =
+        schedule.endDate !== undefined &&
+        utcDay(next) > utcDay(schedule.endDate);
+      const advanced = await this.advanceSchedule(
+        schedule,
+        occurrence,
+        next,
+        !finished,
+      );
+      if (!advanced) {
+        // Someone else moved nextDate between our read and this write, so the
+        // remaining periods are not ours to post. State what was OBSERVED
+        // rather than guessing a cause: leader election makes a second cron
+        // instance unlikely, and the realistic causes are a concurrent PATCH
+        // or the cursor re-visiting this document — an unsnapshotted scan over
+        // { isActive, nextDate } while the loop pushes nextDate forward within
+        // that same index. The guard makes a re-visit harmless (the insert
+        // dedupes, this advance misses, we stop) but it is not "concurrency".
+        summary.yielded += 1;
+        this.logger.warn(
+          {
+            householdId,
+            recurringId,
+            observedNextDate: occurrence.toISOString(),
+            attemptedNextDate: next.toISOString(),
+          },
+          'Guarded advance matched no schedule (concurrent edit or cursor re-visit); yielding the remaining periods',
+        );
+        return;
+      }
+      if (finished) {
+        summary.deactivated += 1;
+        return;
+      }
+
+      occurrence = next;
+      periods += 1;
     }
   }
 

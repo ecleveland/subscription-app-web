@@ -53,6 +53,50 @@ export function addCadence(
   return result;
 }
 
+/** The fields `settleTrackedSubscriptionDate` reads from a schedule. */
+export interface TrackedSubscriptionState {
+  isSubscription?: boolean;
+  accountId?: unknown;
+  isActive: boolean;
+  nextDate: Date;
+  cadence: RecurringCadence;
+  cadenceAnchorDay?: number;
+}
+
+/**
+ * The nextDate a subscription may be saved with. Ledger history for a
+ * subscription starts when it can post. It is never backfilled through the
+ * API, whatever path got it there: create with a past date, first attach,
+ * reactivation, or a date edited into the past, through /api/subscriptions or
+ * /api/recurring. So a subscription that can post (has an account and is
+ * active) with a date before today rolls forward on its cadence to the first
+ * occurrence on or after today. Anything else returns its date unchanged.
+ * Ordinary bills keep their replay behavior, and the scheduler still replays
+ * a run it missed, so a renewal is never lost to a restart.
+ *
+ * A migrated subscription has no stored anchor, so the starting date's day
+ * stands in for it, which keeps Jan 31 rolling to Feb 28 and then Mar 31.
+ */
+export function settleTrackedSubscriptionDate(
+  state: TrackedSubscriptionState,
+  now: Date,
+): Date {
+  if (
+    !state.isSubscription ||
+    !state.accountId ||
+    !state.isActive ||
+    utcDay(state.nextDate) >= utcDay(now)
+  ) {
+    return state.nextDate;
+  }
+  const anchor = state.cadenceAnchorDay ?? state.nextDate.getUTCDate();
+  let next = state.nextDate;
+  while (utcDay(next) < utcDay(now)) {
+    next = addCadence(next, state.cadence, anchor);
+  }
+  return next;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**

@@ -750,12 +750,14 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
       const ARCHIVED_ACC = new Types.ObjectId();
       const MISSING_ACC = new Types.ObjectId();
       const GOOD_ACC = new Types.ObjectId();
+      // A future date, so no tracked row needs rolling.
+      const nextDate = new Date('2099-01-01T00:00:00Z');
       model.find.mockReturnValue(
         chain([
-          { _id: usable, accountId: GOOD_ACC },
-          { _id: onArchived, accountId: ARCHIVED_ACC },
-          { _id: onMissing, accountId: MISSING_ACC },
-          { _id: noAccount },
+          { _id: usable, accountId: GOOD_ACC, nextDate },
+          { _id: onArchived, accountId: ARCHIVED_ACC, nextDate },
+          { _id: onMissing, accountId: MISSING_ACC, nextDate },
+          { _id: noAccount, nextDate },
         ]),
       );
       accountsService.findOne.mockImplementation(
@@ -848,6 +850,9 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
       expect(ops).toHaveLength(1);
       expect(String(ops[0].updateOne.filter._id)).toBe(String(tracked));
       expect(ops[0].updateOne.filter.isSubscription).toBe(true);
+      expect(ops[0].updateOne.filter.nextDate).toEqual(
+        new Date('2026-02-15T00:00:00Z'),
+      );
       expect(ops[0].updateOne.update.$set).toEqual({
         isActive: true,
         nextDate: new Date('2026-05-15T00:00:00Z'),
@@ -855,6 +860,32 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
       const filter = model.updateMany.mock.calls[0][0];
       expect(filter._id.$in.map(String)).toEqual([String(untracked)]);
       expect(res).toEqual({ success: 2, failed: 0 });
+    });
+
+    it('activate counts a tracked subscription the cron advanced mid-request as failed', async () => {
+      const NOW = new Date('2026-05-10T00:00:00Z');
+      model.find.mockReturnValue(
+        chain([
+          {
+            _id: new Types.ObjectId(),
+            accountId: new Types.ObjectId(),
+            nextDate: new Date('2026-02-15T00:00:00Z'),
+            cadence: 'monthly',
+            cadenceAnchorDay: 15,
+            isActive: false,
+          },
+        ]),
+      );
+      // The guarded write finds nextDate already moved and matches nothing.
+      model.bulkWrite = jest.fn().mockResolvedValue({ matchedCount: 0 });
+
+      const res = await service.bulkOperation(
+        HH,
+        { ids: [new Types.ObjectId().toString()], action: BulkAction.ACTIVATE },
+        NOW,
+      );
+
+      expect(res).toEqual({ success: 0, failed: 1 });
     });
 
     it('reports all failed when no ids belong to the household slice', async () => {

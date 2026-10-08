@@ -17,8 +17,7 @@ import {
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { AccountDocument } from '../accounts/schemas/account.schema';
-import { addCadence } from '../recurring/recurring-dates.util';
-import { utcDay } from '../common/utc-date.util';
+import { settleTrackedSubscriptionDate } from '../recurring/recurring-dates.util';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
@@ -77,24 +76,6 @@ export class SubscriptionsService {
     return billingCycle === BillingCycle.YEARLY ? cost / 12 : cost;
   }
 
-  // Step a date forward one period at a time until it is today or later. The
-  // anchor keeps a month-end date on its intended day through a clamp. A
-  // migrated subscription has no stored anchor, so the starting date's day
-  // stands in for it, which keeps Jan 31 rolling to Feb 28 and then Mar 31.
-  private static rollForwardToToday(
-    date: Date,
-    cadence: RecurringCadence,
-    anchorDay: number | undefined,
-    now: Date,
-  ): Date {
-    const anchor = anchorDay ?? date.getUTCDate();
-    let next = date;
-    while (utcDay(next) < utcDay(now)) {
-      next = addCadence(next, cadence, anchor);
-    }
-    return next;
-  }
-
   // Monthly and yearly schedules remember their intended day-of-month so a
   // clamp to a short month is temporary. Weekly has no day-of-month identity.
   private static anchorDayFor(
@@ -106,24 +87,14 @@ export class SubscriptionsService {
       : nextDate.getUTCDate();
   }
 
-  // Ledger history for a subscription starts when it can post. It is never
-  // backfilled through this API, whatever path got it there: create with a
-  // past date, first attach, reactivation, or a date edited into the past. So
-  // a subscription that can post (has an account and is active) is saved with
-  // a nextDate of today or later, rolled forward on its cadence. Ordinary
-  // bills under /api/recurring keep their replay behavior.
+  // A subscription that can post never saves a past nextDate. The rule and
+  // its reasons live with settleTrackedSubscriptionDate, which
+  // RecurringService.update applies to /api/recurring as well.
   private static settleTrackedDate(
     doc: RecurringTransactionDocument,
     now: Date,
   ): void {
-    if (doc.accountId && doc.isActive && utcDay(doc.nextDate) < utcDay(now)) {
-      doc.nextDate = SubscriptionsService.rollForwardToToday(
-        doc.nextDate,
-        doc.cadence,
-        doc.cadenceAnchorDay,
-        now,
-      );
-    }
+    doc.nextDate = settleTrackedSubscriptionDate(doc, now);
   }
 
   /** Escape user input so it matches literally in a RegExp (no ReDoS/injection). */
@@ -630,9 +601,12 @@ export class SubscriptionsService {
   }
 
   // Activating a tracked subscription is the moment it can post, so it obeys
-  // the same no-backfill rule as update (see settleTrackedDate). Each tracked
-  // subscription with a past date gets its own rolled date in the same write
-  // that activates it. The rest flip in one updateMany.
+  // the same no-backfill rule as update (see settleTrackedSubscriptionDate).
+  // Each tracked subscription with a past date gets its own rolled date in the
+  // same write that activates it, guarded on the nextDate this request read,
+  // as RecurringService.advanceSchedule does. If the cron advanced it in
+  // between, the write misses and the subscription counts as failed instead
+  // of having a newer date overwritten. The rest flip in one updateMany.
   private async bulkActivate(
     householdId: string,
     docs: RecurringTransactionDocument[],
@@ -640,20 +614,25 @@ export class SubscriptionsService {
     now: Date,
   ): Promise<number> {
     const activatable = new Set(ids.map(String));
-    const rolled: { _id: Types.ObjectId; nextDate: Date }[] = [];
+    const rolled: { _id: Types.ObjectId; observed: Date; nextDate: Date }[] =
+      [];
     const plain: Types.ObjectId[] = [];
     for (const doc of docs) {
       if (!activatable.has(String(doc._id))) continue;
-      if (doc.accountId && doc.nextDate && utcDay(doc.nextDate) < utcDay(now)) {
-        rolled.push({
-          _id: doc._id,
-          nextDate: SubscriptionsService.rollForwardToToday(
-            doc.nextDate,
-            doc.cadence,
-            doc.cadenceAnchorDay,
-            now,
-          ),
-        });
+      // Settle as the activated state: the flip is what makes it able to post.
+      const nextDate = settleTrackedSubscriptionDate(
+        {
+          isSubscription: true,
+          accountId: doc.accountId,
+          isActive: true,
+          nextDate: doc.nextDate,
+          cadence: doc.cadence,
+          cadenceAnchorDay: doc.cadenceAnchorDay,
+        },
+        now,
+      );
+      if (nextDate !== doc.nextDate) {
+        rolled.push({ _id: doc._id, observed: doc.nextDate, nextDate });
       } else {
         plain.push(doc._id);
       }
@@ -662,12 +641,13 @@ export class SubscriptionsService {
     let matched = 0;
     if (rolled.length > 0) {
       const res = await this.recurringModel.bulkWrite(
-        rolled.map(({ _id, nextDate }) => ({
+        rolled.map(({ _id, observed, nextDate }) => ({
           updateOne: {
-            filter: { ...this.baseFilter(householdId), _id } as Record<
-              string,
-              unknown
-            >,
+            filter: {
+              ...this.baseFilter(householdId),
+              _id,
+              nextDate: observed,
+            } as Record<string, unknown>,
             update: { $set: { isActive: true, nextDate } },
           },
         })),
