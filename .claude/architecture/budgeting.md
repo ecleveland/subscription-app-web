@@ -152,9 +152,17 @@ BudgetCategory { budgetId, categoryId, plannedCents }
 
 ### Goal
 ```
-Goal { householdId, name, targetCents, currentCents, targetDate?, categoryId? }
+Goal { householdId, name, type: 'savings' | 'debt', targetCents, currentCents,
+       targetDate?, categoryId?, isArchived }
 ```
 Savings / debt-payoff / sinking-fund tracking. Phase 5.
+
+Both types count up, so progress is always `currentCents / targetCents`. A
+savings goal's target is the amount to save. A debt goal's target is the
+starting balance owed, and `currentCents` is how much has been paid off.
+`currentCents` changes only through `POST /goals/:id/contributions`, an atomic
+`$inc` that accepts negative amounts for corrections. `isArchived` lets a
+reached goal leave the default list without being deleted.
 
 ---
 
