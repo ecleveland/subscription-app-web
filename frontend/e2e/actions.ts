@@ -10,6 +10,8 @@ export interface NewSub {
   trialEndDate?: string;
   /** When set, enables "Shared subscription" and fills the people count. */
   sharedWith?: string;
+  /** When set, selects this account in the "Account" select. */
+  account?: string;
 }
 
 /** Create a subscription through the form and wait for the dashboard redirect. */
@@ -32,6 +34,11 @@ export async function createSubscription(page: Page, sub: NewSub): Promise<void>
     await page
       .getByLabel('Number of people sharing (including you)')
       .fill(sub.sharedWith);
+  }
+  if (sub.account) {
+    await page
+      .getByLabel('Account', { exact: true })
+      .selectOption({ label: sub.account });
   }
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);

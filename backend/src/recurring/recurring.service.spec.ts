@@ -421,6 +421,47 @@ describe('RecurringService', () => {
       expect(result).toBe(doc);
     });
 
+    describe('tracked subscription date (VEG-486)', () => {
+      // /api/recurring can attach or reactivate a subscription too, so it
+      // applies the same no-backfill rule as /api/subscriptions.
+      const NOW = new Date('2026-05-10T00:00:00Z');
+      const pastSub = (overrides: Record<string, any> = {}) =>
+        recDoc({
+          isSubscription: true,
+          nextDate: new Date('2026-02-15T00:00:00Z'),
+          cadenceAnchorDay: 15,
+          ...overrides,
+        });
+
+      it('rolls a past date forward when an account is attached', async () => {
+        const doc = pastSub({ accountId: undefined });
+        mockModel.findById.mockReturnValue(createChainable(doc));
+
+        await service.update(HOUSEHOLD_ID, REC_ID, { accountId: ACC_ID }, NOW);
+
+        expect(doc.nextDate).toEqual(new Date('2026-05-15T00:00:00Z'));
+        expect(doc.save).toHaveBeenCalled();
+      });
+
+      it('rolls a past date forward on reactivation', async () => {
+        const doc = pastSub({ isActive: false });
+        mockModel.findById.mockReturnValue(createChainable(doc));
+
+        await service.update(HOUSEHOLD_ID, REC_ID, { isActive: true }, NOW);
+
+        expect(doc.nextDate).toEqual(new Date('2026-05-15T00:00:00Z'));
+      });
+
+      it('leaves an ordinary bill with a past date untouched', async () => {
+        const doc = pastSub({ isSubscription: false, isActive: false });
+        mockModel.findById.mockReturnValue(createChainable(doc));
+
+        await service.update(HOUSEHOLD_ID, REC_ID, { isActive: true }, NOW);
+
+        expect(doc.nextDate).toEqual(new Date('2026-02-15T00:00:00Z'));
+      });
+    });
+
     it('re-anchors cadenceAnchorDay when nextDate moves', async () => {
       const doc = recDoc({ cadenceAnchorDay: 1 });
       mockModel.findById.mockReturnValue(createChainable(doc));
@@ -1083,6 +1124,140 @@ describe('RecurringService', () => {
         // stop rather than double-advancing.
         expect(mockModel.updateOne).toHaveBeenCalledTimes(1);
         expect(summary).toMatchObject({ yielded: 1, advancedOnly: 0 });
+      });
+    });
+
+    describe('subscriptions with an unusable account — advance without materializing (VEG-486)', () => {
+      // A tracked subscription whose account is archived or gone must not
+      // freeze: the Subscriptions page and renewal reminders read its nextDate.
+      // It falls back to the account-less advance-only path instead.
+      const subDoc = (overrides: Record<string, any> = {}) =>
+        scanDoc({ isSubscription: true, ...overrides });
+
+      it('advances a subscription whose account is archived without posting', async () => {
+        accountsService.findOne.mockResolvedValue({
+          _id: new Types.ObjectId(ACC_ID),
+          isArchived: true,
+        });
+        scanReturns([subDoc({ nextDate: new Date('2026-08-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).not.toHaveBeenCalled();
+        expect(mockModel.updateOne).toHaveBeenCalledTimes(1);
+        expect(advancedTo(0)).toEqual(new Date('2026-09-01T00:00:00Z'));
+        expect(summary).toMatchObject({
+          advancedOnly: 1,
+          skipped: 0,
+          materialized: 0,
+        });
+      });
+
+      it('advances a subscription whose account no longer exists', async () => {
+        accountsService.findOne.mockRejectedValue(new NotFoundException());
+        scanReturns([subDoc()]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).not.toHaveBeenCalled();
+        expect(summary).toMatchObject({ advancedOnly: 1, skipped: 0 });
+      });
+
+      it('counts every renewal it rolls past as dropped', async () => {
+        accountsService.findOne.mockResolvedValue({
+          _id: new Types.ObjectId(ACC_ID),
+          isArchived: true,
+        });
+        const warn = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+        // 07-01 and 08-01 are both due on 08-15: two renewals never post.
+        scanReturns([subDoc({ nextDate: new Date('2026-07-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({
+          advancedOnly: 2,
+          droppedRenewals: 2,
+          skipped: 0,
+        });
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reason: 'account archived',
+            droppedRenewals: 2,
+          }),
+          expect.any(String),
+        );
+      });
+
+      it('does not count an account-less subscription as dropped', async () => {
+        scanReturns([
+          subDoc({
+            accountId: undefined,
+            nextDate: new Date('2026-07-01T00:00:00Z'),
+          }),
+        ]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({ advancedOnly: 2, droppedRenewals: 0 });
+      });
+
+      it('still skips an ordinary bill whose account is archived', async () => {
+        accountsService.findOne.mockResolvedValue({
+          _id: new Types.ObjectId(ACC_ID),
+          isArchived: true,
+        });
+        scanReturns([scanDoc({ isSubscription: false })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(mockModel.updateOne).not.toHaveBeenCalled();
+        expect(summary).toMatchObject({ skipped: 1, advancedOnly: 0 });
+      });
+    });
+
+    describe('tracked subscriptions replay missed runs like bills (VEG-486)', () => {
+      // A missed midnight run or a transient posting failure must not lose a
+      // renewal. The API keeps a tracked subscription from carrying a stale
+      // date, so anything behind here is a real missed run and replays.
+      const behind = (overrides: Record<string, any> = {}) =>
+        scanDoc({
+          nextDate: new Date('2026-06-15T00:00:00Z'),
+          cadenceAnchorDay: 15,
+          ...overrides,
+        });
+
+      it('replays missed occurrences of a tracked subscription', async () => {
+        scanReturns([behind({ isSubscription: true })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        // 06-15, 07-15, and 08-15 (today) all post.
+        expect(transactionsService.materializeRecurring).toHaveBeenCalledTimes(
+          3,
+        );
+        expect(advancedTo(2)).toEqual(new Date('2026-09-15T00:00:00Z'));
+        expect(summary).toMatchObject({
+          materialized: 3,
+          droppedRenewals: 0,
+          advancedOnly: 0,
+        });
+      });
+
+      it('still backfills every missed period of an ordinary bill', async () => {
+        scanReturns([behind({ isSubscription: false })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).toHaveBeenCalledTimes(
+          3,
+        );
+        expect(summary).toMatchObject({
+          materialized: 3,
+          droppedRenewals: 0,
+          advancedOnly: 0,
+        });
       });
     });
 

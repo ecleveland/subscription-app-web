@@ -2,6 +2,7 @@ import {
   addCadence,
   daysUntil,
   isInReminderWindow,
+  settleTrackedSubscriptionDate,
 } from './recurring-dates.util';
 import { RecurringCadence } from './schemas/recurring-transaction.schema';
 
@@ -225,5 +226,75 @@ describe('isInReminderWindow', () => {
         new Date('2026-03-31T09:00:00Z'),
       ),
     ).toBe(true);
+  });
+});
+
+describe('settleTrackedSubscriptionDate', () => {
+  const NOW = new Date('2026-05-10T00:00:00Z');
+  const tracked = (overrides: Record<string, unknown> = {}) => ({
+    isSubscription: true,
+    accountId: 'acc',
+    isActive: true,
+    nextDate: new Date('2026-02-15T00:00:00Z'),
+    cadence: RecurringCadence.MONTHLY,
+    cadenceAnchorDay: 15 as number | undefined,
+    ...overrides,
+  });
+
+  it('rolls a past monthly date to the first occurrence on or after today', () => {
+    expect(settleTrackedSubscriptionDate(tracked(), NOW)).toEqual(
+      new Date('2026-05-15T00:00:00Z'),
+    );
+  });
+
+  it('rolls a weekly date in 7-day steps', () => {
+    const settled = settleTrackedSubscriptionDate(
+      tracked({
+        cadence: RecurringCadence.WEEKLY,
+        nextDate: new Date('2026-04-20T00:00:00Z'),
+        cadenceAnchorDay: undefined,
+      }),
+      NOW,
+    );
+    // 04-20, 04-27, 05-04, 05-11.
+    expect(settled).toEqual(new Date('2026-05-11T00:00:00Z'));
+  });
+
+  it('keeps a month-end anchor through short months', () => {
+    const settled = settleTrackedSubscriptionDate(
+      tracked({
+        nextDate: new Date('2026-01-31T00:00:00Z'),
+        cadenceAnchorDay: 31,
+      }),
+      NOW,
+    );
+    expect(settled).toEqual(new Date('2026-05-31T00:00:00Z'));
+  });
+
+  it("uses the starting date's day when no anchor is stored", () => {
+    const settled = settleTrackedSubscriptionDate(
+      tracked({
+        nextDate: new Date('2026-01-31T00:00:00Z'),
+        cadenceAnchorDay: undefined,
+      }),
+      NOW,
+    );
+    expect(settled).toEqual(new Date('2026-05-31T00:00:00Z'));
+  });
+
+  it('keeps a date that falls on today, at any time of day', () => {
+    const today = new Date('2026-05-10T18:30:00Z');
+    expect(
+      settleTrackedSubscriptionDate(tracked({ nextDate: today }), NOW),
+    ).toBe(today);
+  });
+
+  it.each([
+    ['an ordinary bill', { isSubscription: false }],
+    ['an account-less subscription', { accountId: undefined }],
+    ['a paused subscription', { isActive: false }],
+  ])('leaves the date of %s alone', (_label, overrides) => {
+    const state = tracked(overrides);
+    expect(settleTrackedSubscriptionDate(state, NOW)).toBe(state.nextDate);
   });
 });

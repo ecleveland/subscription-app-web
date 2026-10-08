@@ -20,7 +20,10 @@ import { QueryRecurringDto } from './dto/query-recurring.dto';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
-import { addCadence } from './recurring-dates.util';
+import {
+  addCadence,
+  settleTrackedSubscriptionDate,
+} from './recurring-dates.util';
 import { parseUtcDate, utcDay } from '../common/utc-date.util';
 
 // The merged, would-be-persisted state of a schedule's cross-field invariants,
@@ -50,6 +53,14 @@ export interface MaterializationSummary {
    * date-only roll is never mistaken for a ledger write.
    */
   advancedOnly: number;
+  /**
+   * The subset of `advancedOnly` that a tracked subscription rolled past
+   * because its account or category was unusable, so the scheduler fell back
+   * to advance-only. Each one is a renewal the ledger never records, so a
+   * nonzero value escalates the cron log to warn. A tracked subscription with
+   * usable references replays missed runs like any bill and never counts here.
+   */
+  droppedRenewals: number;
   /** Schedules that hit MAX_CATCHUP_PERIODS and will resume tomorrow. */
   capped: number;
   /**
@@ -238,6 +249,7 @@ export class RecurringService {
     householdId: string,
     id: string,
     dto: UpdateRecurringDto,
+    now: Date = new Date(),
   ): Promise<RecurringTransactionDocument> {
     const existing = await this.findOne(householdId, id);
 
@@ -352,6 +364,12 @@ export class RecurringService {
       existing.sharedWith = dto.sharedWith ?? undefined;
     }
 
+    // Attaching an account or reactivating here bypasses /api/subscriptions,
+    // so a subscription gets the same no-backfill rule at this door too.
+    if (existing.isSubscription) {
+      existing.nextDate = settleTrackedSubscriptionDate(existing, now);
+    }
+
     // Save via the document, never findOneAndUpdate: the schema's
     // isSubscription cross-field validator only runs on the save path.
     const saved = await existing.save();
@@ -412,6 +430,7 @@ export class RecurringService {
       skipped: 0,
       deactivated: 0,
       advancedOnly: 0,
+      droppedRenewals: 0,
       capped: 0,
       yielded: 0,
       failed: 0,
@@ -474,6 +493,30 @@ export class RecurringService {
     }
 
     const references = await this.resolveMaterializationRefs(schedule);
+    if (!references.usable && schedule.isSubscription) {
+      // A tracked subscription whose account or category became unusable
+      // falls back to advance-only, like an account-less one. Its nextDate
+      // drives the Subscriptions page and renewal reminders, so freezing it
+      // would break both. The cost is that renewals falling due while the
+      // reference is unusable never post, where an ordinary bill below stays
+      // frozen and replays them once the reference is fixed. Each such
+      // renewal counts as dropped so the run summary shows the loss.
+      const before = summary.advancedOnly;
+      await this.advanceSubscriptionOnly(schedule, now, summary);
+      const dropped = summary.advancedOnly - before;
+      summary.droppedRenewals += dropped;
+      this.logger.warn(
+        {
+          householdId,
+          recurringId,
+          reason: references.reason,
+          payee: schedule.payee,
+          droppedRenewals: dropped,
+        },
+        'Subscription has an unusable reference; advanced without posting',
+      );
+      return;
+    }
     if (!references.usable) {
       // Skip WITHOUT advancing. Leaving nextDate stale keeps the schedule at
       // the top of the household's nextDate-sorted list as a visible signal,
@@ -547,30 +590,14 @@ export class RecurringService {
         return;
       }
 
-      const result = await this.transactionsService.materializeRecurring(
+      await this.postOccurrence(
         householdId,
-        {
-          recurringId,
-          accountId: references.accountId.toString(),
-          categoryId: schedule.categoryId.toString(),
-          memberId: schedule.memberId?.toString(),
-          type: toTransactionType(schedule.type),
-          amountCents: schedule.amountCents,
-          date: occurrence,
-          payee: schedule.payee,
-          notes: schedule.notes,
-          tags: schedule.tags ?? [],
-        },
+        recurringId,
+        references.accountId,
+        schedule,
+        occurrence,
+        summary,
       );
-      if (result.duplicate) {
-        // A previous run wrote this one and died before advancing. Treat it as
-        // done and move on — aborting here would wedge the schedule forever,
-        // re-colliding on the same date every night.
-        summary.duplicate += 1;
-      } else {
-        summary.materialized += 1;
-      }
-
       const next = addCadence(
         occurrence,
         schedule.cadence,
@@ -617,6 +644,40 @@ export class RecurringService {
 
       occurrence = next;
       periods += 1;
+    }
+  }
+
+  // Post one occurrence to the ledger and count it. A duplicate means a
+  // previous run wrote this one and died before advancing. Treat it as done
+  // and move on, because aborting would wedge the schedule forever,
+  // re-colliding on the same date every night.
+  private async postOccurrence(
+    householdId: string,
+    recurringId: string,
+    accountId: Types.ObjectId,
+    schedule: DueSchedule,
+    occurrence: Date,
+    summary: MaterializationSummary,
+  ): Promise<void> {
+    const result = await this.transactionsService.materializeRecurring(
+      householdId,
+      {
+        recurringId,
+        accountId: accountId.toString(),
+        categoryId: schedule.categoryId.toString(),
+        memberId: schedule.memberId?.toString(),
+        type: toTransactionType(schedule.type),
+        amountCents: schedule.amountCents,
+        date: occurrence,
+        payee: schedule.payee,
+        notes: schedule.notes,
+        tags: schedule.tags ?? [],
+      },
+    );
+    if (result.duplicate) {
+      summary.duplicate += 1;
+    } else {
+      summary.materialized += 1;
     }
   }
 
@@ -744,8 +805,10 @@ export class RecurringService {
     schedule: DueSchedule,
   ): Promise<MaterializationRefs> {
     if (!schedule.accountId) {
-      // Subscriptions have no account and stay on the advance-only path. No
-      // account is assigned through the subscriptions API today.
+      // Account-less subscriptions never reach here; materializeSchedule
+      // routes them to advance-only first. Subscriptions get an account
+      // through /api/subscriptions, and one whose account is unusable also
+      // falls back to advance-only.
       return { usable: false, reason: 'no accountId' };
     }
     const householdId = schedule.householdId.toString();

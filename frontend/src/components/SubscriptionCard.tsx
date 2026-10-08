@@ -103,6 +103,11 @@ export default function SubscriptionCard({
               Split {subscription.sharedWith} ways
             </span>
           )}
+          {subscription.accountId && (
+            <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
+              In ledger
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className={`text-lg font-bold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>

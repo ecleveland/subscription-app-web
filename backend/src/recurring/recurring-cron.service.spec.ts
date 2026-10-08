@@ -22,6 +22,8 @@ describe('RecurringCronService', () => {
     duplicate: 0,
     skipped: 0,
     deactivated: 0,
+    advancedOnly: 0,
+    droppedRenewals: 0,
     capped: 0,
     yielded: 0,
     failed: 0,
@@ -97,6 +99,19 @@ describe('RecurringCronService', () => {
       await cron.handleMaterialization();
       expect(warn).toHaveBeenCalledWith(
         expect.objectContaining({ skipped: 2 }),
+        expect.stringContaining('complete'),
+      );
+    });
+
+    it('escalates to warn when subscription renewals were dropped', async () => {
+      mockRecurringService.materializeDue.mockResolvedValue({
+        ...summary,
+        droppedRenewals: 3,
+      });
+      const warn = levelSpy('warn');
+      await cron.handleMaterialization();
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ droppedRenewals: 3 }),
         expect.stringContaining('complete'),
       );
     });

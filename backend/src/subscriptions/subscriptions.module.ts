@@ -8,6 +8,7 @@ import {
 } from '../recurring/schemas/recurring-transaction.schema';
 import { HouseholdsModule } from '../households/households.module';
 import { CategoriesModule } from '../categories/categories.module';
+import { AccountsModule } from '../accounts/accounts.module';
 
 @Module({
   imports: [
@@ -20,6 +21,9 @@ import { CategoriesModule } from '../categories/categories.module';
     // Provides CategoriesService (category-name → categoryId resolution for the
     // adapter).
     CategoriesModule,
+    // Provides AccountsService, which checks that a subscription's ledger
+    // account belongs to the household and is not archived (VEG-486).
+    AccountsModule,
   ],
   controllers: [SubscriptionsController],
   providers: [SubscriptionsService],

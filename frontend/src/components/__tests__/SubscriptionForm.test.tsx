@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SubscriptionForm from '../SubscriptionForm';
-import type { Subscription } from '@/lib/types';
+import type { Account, Subscription } from '@/lib/types';
 
 vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
@@ -10,6 +10,40 @@ vi.mock('@/lib/api', () => ({
 vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
+}));
+
+const ledgerAccounts: Account[] = [
+  {
+    _id: 'acc-1',
+    householdId: 'hh-1',
+    name: 'Checking',
+    type: 'checking',
+    balanceCents: 0,
+    isArchived: false,
+    createdAt: '2025-01-01',
+    updatedAt: '2025-01-01',
+  },
+  {
+    _id: 'acc-2',
+    householdId: 'hh-1',
+    name: 'Visa',
+    type: 'credit',
+    balanceCents: 0,
+    isArchived: false,
+    createdAt: '2025-01-01',
+    updatedAt: '2025-01-01',
+  },
+];
+
+const accountsState = {
+  accounts: ledgerAccounts,
+  loading: false,
+  error: null as string | null,
+  refresh: vi.fn(),
+};
+
+vi.mock('@/lib/accounts-context', () => ({
+  useAccounts: () => accountsState,
 }));
 
 const mockPush = vi.fn();
@@ -379,6 +413,170 @@ describe('SubscriptionForm', () => {
           vi.mocked(apiFetch).mock.calls[0][1]!.body as string,
         );
         expect(body.reminderDaysBefore).toBe(7);
+      });
+    });
+  });
+
+  describe('ledger account', () => {
+    afterEach(() => {
+      accountsState.accounts = ledgerAccounts;
+      accountsState.loading = false;
+      accountsState.error = null;
+    });
+
+    function lastBody() {
+      const calls = vi.mocked(apiFetch).mock.calls;
+      return JSON.parse(calls[calls.length - 1][1]!.body as string);
+    }
+
+    async function fillRequired(user: ReturnType<typeof userEvent.setup>) {
+      await user.type(screen.getByLabelText('Name'), 'Spotify');
+      await user.type(screen.getByLabelText('Cost ($)'), '9.99');
+      await user.type(screen.getByLabelText('Next Billing Date'), '2025-07-01');
+    }
+
+    it('renders the Account select defaulting to not tracked, with each account as an option', () => {
+      render(<SubscriptionForm />);
+
+      const select = screen.getByLabelText('Account');
+      expect(select).toHaveValue('');
+      expect(
+        screen.getByRole('option', { name: 'Not tracked in the ledger' }),
+      ).toHaveProperty('selected', true);
+      expect(screen.getByRole('option', { name: 'Checking' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Visa' })).toBeInTheDocument();
+    });
+
+    it('sends the chosen accountId on create', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm />);
+      await fillRequired(user);
+      await user.selectOptions(screen.getByLabelText('Account'), 'acc-1');
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody().accountId).toBe('acc-1');
+    });
+
+    it('omits accountId on create when no account is chosen', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm />);
+      await fillRequired(user);
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody()).not.toHaveProperty('accountId');
+    });
+
+    it('preselects the linked account and sends null when detached on edit', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-2' }} />);
+
+      const select = screen.getByLabelText('Account');
+      expect(select).toHaveValue('acc-2');
+
+      await user.selectOptions(select, '');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody().accountId).toBeNull();
+    });
+
+    it('keeps an archived linked account selectable as a disabled placeholder', () => {
+      render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-gone' }} />);
+
+      const archived = screen.getByRole('option', {
+        name: 'Current account (archived or unavailable)',
+      });
+      expect(archived).toBeDisabled();
+      expect(screen.getByLabelText('Account')).toHaveValue('acc-gone');
+    });
+
+    it('disables the select with a loading placeholder while accounts load', () => {
+      accountsState.accounts = [];
+      accountsState.loading = true;
+
+      render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-2' }} />);
+
+      const select = screen.getByLabelText('Account');
+      expect(select).toBeDisabled();
+      expect(select).toHaveValue('acc-2');
+      expect(screen.getByRole('option', { name: 'Loading accounts...' })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: /archived/ })).not.toBeInTheDocument();
+    });
+
+    it('selects a could-not-load placeholder for the linked account after a failed load', () => {
+      accountsState.accounts = [];
+      accountsState.error = 'Network down';
+
+      render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-2' }} />);
+
+      expect(screen.getByLabelText('Account')).toHaveValue('acc-2');
+      const placeholder = screen.getByRole('option', {
+        name: 'Current account (could not load accounts)',
+      });
+      expect(placeholder).toBeDisabled();
+      expect(placeholder).toHaveProperty('selected', true);
+      expect(screen.getByText(/Couldn.t load accounts: Network down/)).toBeInTheDocument();
+    });
+
+    it('keeps the linked account when an edit leaves the select untouched', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-2' }} />);
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody().accountId).toBe('acc-2');
+    });
+
+    it('keeps an archived linked account when an edit leaves the select untouched', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-gone' }} />);
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody().accountId).toBe('acc-gone');
+    });
+
+    it('shows the load error banner in create mode when accounts fail to load', () => {
+      accountsState.accounts = [];
+      accountsState.error = 'Network down';
+
+      render(<SubscriptionForm />);
+
+      expect(screen.getByText(/Couldn.t load accounts: Network down/)).toBeInTheDocument();
+    });
+
+    it('surfaces the server rejection for a free subscription', async () => {
+      const message =
+        'A free subscription cannot be tracked in an account. Set a cost above $0 or leave the account empty.';
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockRejectedValueOnce(new Error(message));
+
+      render(<SubscriptionForm />);
+      await fillRequired(user);
+      await user.selectOptions(screen.getByLabelText('Account'), 'acc-1');
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => {
+        expect(screen.getByText(message)).toBeInTheDocument();
+        expect(showErrorToast).toHaveBeenCalledWith(message);
       });
     });
   });

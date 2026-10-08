@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { uniqueName } from './helpers';
-import { createSubscription, findCard } from './actions';
+import { createAccount, createSubscription, findCard } from './actions';
 
 test.describe('Subscription CRUD', () => {
   test('create, view on dashboard, edit, then delete', async ({ page }) => {
@@ -34,5 +34,16 @@ test.describe('Subscription CRUD', () => {
     await page.goto('/');
     await page.getByLabel('Search subscriptions').fill(name);
     await expect(page.getByRole('link').filter({ hasText: name })).toHaveCount(0);
+  });
+
+  test('tracks a subscription in an account and shows the badge', async ({ page }) => {
+    const account = uniqueName('E2E Ledger Acct');
+    await createAccount(page, account, 'checking');
+
+    const name = uniqueName('E2E Ledger Sub');
+    await createSubscription(page, { name, cost: '4.99', account });
+
+    const card = await findCard(page, name);
+    await expect(card).toContainText('In ledger');
   });
 });

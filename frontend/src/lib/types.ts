@@ -23,6 +23,7 @@ export interface Subscription {
   reminderDaysBefore: number;
   trialEndDate?: string;
   sharedWith?: number | null;
+  accountId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -195,6 +195,18 @@ describe('SubscriptionCard', () => {
     expect(screen.getByRole('checkbox')).toBeChecked();
   });
 
+  describe('ledger account', () => {
+    it('shows In ledger badge when accountId is set', () => {
+      render(<SubscriptionCard subscription={makeSub({ accountId: 'acc-1' })} />);
+      expect(screen.getByText('In ledger')).toBeInTheDocument();
+    });
+
+    it('does not show the badge without accountId', () => {
+      render(<SubscriptionCard subscription={makeSub({ accountId: null })} />);
+      expect(screen.queryByText('In ledger')).not.toBeInTheDocument();
+    });
+  });
+
   describe('shared subscription', () => {
     it('should show Split badge when sharedWith is set', () => {
       render(
