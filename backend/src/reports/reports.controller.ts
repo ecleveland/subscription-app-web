@@ -6,7 +6,10 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
-import { CashFlowQueryDto } from './dto/cash-flow-query.dto';
+import {
+  CashFlowQueryDto,
+  MAX_CASH_FLOW_MONTHS,
+} from './dto/cash-flow-query.dto';
 import type { CashFlowReport } from './interfaces/cash-flow.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../households/guards/household.guard';
@@ -27,12 +30,12 @@ export class ReportsController {
     description:
       'Sums income and expense transactions by UTC month. Transfers are ' +
       'excluded. Months with no activity are zero-filled. The range is capped ' +
-      'at 36 months.',
+      `at ${MAX_CASH_FLOW_MONTHS} months.`,
   })
   @ApiResponse({ status: 200, description: 'Cash flow by month' })
   @ApiResponse({
     status: 400,
-    description: 'Malformed month, from after to, or range over 36 months',
+    description: `Malformed month, from after to, or range over ${MAX_CASH_FLOW_MONTHS} months`,
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   getCashFlow(

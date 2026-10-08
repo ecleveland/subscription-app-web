@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import {
@@ -15,6 +15,8 @@ import type {
 
 @Injectable()
 export class ReportsService {
+  private readonly logger = new Logger(ReportsService.name);
+
   constructor(
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
@@ -76,7 +78,16 @@ export class ReportsService {
     );
     for (const row of rows) {
       const entry = byMonth.get(row._id.month);
-      if (!entry) continue;
+      // Unreachable while the $match range and the zero-filled months agree.
+      // Warn if it ever happens so a range bug shows up instead of cents
+      // silently vanishing from the report.
+      if (!entry) {
+        this.logger.warn(
+          { householdId, month: row._id.month },
+          'Dropped a cash flow row outside the requested range',
+        );
+        continue;
+      }
       if (row._id.type === TransactionType.INCOME) {
         entry.incomeCents += row.totalCents;
       } else {

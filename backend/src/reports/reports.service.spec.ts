@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
@@ -216,6 +217,26 @@ describe('ReportsService', () => {
       expect(result.months).toEqual([
         { month: '2026-01', incomeCents: 0, expenseCents: 0, netCents: 0 },
       ]);
+    });
+
+    it('warns with the household and the key when it drops a row outside the range', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      mockRows([
+        {
+          _id: { month: '2025-12', type: TransactionType.INCOME },
+          totalCents: 999,
+        },
+      ]);
+
+      await service.getCashFlow(householdId, '2026-01', '2026-01');
+
+      expect(warn).toHaveBeenCalledWith(
+        { householdId, month: '2025-12' },
+        expect.stringMatching(/outside the requested range/),
+      );
+      warn.mockRestore();
     });
   });
 });
