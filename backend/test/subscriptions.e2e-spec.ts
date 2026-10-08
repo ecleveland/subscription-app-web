@@ -9,6 +9,7 @@ import { RecurringService } from '../src/recurring/recurring.service';
 import { RecurringCronService } from '../src/recurring/recurring-cron.service';
 import { HouseholdsService } from '../src/households/households.service';
 import { UsersService } from '../src/users/users.service';
+import { Transaction } from '../src/transactions/schemas/transaction.schema';
 import {
   HouseholdMember,
   HouseholdMemberDocument,
@@ -509,6 +510,235 @@ describe('Subscriptions (e2e)', () => {
 
       // Second run the same day finds the lock held and is a no-op (no throw).
       await expect(cron.handleMaterialization()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('Ledger tracking (VEG-486)', () => {
+    // Attaching an account to a subscription hands it to the scheduler's
+    // normal materialization path, which posts each renewal as an expense.
+    let recurringService: RecurringService;
+    let transactionModel: Model<Transaction>;
+
+    const today = (): string => new Date().toISOString().slice(0, 10);
+
+    const createAccount = async (
+      token: string,
+      name: string,
+    ): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/accounts')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name, type: 'checking' })
+        .expect(201);
+      return res.body._id;
+    };
+
+    const createSub = async (
+      body: Record<string, unknown>,
+    ): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          billingCycle: 'monthly',
+          category: 'Software',
+          ...body,
+        })
+        .expect(201);
+      return res.body._id;
+    };
+
+    const getSub = async (subId: string): Promise<any> => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/subscriptions/${subId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      return res.body;
+    };
+
+    const patchSub = (subId: string, body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .patch(`/api/subscriptions/${subId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send(body);
+
+    const transactionsFor = (subId: string) =>
+      transactionModel
+        .find({ recurringId: new Types.ObjectId(subId) } as Record<
+          string,
+          unknown
+        >)
+        .lean()
+        .exec();
+
+    let accountA: string;
+
+    beforeAll(async () => {
+      recurringService = app.get(RecurringService);
+      transactionModel = app.get<Model<Transaction>>(
+        getModelToken(Transaction.name),
+      );
+      accountA = await createAccount(tokenA, 'Ledger Checking');
+    });
+
+    it('attaches and detaches an account via PATCH', async () => {
+      const subId = await createSub({
+        name: 'Attach Detach',
+        cost: 7,
+        nextBillingDate: '2099-01-01',
+      });
+      expect((await getSub(subId)).accountId).toBeNull();
+
+      await patchSub(subId, { accountId: accountA }).expect(200);
+      expect((await getSub(subId)).accountId).toBe(accountA);
+
+      await patchSub(subId, { accountId: null }).expect(200);
+      expect((await getSub(subId)).accountId).toBeNull();
+    });
+
+    it('posts a renewal due today as an expense in the account', async () => {
+      const date = today();
+      const subId = await createSub({
+        name: 'Ledger Due Today',
+        cost: 12.34,
+        nextBillingDate: date,
+        accountId: accountA,
+      });
+
+      await recurringService.materializeDue();
+
+      const txns = await transactionsFor(subId);
+      expect(txns).toHaveLength(1);
+      expect(txns[0].amountCents).toBe(1234);
+      expect(txns[0].type).toBe('expense');
+      expect((txns[0].accountId as unknown as Types.ObjectId).toString()).toBe(
+        accountA,
+      );
+      expect(new Date(txns[0].date).toISOString()).toBe(
+        `${date}T00:00:00.000Z`,
+      );
+
+      const sub = await getSub(subId);
+      expect(new Date(sub.nextBillingDate).getTime()).toBeGreaterThan(
+        new Date(`${date}T00:00:00.000Z`).getTime(),
+      );
+    });
+
+    it('starts posting from the next renewal, not past ones', async () => {
+      const subId = await createSub({
+        name: 'Ledger Starts Now',
+        cost: 5,
+        nextBillingDate: today(),
+      });
+
+      // Account-less: the scheduler only rolls the date forward.
+      await recurringService.materializeDue();
+      const advanced = (await getSub(subId)).nextBillingDate;
+      expect(await transactionsFor(subId)).toHaveLength(0);
+
+      await patchSub(subId, { accountId: accountA }).expect(200);
+      await recurringService.materializeDue();
+
+      expect(await transactionsFor(subId)).toHaveLength(0);
+      expect((await getSub(subId)).nextBillingDate).toBe(advanced);
+    });
+
+    it('rolls a stale nextBillingDate forward on attach instead of backfilling', async () => {
+      const past = new Date();
+      past.setUTCMonth(past.getUTCMonth() - 3);
+      const subId = await createSub({
+        name: 'Ledger Stale Date',
+        cost: 6,
+        nextBillingDate: past.toISOString().slice(0, 10),
+      });
+
+      await patchSub(subId, { accountId: accountA }).expect(200);
+      const todayMidnight = new Date(`${today()}T00:00:00.000Z`).getTime();
+      expect(
+        new Date((await getSub(subId)).nextBillingDate).getTime(),
+      ).toBeGreaterThanOrEqual(todayMidnight);
+
+      await recurringService.materializeDue();
+
+      // At most the renewal due today posts; none of the three missed months.
+      const txns = await transactionsFor(subId);
+      expect(txns.length).toBeLessThanOrEqual(1);
+      for (const txn of txns) {
+        expect(new Date(txn.date).getTime()).toBeGreaterThanOrEqual(
+          todayMidnight,
+        );
+      }
+      expect(
+        new Date((await getSub(subId)).nextBillingDate).getTime(),
+      ).toBeGreaterThanOrEqual(todayMidnight);
+    });
+
+    it("rejects an account from another user's household", async () => {
+      const accountB = await createAccount(tokenB, 'Other Household');
+      const subId = await createSub({
+        name: 'Foreign Account',
+        cost: 3,
+        nextBillingDate: '2099-01-01',
+      });
+
+      const res = await patchSub(subId, { accountId: accountB }).expect(400);
+      expect(res.body.message).toMatch(/does not reference an account/);
+      expect((await getSub(subId)).accountId).toBeNull();
+    });
+
+    it('rejects an account on a free subscription', async () => {
+      const subId = await createSub({
+        name: 'Free Tier',
+        cost: 0,
+        nextBillingDate: '2099-01-01',
+      });
+      const patched = await patchSub(subId, { accountId: accountA }).expect(
+        400,
+      );
+      expect(patched.body.message).toMatch(/free subscription/i);
+
+      const created = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Free With Account',
+          cost: 0,
+          billingCycle: 'monthly',
+          category: 'Software',
+          nextBillingDate: '2099-01-01',
+          accountId: accountA,
+        })
+        .expect(400);
+      expect(created.body.message).toMatch(/free subscription/i);
+    });
+
+    it('rejects an archived account', async () => {
+      const archived = await createAccount(tokenA, 'Closed Card');
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${archived}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isArchived: true })
+        .expect(200);
+      const subId = await createSub({
+        name: 'Archived Target',
+        cost: 4,
+        nextBillingDate: '2099-01-01',
+      });
+
+      const res = await patchSub(subId, { accountId: archived }).expect(400);
+      expect(res.body.message).toBe(
+        'Cannot track a subscription in an archived account',
+      );
+    });
+
+    it('rejects an accountId that is not an ObjectId', async () => {
+      const subId = await createSub({
+        name: 'Bad Id',
+        cost: 4,
+        nextBillingDate: '2099-01-01',
+      });
+      const res = await patchSub(subId, { accountId: 'not-an-id' }).expect(400);
+      expect(res.body.message).toContain('accountId must be a mongodb id');
     });
   });
 

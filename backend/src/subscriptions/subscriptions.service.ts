@@ -15,6 +15,10 @@ import {
   RecurringCadence,
 } from '../recurring/schemas/recurring-transaction.schema';
 import { CategoriesService } from '../categories/categories.service';
+import { AccountsService } from '../accounts/accounts.service';
+import { AccountDocument } from '../accounts/schemas/account.schema';
+import { addCadence } from '../recurring/recurring-dates.util';
+import { utcDay } from '../common/utc-date.util';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import { QuerySubscriptionDto } from './dto/query-subscription.dto';
@@ -43,6 +47,7 @@ export interface SubscriptionView {
   reminderDaysBefore: number;
   trialEndDate?: Date;
   sharedWith?: number | null;
+  accountId: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,6 +66,7 @@ export class SubscriptionsService {
     @InjectModel(RecurringTransaction.name)
     private readonly recurringModel: Model<RecurringTransactionDocument>,
     private readonly categoriesService: CategoriesService,
+    private readonly accountsService: AccountsService,
   ) {}
 
   private static getMonthlyCost(
@@ -69,6 +75,21 @@ export class SubscriptionsService {
   ): number {
     if (billingCycle === BillingCycle.WEEKLY) return cost * 4.33;
     return billingCycle === BillingCycle.YEARLY ? cost / 12 : cost;
+  }
+
+  // Step a date forward one period at a time, so cadenceAnchorDay keeps a
+  // clamped month-end date on its intended day, until it is today or later.
+  private static rollForwardToToday(
+    date: Date,
+    cadence: RecurringCadence,
+    anchorDay: number | undefined,
+    now: Date = new Date(),
+  ): Date {
+    let next = date;
+    while (utcDay(next) < utcDay(now)) {
+      next = addCadence(next, cadence, anchorDay);
+    }
+    return next;
   }
 
   /** Escape user input so it matches literally in a RegExp (no ReDoS/injection). */
@@ -100,6 +121,8 @@ export class SubscriptionsService {
       reminderDaysBefore: doc.reminderDaysBefore,
       trialEndDate: doc.trialEndDate,
       sharedWith: doc.sharedWith ?? null,
+      accountId:
+        (doc.accountId as unknown as Types.ObjectId | undefined) ?? null,
       createdAt: (doc as unknown as { createdAt: Date }).createdAt,
       updatedAt: (doc as unknown as { updatedAt: Date }).updatedAt,
     };
@@ -130,11 +153,65 @@ export class SubscriptionsService {
     return resolved;
   }
 
+  // A subscription's ledger account must live in this household and accept new
+  // activity. A missing or foreign account is a client error (400), not a 404,
+  // because the subscription is what the request creates or updates. This
+  // mirrors RecurringService.assertAccountUsable.
+  // `reactivating` only rewords the archived message: on PATCH
+  // { isActive: true } the client never sent an accountId.
+  private async assertAccountUsable(
+    householdId: string,
+    accountId: string,
+    { reactivating = false }: { reactivating?: boolean } = {},
+  ): Promise<void> {
+    let account: AccountDocument;
+    try {
+      account = await this.accountsService.findOne(householdId, accountId);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new BadRequestException(
+          `accountId "${accountId}" does not reference an account in this household`,
+        );
+      }
+      throw error;
+    }
+    if (account.isArchived) {
+      throw new BadRequestException(
+        reactivating
+          ? 'Cannot reactivate a subscription whose account is archived'
+          : 'Cannot track a subscription in an archived account',
+      );
+    }
+  }
+
+  // Transaction.amountCents has min 1, so a $0 subscription with an account
+  // would fail every nightly materialization. Reject the pairing up front.
+  private assertLedgerable(
+    amountCents: number,
+    accountId: Types.ObjectId | undefined,
+  ): void {
+    if (accountId && amountCents === 0) {
+      throw new BadRequestException(
+        'A free subscription cannot be tracked in an account. Set a cost above $0 or leave the account empty.',
+      );
+    }
+  }
+
   async create(
     householdId: string,
     memberId: string,
     createDto: CreateSubscriptionDto,
   ): Promise<SubscriptionView> {
+    const accountId =
+      typeof createDto.accountId === 'string'
+        ? new Types.ObjectId(createDto.accountId)
+        : undefined;
+    const amountCents = Math.round(createDto.cost * 100);
+    this.assertLedgerable(amountCents, accountId);
+    if (typeof createDto.accountId === 'string') {
+      await this.assertAccountUsable(householdId, createDto.accountId);
+    }
+
     const categoryId = await this.resolveCategoryId(
       householdId,
       createDto.category,
@@ -145,7 +222,8 @@ export class SubscriptionsService {
       memberId: new Types.ObjectId(memberId),
       type: RecurringType.EXPENSE,
       isSubscription: true,
-      amountCents: Math.round(createDto.cost * 100),
+      amountCents,
+      accountId,
       payee: createDto.name,
       cadence: createDto.billingCycle as unknown as RecurringCadence,
       nextDate: new Date(createDto.nextBillingDate),
@@ -285,10 +363,47 @@ export class SubscriptionsService {
   ): Promise<SubscriptionView> {
     const doc = await this.findDoc(householdId, id);
 
-    if (updateDto.name !== undefined) doc.payee = updateDto.name;
-    if (updateDto.cost !== undefined) {
-      doc.amountCents = Math.round(updateDto.cost * 100);
+    // Validate the merged ledger state before mutating anything, so a rejected
+    // patch leaves the document untouched.
+    const currentAccountId = doc.accountId as unknown as
+      | Types.ObjectId
+      | undefined;
+    const nextAmountCents =
+      updateDto.cost !== undefined
+        ? Math.round(updateDto.cost * 100)
+        : doc.amountCents;
+    const nextAccountId =
+      typeof updateDto.accountId === 'string'
+        ? new Types.ObjectId(updateDto.accountId)
+        : updateDto.accountId === null
+          ? undefined
+          : currentAccountId;
+
+    let accountChecked = false;
+    if (
+      typeof updateDto.accountId === 'string' &&
+      updateDto.accountId.toLowerCase() !== currentAccountId?.toString()
+    ) {
+      await this.assertAccountUsable(householdId, updateDto.accountId);
+      accountChecked = true;
     }
+    // Reactivation must not resume posting to an archived account. The
+    // recurring API applies the same rule to ordinary schedules.
+    if (
+      updateDto.isActive === true &&
+      !doc.isActive &&
+      nextAccountId &&
+      !accountChecked
+    ) {
+      await this.assertAccountUsable(householdId, nextAccountId.toString(), {
+        reactivating: true,
+      });
+    }
+    this.assertLedgerable(nextAmountCents, nextAccountId);
+
+    const wasActive = doc.isActive;
+    if (updateDto.name !== undefined) doc.payee = updateDto.name;
+    if (updateDto.cost !== undefined) doc.amountCents = nextAmountCents;
     if (updateDto.billingCycle !== undefined) {
       doc.cadence = updateDto.billingCycle as unknown as RecurringCadence;
     }
@@ -315,6 +430,26 @@ export class SubscriptionsService {
     }
     if (updateDto.sharedWith !== undefined) {
       doc.sharedWith = updateDto.sharedWith ?? undefined;
+    }
+    if (updateDto.accountId !== undefined) {
+      doc.accountId = nextAccountId as unknown as typeof doc.accountId;
+    }
+    // A subscription never backfills. Its ledger history starts the moment it
+    // can post, which is when an account is first attached or when a tracked
+    // subscription is reactivated. At either moment a past nextDate would make
+    // the scheduler post every missed renewal as a real expense, so roll it
+    // forward on the cadence to the first occurrence on or after today.
+    // Re-pointing an active subscription to another account keeps the date,
+    // because it was already posting. Ordinary bills under /api/recurring keep
+    // their replay behavior.
+    const firstAttach = !currentAccountId && !!nextAccountId;
+    const reactivating = updateDto.isActive === true && !wasActive;
+    if (nextAccountId && (firstAttach || reactivating)) {
+      doc.nextDate = SubscriptionsService.rollForwardToToday(
+        doc.nextDate,
+        doc.cadence,
+        doc.cadenceAnchorDay,
+      );
     }
 
     const saved = await doc.save();
@@ -355,9 +490,13 @@ export class SubscriptionsService {
 
     const validDocs = await this.recurringModel
       .find(filter)
-      .select('_id')
+      .select('_id accountId')
       .exec();
-    const validIds = validDocs.map((doc) => doc._id);
+    let validIds = validDocs.map((doc) => doc._id);
+
+    if (dto.action === BulkAction.ACTIVATE) {
+      validIds = await this.activatableIds(householdId, validDocs);
+    }
 
     if (validIds.length === 0) {
       return { success: 0, failed: dto.ids.length };
@@ -416,6 +555,40 @@ export class SubscriptionsService {
     );
 
     return { success, failed: dto.ids.length - success };
+  }
+
+  // Bulk activate follows the same rule as PATCH { isActive: true }: a
+  // subscription tracked in a missing or archived account stays paused, so it
+  // cannot resume posting there. Each distinct account is looked up once.
+  private async activatableIds(
+    householdId: string,
+    docs: RecurringTransactionDocument[],
+  ): Promise<Types.ObjectId[]> {
+    const usable = new Map<string, boolean>();
+    for (const doc of docs) {
+      const accountId = (
+        doc.accountId as unknown as Types.ObjectId | undefined
+      )?.toString();
+      if (!accountId || usable.has(accountId)) continue;
+      try {
+        const account = await this.accountsService.findOne(
+          householdId,
+          accountId,
+        );
+        usable.set(accountId, !account.isArchived);
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) throw error;
+        usable.set(accountId, false);
+      }
+    }
+    return docs
+      .filter((doc) => {
+        const accountId = (
+          doc.accountId as unknown as Types.ObjectId | undefined
+        )?.toString();
+        return !accountId || usable.get(accountId) === true;
+      })
+      .map((doc) => doc._id);
   }
 
   private escapeCsvField(field: string): string {

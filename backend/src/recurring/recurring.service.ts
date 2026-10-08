@@ -474,6 +474,25 @@ export class RecurringService {
     }
 
     const references = await this.resolveMaterializationRefs(schedule);
+    if (!references.usable && schedule.isSubscription) {
+      // A tracked subscription whose account or category became unusable
+      // falls back to advance-only, like an account-less one. Its nextDate
+      // drives the Subscriptions page and renewal reminders, so freezing it
+      // would break both. The cost is that renewals falling due while the
+      // reference is unusable never post, where an ordinary bill below stays
+      // frozen and replays them once the reference is fixed.
+      this.logger.warn(
+        {
+          householdId,
+          recurringId,
+          reason: references.reason,
+          payee: schedule.payee,
+        },
+        'Subscription has an unusable reference; advancing without posting',
+      );
+      await this.advanceSubscriptionOnly(schedule, now, summary);
+      return;
+    }
     if (!references.usable) {
       // Skip WITHOUT advancing. Leaving nextDate stale keeps the schedule at
       // the top of the household's nextDate-sorted list as a visible signal,
@@ -744,8 +763,10 @@ export class RecurringService {
     schedule: DueSchedule,
   ): Promise<MaterializationRefs> {
     if (!schedule.accountId) {
-      // Subscriptions have no account and stay on the advance-only path. No
-      // account is assigned through the subscriptions API today.
+      // Account-less subscriptions never reach here; materializeSchedule
+      // routes them to advance-only first. Subscriptions get an account
+      // through /api/subscriptions, and one whose account is unusable also
+      // falls back to advance-only.
       return { usable: false, reason: 'no accountId' };
     }
     const householdId = schedule.householdId.toString();

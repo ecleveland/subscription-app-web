@@ -1086,6 +1086,56 @@ describe('RecurringService', () => {
       });
     });
 
+    describe('subscriptions with an unusable account — advance without materializing (VEG-486)', () => {
+      // A tracked subscription whose account is archived or gone must not
+      // freeze: the Subscriptions page and renewal reminders read its nextDate.
+      // It falls back to the account-less advance-only path instead.
+      const subDoc = (overrides: Record<string, any> = {}) =>
+        scanDoc({ isSubscription: true, ...overrides });
+
+      it('advances a subscription whose account is archived without posting', async () => {
+        accountsService.findOne.mockResolvedValue({
+          _id: new Types.ObjectId(ACC_ID),
+          isArchived: true,
+        });
+        scanReturns([subDoc({ nextDate: new Date('2026-08-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).not.toHaveBeenCalled();
+        expect(mockModel.updateOne).toHaveBeenCalledTimes(1);
+        expect(advancedTo(0)).toEqual(new Date('2026-09-01T00:00:00Z'));
+        expect(summary).toMatchObject({
+          advancedOnly: 1,
+          skipped: 0,
+          materialized: 0,
+        });
+      });
+
+      it('advances a subscription whose account no longer exists', async () => {
+        accountsService.findOne.mockRejectedValue(new NotFoundException());
+        scanReturns([subDoc()]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).not.toHaveBeenCalled();
+        expect(summary).toMatchObject({ advancedOnly: 1, skipped: 0 });
+      });
+
+      it('still skips an ordinary bill whose account is archived', async () => {
+        accountsService.findOne.mockResolvedValue({
+          _id: new Types.ObjectId(ACC_ID),
+          isArchived: true,
+        });
+        scanReturns([scanDoc({ isSubscription: false })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(mockModel.updateOne).not.toHaveBeenCalled();
+        expect(summary).toMatchObject({ skipped: 1, advancedOnly: 0 });
+      });
+    });
+
     describe('crash-safety and concurrency', () => {
       it('advances past an occurrence another run already materialized', async () => {
         transactionsService.materializeRecurring.mockResolvedValueOnce({

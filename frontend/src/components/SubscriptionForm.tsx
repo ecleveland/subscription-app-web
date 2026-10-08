@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { Subscription, CATEGORIES } from '@/lib/types';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
+import { useAccounts } from '@/lib/accounts-context';
 import TagInput from './TagInput';
 
 interface Props {
@@ -44,6 +45,15 @@ export default function SubscriptionForm({ subscription }: Props) {
       ? new Date(subscription.trialEndDate).toISOString().split('T')[0]
       : '',
   );
+  const { accounts, loading: accountsLoading } = useAccounts();
+  const [accountId, setAccountId] = useState(subscription?.accountId ?? '');
+  // An archived account drops out of the list but stays linked server-side.
+  // A failed load leaves the list empty too, so the label covers both cases.
+  // While the list is still loading, nothing can be called missing yet.
+  const linkedAccountMissing =
+    !accountsLoading &&
+    !!subscription?.accountId &&
+    !accounts.some((a) => a._id === subscription.accountId);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -78,6 +88,12 @@ export default function SubscriptionForm({ subscription }: Props) {
       body.sharedWith = parseInt(sharedWith, 10);
     } else if (!isShared && isEditing) {
       body.sharedWith = null;
+    }
+
+    if (accountId) {
+      body.accountId = accountId;
+    } else if (isEditing) {
+      body.accountId = null;
     }
 
     try {
@@ -215,6 +231,40 @@ export default function SubscriptionForm({ subscription }: Props) {
             ))}
           </select>
         </div>
+      </div>
+
+      <div>
+        <label htmlFor="accountId" className={labelClasses}>
+          Account
+        </label>
+        <select
+          id="accountId"
+          value={accountId}
+          onChange={(e) => setAccountId(e.target.value)}
+          disabled={accountsLoading}
+          className={`${inputClasses} disabled:opacity-50`}
+        >
+          {accountsLoading ? (
+            <option value={accountId}>Loading accounts...</option>
+          ) : (
+            <>
+              <option value="">Not tracked in the ledger</option>
+              {linkedAccountMissing && (
+                <option value={subscription!.accountId!} disabled>
+                  Current account (archived or unavailable)
+                </option>
+              )}
+              {accounts.map((a) => (
+                <option key={a._id} value={a._id}>
+                  {a.name}
+                </option>
+              ))}
+            </>
+          )}
+        </select>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          Posts each renewal to this account as an expense. Requires a cost above $0.
+        </p>
       </div>
 
       <div className="flex items-center gap-2">

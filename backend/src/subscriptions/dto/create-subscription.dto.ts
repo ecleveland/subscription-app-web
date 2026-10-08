@@ -8,6 +8,7 @@ import {
   IsBoolean,
   IsArray,
   IsInt,
+  IsMongoId,
   Min,
   Max,
   ValidateIf,
@@ -113,4 +114,15 @@ export class CreateSubscriptionDto {
   @Min(2)
   @IsOptional()
   sharedWith?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Account each renewal posts to as an expense. Omit or null to keep the subscription out of the ledger.',
+    example: '665f1c2e9b3a4d5e6f708192',
+    nullable: true,
+  })
+  @ValidateIf((o: CreateSubscriptionDto) => o.accountId !== null)
+  @IsMongoId()
+  @IsOptional()
+  accountId?: string | null;
 }
