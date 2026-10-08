@@ -19,6 +19,7 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { BudgetsModule } from './budgets/budgets.module';
 import { RecurringModule } from './recurring/recurring.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
+import { ReportsModule } from './reports/reports.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -102,6 +103,7 @@ import { HealthModule } from './health/health.module';
     BudgetsModule,
     RecurringModule,
     ReconciliationModule,
+    ReportsModule,
     HealthModule,
   ],
   // Apply rate limiting globally (per-route @Throttle decorators still override
