@@ -37,10 +37,10 @@ export class RecurringTransaction {
   })
   householdId: MongooseSchema.Types.ObjectId;
 
-  // The account materialized Transactions post to. Optional: legacy
-  // subscriptions migrate without one (VEG-469), and the scheduler skips
-  // account-less schedules until an account is assigned. New schedules created
-  // via the API require it at the DTO layer (VEG-466).
+  // The account materialized Transactions post to. Optional: subscriptions
+  // created through /api/subscriptions have no account, and the scheduler only
+  // advances their date. New schedules created via /api/recurring require it
+  // at the DTO layer (VEG-466).
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Account' })
   accountId?: MongooseSchema.Types.ObjectId;
 
@@ -52,7 +52,8 @@ export class RecurringTransaction {
   categoryId: MongooseSchema.Types.ObjectId;
 
   // Attribution: the HouseholdMember who created the schedule. Optional —
-  // mirrors Transaction.memberId / Subscription.memberId.
+  // mirrors Transaction.memberId. On /api/subscriptions the server sets
+  // it (CreateSubscriptionDto has no memberId).
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'HouseholdMember' })
   memberId?: MongooseSchema.Types.ObjectId;
 
@@ -60,16 +61,16 @@ export class RecurringTransaction {
   type: RecurringType;
 
   // Integer magnitude in minor units (cents); sign comes from `type`. Enforced
-  // at the schema layer (not just DTOs) because the VEG-469 fold-in migration —
-  // and any future non-DTO write path — bypasses the ValidationPipe; same
+  // at the schema layer (not just DTOs) because /api/subscriptions writes
+  // these docs through CreateSubscriptionDto, not the recurring DTOs; same
   // rationale as Transaction.amountCents.
   //
-  // Bound is conditional: subscriptions may be free ($0 → 0 cents, a legal
-  // legacy Subscription.cost), so a subscription doc allows 0; every other
-  // schedule needs a positive magnitude (≥1). The `/api/recurring` DTOs keep
-  // Min(1), so this relaxation only reaches the fold-in write path. On query
-  // (update) validation `this` isn't a Document, so it falls back to the strict
-  // ≥1 bound (the invariant is enforced on the save path the fold-in uses).
+  // Bound is conditional: a subscription may be free (cost 0 is legal on that
+  // API), so a subscription doc allows 0; every other schedule needs a positive
+  // magnitude (≥1). The `/api/recurring` DTOs keep Min(1). On query (update)
+  // validation `this` isn't a Document, so it falls back to the strict ≥1
+  // bound. SubscriptionsService loads and saves, so it gets the conditional
+  // check.
   @Prop({
     required: true,
     validate: {
@@ -115,7 +116,7 @@ export class RecurringTransaction {
   // true` strips any client attempt to set an anchor that disagrees with
   // nextDate. Optional: absent means "use nextDate's own day", which is exactly
   // right for every schedule anchored on day ≤ 28 and for legacy rows the
-  // VEG-469 fold-in migrates, so no backfill is required.
+  // VEG-469 fold-in migrated, so no backfill is required.
   @Prop({
     required: false,
     min: 1,
@@ -128,8 +129,9 @@ export class RecurringTransaction {
   cadenceAnchorDay?: number;
 
   // The integer validator also rejects explicit null (Mongoose applies the
-  // default only to undefined and skips min/max on null), which the VEG-469
-  // fold-in could otherwise persist and break the reminder cron's date math.
+  // default only to undefined and skips min/max on null). It guards any write
+  // that bypasses the recurring DTOs, since a persisted null would break the
+  // reminder cron's date math.
   @Prop({
     default: 3,
     min: 0,
@@ -145,7 +147,7 @@ export class RecurringTransaction {
   @Prop({ required: false })
   endDate?: Date;
 
-  // Pause/resume without deleting history (mirrors Subscription.isActive).
+  // Pause/resume without deleting history (the `isActive` field on /api/subscriptions).
   // Also the equality prefix of the cron-scan index below.
   @Prop({ default: true })
   isActive: boolean;
@@ -174,11 +176,11 @@ export class RecurringTransaction {
   })
   isSubscription: boolean;
 
-  // Number of people splitting the cost (mirrors Subscription.sharedWith).
-  // Explicit null must pass: the legacy Subscription contract accepts and
-  // persists sharedWith: null to clear sharing (DTO ValidateIf skips null;
-  // the service queries { $in: [null, undefined] }), so migrated docs and
-  // null-to-clear PATCHes stay valid. `min` already skips null.
+  // Number of people splitting the cost (the `sharedWith` field on /api/subscriptions).
+  // Explicit null must pass: /api/subscriptions accepts and persists
+  // sharedWith: null to clear sharing (DTO ValidateIf skips null; the service
+  // queries { $in: [null, undefined] }), so null-to-clear PATCHes stay valid.
+  // `min` already skips null.
   @Prop({
     required: false,
     min: 2,
@@ -196,9 +198,9 @@ export class RecurringTransaction {
   @Prop({ required: false })
   trialEndDate?: Date;
 
-  // Subscription-only: the verbatim legacy Subscription.category string
-  // (VEG-469). Kept alongside the budgeting `categoryId` so the /api/subscriptions
-  // compatibility layer round-trips the original free-text category exactly,
+  // Subscription-only: the free-text `category` string from /api/subscriptions
+  // (CreateSubscriptionDto). Kept alongside the budgeting `categoryId` so that
+  // API round-trips the original free-text category exactly,
   // independent of the best-effort budget-category link. Absent for non-subs.
   @Prop({ required: false, trim: true })
   subscriptionCategory?: string;
@@ -210,5 +212,5 @@ export const RecurringTransactionSchema =
 // Household-scoped lists sorted by next occurrence (upcoming-bills view).
 RecurringTransactionSchema.index({ householdId: 1, nextDate: 1 });
 // Daily scheduler/reminder crons: scan active schedules by due date across all
-// households (mirrors { isActive, nextBillingDate } on Subscription).
+// households (the renewal-reminder cron scans active subscriptions by next date).
 RecurringTransactionSchema.index({ isActive: 1, nextDate: 1 });

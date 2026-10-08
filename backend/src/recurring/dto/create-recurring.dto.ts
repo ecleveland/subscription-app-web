@@ -23,9 +23,9 @@ import {
 } from '../../common/validation/transform-raw-value';
 
 export class CreateRecurringDto {
-  // Required here even though the schema prop is optional: only migrated
-  // legacy subscriptions (VEG-469) may lack an account — every API-created
-  // schedule posts somewhere, so the scheduler never has to skip it.
+  // Required here even though the schema prop is optional: subscriptions
+  // created through /api/subscriptions have no account, while every schedule
+  // created here posts somewhere, so the scheduler never has to skip it.
   @ApiProperty({
     description: 'Account the materialized transactions will post to',
   })

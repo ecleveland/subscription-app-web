@@ -37,8 +37,8 @@ describe('RecurringTransactionSchema indexes', () => {
   });
 
   it('indexes { isActive, nextDate } for the cross-household cron scan', () => {
-    // Mirrors { isActive, nextBillingDate } on Subscription: the daily
-    // materialization/reminder crons scan active schedules by due date.
+    // Serves the renewal-reminder cron's scan of active subscriptions by next
+    // date, alongside the daily materialization cron.
     expect(indexKeyJson).toContain('{"isActive":1,"nextDate":1}');
   });
 
@@ -168,8 +168,8 @@ describe('RecurringTransactionSchema validation', () => {
   });
 
   it('allows amountCents 0 on a subscription (a free/$0 subscription, VEG-469)', () => {
-    // Legacy Subscription.cost has min 0; the fold-in must preserve $0 subs
-    // (e.g. free trials) rather than clamping them up to 1 cent.
+    // /api/subscriptions allows cost 0 (CreateSubscriptionDto Min(0)), so $0
+    // subs (e.g. free trials) must not be clamped up to 1 cent.
     expect(
       new RecurringModel({
         ...valid(),

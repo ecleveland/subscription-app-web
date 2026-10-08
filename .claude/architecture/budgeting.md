@@ -176,10 +176,16 @@ The migration must be **idempotent** (safe to re-run) and **reversible in test**
 VEG-485 removed the VEG-469 subscriptions fold-in. Subscriptions now live only
 as `RecurringTransaction` documents with `isSubscription: true`, and step 3
 stamps `Notification` documents only. The app no longer registers or reads the
-legacy `subscriptions` Mongo collection. Once a deployment has booted cleanly on
-this code, drop the collection by hand.
+legacy `subscriptions` Mongo collection.
+
+Deploy this code only to a database that already booted on the VEG-469 flip
+(PR #60). This code folds nothing, so a database that skipped that release
+keeps its legacy rows in `subscriptions` and serves an empty subscriptions
+list. Before dropping the collection by hand, confirm every row was folded.
+The count must be 0.
 
 ```bash
+mongosh "$MONGODB_URI" --eval 'db.subscriptions.countDocuments({ migratedAt: { $exists: false } })'
 mongosh "$MONGODB_URI" --eval 'db.subscriptions.drop()'
 ```
 

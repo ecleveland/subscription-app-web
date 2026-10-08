@@ -45,7 +45,7 @@ export interface MaterializationSummary {
   deactivated: number;
   /**
    * Occurrences rolled forward WITHOUT posting to the ledger: account-less
-   * subscriptions (VEG-469 fold-in) whose date must still advance the way the
+   * subscriptions, whose date must still advance the way the
    * retired subscription cron advanced them. Distinct from `materialized` so a
    * date-only roll is never mistaken for a ledger write.
    */
@@ -79,7 +79,7 @@ interface DueSchedule {
   nextDate: Date;
   cadenceAnchorDay?: number;
   endDate?: Date;
-  // Account-less subscriptions advance their date without materializing (VEG-469).
+  // Account-less subscriptions advance their date without materializing.
   isSubscription: boolean;
 }
 
@@ -105,8 +105,8 @@ function toTransactionType(
 
 // Household-scoped CRUD for recurring schedules (VEG-466). The materialization
 // scheduler (VEG-467) and reminders (VEG-468) build on the model and the
-// { isActive, nextDate } index; the subscriptions fold-in (VEG-469) writes
-// outside the ValidationPipe and leans on the schema-level validators as its
+// { isActive, nextDate } index. SubscriptionsService writes subscription docs
+// through its own DTOs and leans on the schema-level validators as its
 // backstop.
 @Injectable()
 export class RecurringService {
@@ -203,8 +203,8 @@ export class RecurringService {
     // Exclude subscriptions by default (VEG-469): they are surfaced by the
     // Subscriptions page via /api/subscriptions, not the Bills view. An explicit
     // ?isSubscription=true opts them back in. Defaulting to include them would
-    // leak migrated subscriptions onto the Bills list — and a migrated (account-
-    // less) row edited there would silently gain an account and start posting.
+    // leak subscriptions onto the Bills list — and an account-
+    // less subscription edited there would silently gain an account and start posting.
     filter.isSubscription = query.isSubscription ?? false;
     if (query.isActive !== undefined) {
       filter.isActive = query.isActive;
@@ -461,7 +461,7 @@ export class RecurringService {
     const householdId = schedule.householdId.toString();
     const recurringId = schedule._id.toString();
 
-    // Account-less subscriptions (VEG-469 fold-in) never post to the ledger —
+    // Account-less subscriptions never post to the ledger —
     // they have no account — but their nextDate must still roll forward so the
     // Subscriptions page shows a real upcoming date, exactly as the retired
     // subscription cron did. This runs BEFORE reference resolution: an
@@ -744,8 +744,8 @@ export class RecurringService {
     schedule: DueSchedule,
   ): Promise<MaterializationRefs> {
     if (!schedule.accountId) {
-      // Legacy subscriptions migrate without an account (VEG-469) and wait
-      // here until one is assigned.
+      // Subscriptions have no account and stay on the advance-only path. No
+      // account is assigned through the subscriptions API today.
       return { usable: false, reason: 'no accountId' };
     }
     const householdId = schedule.householdId.toString();

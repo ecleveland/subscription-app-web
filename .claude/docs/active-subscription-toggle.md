@@ -8,7 +8,7 @@
 Added an `isActive` boolean field to subscriptions so users can mark them as active or inactive. Dashboard cost totals (monthly/yearly) now only include active subscriptions.
 
 ### Backend (2 modified files)
-- **`backend/src/subscriptions/schemas/subscription.schema.ts`** — Added `isActive` boolean field with `default: true` to Mongoose schema (no migration needed)
+- **`backend/src/subscriptions/schemas/subscription.schema.ts`** — Added `isActive` boolean field with `default: true` to Mongoose schema (no migration needed). That schema was removed in VEG-485; the field now lives on `RecurringTransaction` in `backend/src/recurring/schemas/recurring-transaction.schema.ts`.
 - **`backend/src/subscriptions/dto/create-subscription.dto.ts`** — Added `@IsBoolean() @IsOptional() isActive?: boolean` field; `UpdateSubscriptionDto` inherits via `PartialType` automatically
 
 ### Frontend components (4 modified files)

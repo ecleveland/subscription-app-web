@@ -23,7 +23,7 @@ export class Notification {
   // The RecurringTransaction _id the reminder is for: a subscription's id (kept
   // stable by the VEG-469 fold-in) or any bill/income schedule's id (VEG-468).
   // The name predates the fold-in; renaming it would break the unique index.
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Subscription' })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'RecurringTransaction' })
   subscriptionId: MongooseSchema.Types.ObjectId;
 
   @Prop({ required: true, enum: NotificationType })
