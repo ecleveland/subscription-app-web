@@ -11,8 +11,9 @@ export enum RecurringType {
   EXPENSE = 'expense',
 }
 
-// Values intentionally identical to Subscription.BillingCycle so the VEG-469
-// fold-in maps billingCycle → cadence 1:1.
+// Values intentionally identical to the BillingCycle API enum in
+// subscriptions/billing-cycle.enum.ts so /api/subscriptions maps billingCycle
+// to cadence 1:1.
 export enum RecurringCadence {
   WEEKLY = 'weekly',
   MONTHLY = 'monthly',
@@ -85,7 +86,7 @@ export class RecurringTransaction {
   })
   amountCents: number;
 
-  // The schedule's display identity (Subscription.name maps here in VEG-469) —
+  // The schedule's display identity (a subscription's name maps here),
   // required, unlike the optional payee on one-off Transactions.
   @Prop({ required: true, trim: true })
   payee: string;

@@ -4,7 +4,7 @@ import {
   RecurringTransaction,
   RecurringTransactionSchema,
 } from './recurring-transaction.schema';
-import { BillingCycle } from '../../subscriptions/schemas/subscription.schema';
+import { BillingCycle } from '../../subscriptions/billing-cycle.enum';
 
 // A throwaway model so we can exercise schema validators (validateSync) without
 // a live Mongo connection — mirrors the lightweight, DB-free schema specs used
@@ -75,7 +75,7 @@ describe('cadenceAnchorDay', () => {
 });
 
 describe('RecurringCadence', () => {
-  it('stays value-identical to BillingCycle (the VEG-469 fold-in maps 1:1)', () => {
+  it('stays value-identical to BillingCycle (/api/subscriptions maps 1:1)', () => {
     expect(Object.values(RecurringCadence)).toEqual(
       Object.values(BillingCycle),
     );

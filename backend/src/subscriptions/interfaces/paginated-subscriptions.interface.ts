@@ -1,4 +1,4 @@
-import { SubscriptionDocument } from '../schemas/subscription.schema';
+import type { SubscriptionView } from '../subscriptions.service';
 
 export interface PaginationMeta {
   total: number;
@@ -9,6 +9,6 @@ export interface PaginationMeta {
 }
 
 export interface PaginatedSubscriptions {
-  data: SubscriptionDocument[];
+  data: SubscriptionView[];
   meta: PaginationMeta;
 }

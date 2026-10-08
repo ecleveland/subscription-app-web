@@ -166,12 +166,22 @@ command), fully covered by tests:
 1. For each existing `User`, create a personal `Household` (`ownerId = user._id`,
    `name` = e.g. `"<displayName>'s Household"`, `currency: "USD"`).
 2. Create an `active` `HouseholdMember` with `role: owner`.
-3. Stamp every existing `Subscription` (and `Notification`) with the new
-   `householdId`.
+3. Stamp every existing `Notification` with the new `householdId`. (This
+   step also stamped `Subscription` until VEG-485 removed that model.)
 4. Seed default `CategoryGroup`/`Category` records per household.
 
 The migration must be **idempotent** (safe to re-run) and **reversible in test**
 (E2E suites build households fresh, so this only runs against existing data).
+
+VEG-485 removed the VEG-469 subscriptions fold-in. Subscriptions now live only
+as `RecurringTransaction` documents with `isSubscription: true`, and step 3
+stamps `Notification` documents only. The app no longer registers or reads the
+legacy `subscriptions` Mongo collection. Once a deployment has booted cleanly on
+this code, drop the collection by hand.
+
+```bash
+mongosh "$MONGODB_URI" --eval 'db.subscriptions.drop()'
+```
 
 ---
 

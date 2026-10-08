@@ -9,7 +9,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { BillingCycle } from '../schemas/subscription.schema';
+import { BillingCycle } from '../billing-cycle.enum';
 
 export class QuerySubscriptionDto {
   @ApiPropertyOptional({

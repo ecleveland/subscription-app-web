@@ -13,7 +13,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BillingCycle } from '../schemas/subscription.schema';
+import { BillingCycle } from '../billing-cycle.enum';
 
 export class CreateSubscriptionDto {
   @ApiProperty({ description: 'Name of the subscription', example: 'Netflix' })

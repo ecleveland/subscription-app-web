@@ -14,10 +14,6 @@ import {
 import { Invitation, InvitationSchema } from './schemas/invitation.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import {
-  Subscription,
-  SubscriptionSchema,
-} from '../subscriptions/schemas/subscription.schema';
-import {
   Notification,
   NotificationSchema,
 } from '../notifications/schemas/notification.schema';
@@ -27,8 +23,8 @@ import {
 // startup data migration. The guard is exported so household-scoped controllers
 // (VEG-389/390) can apply it after JwtAuthGuard; the migration service is
 // exported so the bootstrap can run it. The User model is registered read-only
-// for the migration's per-user backfill; the Subscription/Notification models
-// let the migration stamp existing single-user data with its householdId.
+// for the migration's per-user backfill; the Notification model lets the
+// migration stamp existing single-user notifications with their householdId.
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -36,7 +32,6 @@ import {
       { name: HouseholdMember.name, schema: HouseholdMemberSchema },
       { name: Invitation.name, schema: InvitationSchema },
       { name: User.name, schema: UserSchema },
-      { name: Subscription.name, schema: SubscriptionSchema },
       { name: Notification.name, schema: NotificationSchema },
     ]),
     MailModule,

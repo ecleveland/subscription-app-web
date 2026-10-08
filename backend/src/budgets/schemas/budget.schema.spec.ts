@@ -3,7 +3,7 @@ import { Budget, BudgetSchema } from './budget.schema';
 
 // A throwaway model so we can exercise schema validators (validateSync) without
 // a live Mongo connection — mirrors the lightweight, DB-free schema specs used
-// elsewhere (subscription.schema.spec, password-reset.schema.spec).
+// elsewhere (password-reset.schema.spec).
 const BudgetModel = model<Budget>('BudgetSchemaSpec', BudgetSchema);
 
 describe('BudgetSchema indexes', () => {

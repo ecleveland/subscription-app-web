@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { BillingCycle } from './schemas/subscription.schema';
+import { BillingCycle } from './billing-cycle.enum';
 import {
   RecurringTransaction,
   RecurringTransactionDocument,
@@ -252,9 +252,7 @@ export class SubscriptionsService {
     const hasNextPage = limit === 0 ? false : page < totalPages;
 
     return {
-      // The controller serializes these plain objects identically to the old
-      // Mongoose docs; the interface type is a structural match.
-      data: views as unknown as PaginatedSubscriptions['data'],
+      data: views,
       meta: { total, page, limit, totalPages, hasNextPage },
     };
   }

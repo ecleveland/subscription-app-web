@@ -13,7 +13,6 @@ import { buildAllIndexes } from './database/build-all-indexes';
 import { UsersService } from './users/users.service';
 import { HouseholdsMigrationService } from './households/households-migration.service';
 import { CategoriesService } from './categories/categories.service';
-import { SubscriptionsFoldInService } from './subscriptions/subscriptions-fold-in.service';
 import { ReconciliationService } from './reconciliation/reconciliation.service';
 
 async function bootstrap() {
@@ -107,8 +106,8 @@ async function bootstrap() {
     // Phase 1 household migration, in order:
     // 1. Backfill a personal household + owner membership for every
     //    pre-household user (idempotent; no-op once every user has one).
-    // 2. Stamp existing subscriptions/notifications with the householdId of
-    //    their owner's now-guaranteed active household. Both log their outcome.
+    // 2. Stamp existing notifications with the householdId of their owner's
+    //    now-guaranteed active household. Each logs its outcome.
     const householdsMigration = app.get(HouseholdsMigrationService);
     await householdsMigration.backfillPersonalHouseholds();
     await householdsMigration.stampExistingData();
@@ -121,16 +120,7 @@ async function bootstrap() {
     const categoriesService = app.get(CategoriesService);
     await categoriesService.backfillDefaultCategories();
 
-    // 4. Phase 4 fold-in (VEG-469): copy each legacy Subscription into a
-    //    RecurringTransaction (isSubscription: true). Runs after the category
-    //    backfill because it maps the legacy category string to a seeded
-    //    household category. Idempotent (stamps Subscription.migratedAt); a
-    //    re-run folds nothing. From here the Subscriptions API is served over
-    //    the recurring collection.
-    const foldIn = app.get(SubscriptionsFoldInService);
-    await foldIn.foldInSubscriptions();
-
-    // 5. VEG-478: stamp openingBalanceCents = balanceCents − Σ(ledger) on every
+    // 4. VEG-478: stamp openingBalanceCents = balanceCents − Σ(ledger) on every
     //    account created before the anchor existed, so balance reconciliation
     //    can re-derive balances without wiping opening balances. Idempotent
     //    (queries $exists:false; a re-run stamps none). Runs before traffic so
