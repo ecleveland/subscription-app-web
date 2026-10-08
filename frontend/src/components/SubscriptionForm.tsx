@@ -45,11 +45,11 @@ export default function SubscriptionForm({ subscription }: Props) {
       ? new Date(subscription.trialEndDate).toISOString().split('T')[0]
       : '',
   );
-  const { accounts, loading: accountsLoading } = useAccounts();
+  const { accounts, loading: accountsLoading, error: accountsError } = useAccounts();
   const [accountId, setAccountId] = useState(subscription?.accountId ?? '');
-  // An archived account drops out of the list but stays linked server-side.
-  // A failed load leaves the list empty too, so the label covers both cases.
-  // While the list is still loading, nothing can be called missing yet.
+  // An archived account drops out of the list but stays linked server-side,
+  // and a failed load can leave the list empty. While the list is still
+  // loading, nothing can be called missing yet.
   const linkedAccountMissing =
     !accountsLoading &&
     !!subscription?.accountId &&
@@ -251,7 +251,9 @@ export default function SubscriptionForm({ subscription }: Props) {
               <option value="">Not tracked in the ledger</option>
               {linkedAccountMissing && (
                 <option value={subscription!.accountId!} disabled>
-                  Current account (archived or unavailable)
+                  {accountsError
+                    ? 'Current account (could not load accounts)'
+                    : 'Current account (archived or unavailable)'}
                 </option>
               )}
               {accounts.map((a) => (
@@ -262,6 +264,11 @@ export default function SubscriptionForm({ subscription }: Props) {
             </>
           )}
         </select>
+        {accountsError && (
+          <p className="text-red-500 text-sm mt-1">
+            Couldn’t load accounts: {accountsError}
+          </p>
+        )}
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
           Posts each renewal to this account as an expense. Requires a cost above $0.
         </p>

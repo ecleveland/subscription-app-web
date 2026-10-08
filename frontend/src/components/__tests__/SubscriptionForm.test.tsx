@@ -514,16 +514,52 @@ describe('SubscriptionForm', () => {
       expect(screen.queryByRole('option', { name: /archived/ })).not.toBeInTheDocument();
     });
 
-    it('shows the unavailable placeholder after a failed load', () => {
+    it('selects a could-not-load placeholder for the linked account after a failed load', () => {
       accountsState.accounts = [];
-      accountsState.error = 'Failed to load accounts';
+      accountsState.error = 'Network down';
 
       render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-2' }} />);
 
       expect(screen.getByLabelText('Account')).toHaveValue('acc-2');
-      expect(
-        screen.getByRole('option', { name: 'Current account (archived or unavailable)' }),
-      ).toBeDisabled();
+      const placeholder = screen.getByRole('option', {
+        name: 'Current account (could not load accounts)',
+      });
+      expect(placeholder).toBeDisabled();
+      expect(placeholder).toHaveProperty('selected', true);
+      expect(screen.getByText(/Couldn.t load accounts: Network down/)).toBeInTheDocument();
+    });
+
+    it('keeps the linked account when an edit leaves the select untouched', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-2' }} />);
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody().accountId).toBe('acc-2');
+    });
+
+    it('keeps an archived linked account when an edit leaves the select untouched', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm subscription={{ ...existingSub, accountId: 'acc-gone' }} />);
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody().accountId).toBe('acc-gone');
+    });
+
+    it('shows the load error banner in create mode when accounts fail to load', () => {
+      accountsState.accounts = [];
+      accountsState.error = 'Network down';
+
+      render(<SubscriptionForm />);
+
+      expect(screen.getByText(/Couldn.t load accounts: Network down/)).toBeInTheDocument();
     });
 
     it('surfaces the server rejection for a free subscription', async () => {

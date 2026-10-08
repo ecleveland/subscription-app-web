@@ -10,6 +10,7 @@ import { RecurringCronService } from '../src/recurring/recurring-cron.service';
 import { HouseholdsService } from '../src/households/households.service';
 import { UsersService } from '../src/users/users.service';
 import { Transaction } from '../src/transactions/schemas/transaction.schema';
+import { RecurringTransaction } from '../src/recurring/schemas/recurring-transaction.schema';
 import {
   HouseholdMember,
   HouseholdMemberDocument,
@@ -789,6 +790,78 @@ describe('Subscriptions (e2e)', () => {
           .expect(200);
         expect(sub.body.isActive).toBe(true);
       }
+    });
+
+    it('bulk activate rolls a backdated tracked subscription forward instead of backfilling (VEG-486)', async () => {
+      const server = app.getHttpServer();
+      const auth = { Authorization: `Bearer ${tokenA}` };
+      const account = await request(server)
+        .post('/api/accounts')
+        .set(auth)
+        .send({ name: 'Bulk Ledger', type: 'checking' })
+        .expect(201);
+      const sub = await request(server)
+        .post('/api/subscriptions')
+        .set(auth)
+        .send({
+          name: 'Bulk Tracked',
+          cost: 8,
+          billingCycle: 'monthly',
+          nextBillingDate: '2099-01-01',
+          category: 'Streaming',
+          accountId: account.body._id,
+        })
+        .expect(201);
+      const subId: string = sub.body._id;
+      await request(server)
+        .patch(`/api/subscriptions/${subId}`)
+        .set(auth)
+        .send({ isActive: false })
+        .expect(200);
+
+      // Backdate past the API, the way a long pause leaves the stored date.
+      const recurringModel = app.get<Model<RecurringTransaction>>(
+        getModelToken(RecurringTransaction.name),
+      );
+      const past = new Date();
+      past.setUTCMonth(past.getUTCMonth() - 3);
+      await recurringModel
+        .updateOne(
+          { _id: new Types.ObjectId(subId) } as Record<string, unknown>,
+          {
+            $set: { nextDate: past },
+          },
+        )
+        .exec();
+
+      const res = await request(server)
+        .post('/api/subscriptions/bulk')
+        .set(auth)
+        .send({ ids: [subId], action: 'activate' })
+        .expect(201);
+      expect(res.body).toEqual({ success: 1, failed: 0 });
+
+      await app.get(RecurringService).materializeDue();
+
+      const todayMidnight = new Date(
+        `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`,
+      ).getTime();
+      const transactionModel = app.get<Model<Transaction>>(
+        getModelToken(Transaction.name),
+      );
+      const txns = await transactionModel
+        .find({ recurringId: new Types.ObjectId(subId) } as Record<
+          string,
+          unknown
+        >)
+        .lean()
+        .exec();
+      for (const txn of txns) {
+        expect(new Date(txn.date).getTime()).toBeGreaterThanOrEqual(
+          todayMidnight,
+        );
+      }
+      expect(txns.length).toBeLessThanOrEqual(1);
     });
 
     it('should bulk deactivate subscriptions', async () => {

@@ -50,6 +50,12 @@ export interface MaterializationSummary {
    * date-only roll is never mistaken for a ledger write.
    */
   advancedOnly: number;
+  /**
+   * The subset of `advancedOnly` that a tracked subscription rolled past
+   * because its account or category was unusable. Each one is a renewal the
+   * ledger never records, so a nonzero value escalates the cron log to warn.
+   */
+  droppedRenewals: number;
   /** Schedules that hit MAX_CATCHUP_PERIODS and will resume tomorrow. */
   capped: number;
   /**
@@ -412,6 +418,7 @@ export class RecurringService {
       skipped: 0,
       deactivated: 0,
       advancedOnly: 0,
+      droppedRenewals: 0,
       capped: 0,
       yielded: 0,
       failed: 0,
@@ -480,17 +487,22 @@ export class RecurringService {
       // drives the Subscriptions page and renewal reminders, so freezing it
       // would break both. The cost is that renewals falling due while the
       // reference is unusable never post, where an ordinary bill below stays
-      // frozen and replays them once the reference is fixed.
+      // frozen and replays them once the reference is fixed. Each such
+      // renewal counts as dropped so the run summary shows the loss.
+      const before = summary.advancedOnly;
+      await this.advanceSubscriptionOnly(schedule, now, summary);
+      const dropped = summary.advancedOnly - before;
+      summary.droppedRenewals += dropped;
       this.logger.warn(
         {
           householdId,
           recurringId,
           reason: references.reason,
           payee: schedule.payee,
+          droppedRenewals: dropped,
         },
-        'Subscription has an unusable reference; advancing without posting',
+        'Subscription has an unusable reference; advanced without posting',
       );
-      await this.advanceSubscriptionOnly(schedule, now, summary);
       return;
     }
     if (!references.usable) {
@@ -524,118 +536,164 @@ export class RecurringService {
 
     let occurrence = schedule.nextDate;
     let periods = 0;
+    let droppedHere = 0;
 
-    for (;;) {
-      // Past its end: nothing more to post, ever.
-      if (schedule.endDate && utcDay(occurrence) > utcDay(schedule.endDate)) {
-        // Count it only if THIS run is the one that deactivated it — a
-        // concurrent run winning the guard would otherwise be double-counted.
-        const deactivated = await this.advanceSchedule(
+    try {
+      for (;;) {
+        // Past its end: nothing more to post, ever.
+        if (schedule.endDate && utcDay(occurrence) > utcDay(schedule.endDate)) {
+          // Count it only if THIS run is the one that deactivated it — a
+          // concurrent run winning the guard would otherwise be double-counted.
+          const deactivated = await this.advanceSchedule(
+            schedule,
+            occurrence,
+            occurrence,
+            false,
+          );
+          if (deactivated) {
+            summary.deactivated += 1;
+          }
+          return;
+        }
+        // Not due yet — the normal exit once the schedule has caught up.
+        if (utcDay(occurrence) > utcDay(now)) {
+          return;
+        }
+        // Cap check sits AFTER the two clean-exit guards, so a schedule that
+        // finishes exactly on the cap leaves via "caught up" rather than being
+        // reported capped — otherwise it would look permanently behind and be
+        // re-scanned as such forever. Reaching here means real work remains.
+        if (periods >= RecurringService.MAX_CATCHUP_PERIODS) {
+          summary.capped += 1;
+          this.logger.warn(
+            {
+              householdId,
+              recurringId,
+              cap: RecurringService.MAX_CATCHUP_PERIODS,
+              nextDate: occurrence.toISOString(),
+              daysBehind: Math.floor(
+                (utcDay(now) - utcDay(occurrence)) / 86_400_000,
+              ),
+            },
+            'Recurring schedule hit the per-run catch-up cap; resuming on the next run',
+          );
+          return;
+        }
+
+        // A subscription's ledger history starts today. Past occurrences are
+        // never backfilled by the scheduler, whichever API wrote the stale
+        // date: they roll forward unposted and count as dropped renewals.
+        // Ordinary bills post every missed period.
+        const dropping =
+          schedule.isSubscription === true && utcDay(occurrence) < utcDay(now);
+        if (!dropping) {
+          await this.postOccurrence(
+            householdId,
+            recurringId,
+            references.accountId,
+            schedule,
+            occurrence,
+            summary,
+          );
+        }
+        const next = addCadence(
+          occurrence,
+          schedule.cadence,
+          schedule.cadenceAnchorDay,
+        );
+
+        // Deactivate in the SAME write as the final advance when the schedule
+        // has now run its course — no extra round trip, and it drops the row out
+        // of the { isActive, nextDate } scan instead of being re-read forever.
+        const finished =
+          schedule.endDate !== undefined &&
+          utcDay(next) > utcDay(schedule.endDate);
+        const advanced = await this.advanceSchedule(
           schedule,
           occurrence,
-          occurrence,
-          false,
+          next,
+          !finished,
         );
-        if (deactivated) {
-          summary.deactivated += 1;
+        if (!advanced) {
+          // Someone else moved nextDate between our read and this write, so the
+          // remaining periods are not ours to post. State what was OBSERVED
+          // rather than guessing a cause: leader election makes a second cron
+          // instance unlikely, and the realistic causes are a concurrent PATCH
+          // or the cursor re-visiting this document — an unsnapshotted scan over
+          // { isActive, nextDate } while the loop pushes nextDate forward within
+          // that same index. The guard makes a re-visit harmless (the insert
+          // dedupes, this advance misses, we stop) but it is not "concurrency".
+          summary.yielded += 1;
+          this.logger.warn(
+            {
+              householdId,
+              recurringId,
+              observedNextDate: occurrence.toISOString(),
+              attemptedNextDate: next.toISOString(),
+            },
+            'Guarded advance matched no schedule (concurrent edit or cursor re-visit); yielding the remaining periods',
+          );
+          return;
         }
-        return;
+        if (dropping) {
+          summary.advancedOnly += 1;
+          summary.droppedRenewals += 1;
+          droppedHere += 1;
+        }
+        if (finished) {
+          summary.deactivated += 1;
+          return;
+        }
+
+        occurrence = next;
+        periods += 1;
       }
-      // Not due yet — the normal exit once the schedule has caught up.
-      if (utcDay(occurrence) > utcDay(now)) {
-        return;
-      }
-      // Cap check sits AFTER the two clean-exit guards, so a schedule that
-      // finishes exactly on the cap leaves via "caught up" rather than being
-      // reported capped — otherwise it would look permanently behind and be
-      // re-scanned as such forever. Reaching here means real work remains.
-      if (periods >= RecurringService.MAX_CATCHUP_PERIODS) {
-        summary.capped += 1;
+    } finally {
+      if (droppedHere > 0) {
         this.logger.warn(
           {
             householdId,
             recurringId,
-            cap: RecurringService.MAX_CATCHUP_PERIODS,
-            nextDate: occurrence.toISOString(),
-            daysBehind: Math.floor(
-              (utcDay(now) - utcDay(occurrence)) / 86_400_000,
-            ),
+            payee: schedule.payee,
+            droppedRenewals: droppedHere,
           },
-          'Recurring schedule hit the per-run catch-up cap; resuming on the next run',
+          'Tracked subscription had past occurrences; advanced them without posting',
         );
-        return;
       }
+    }
+  }
 
-      const result = await this.transactionsService.materializeRecurring(
-        householdId,
-        {
-          recurringId,
-          accountId: references.accountId.toString(),
-          categoryId: schedule.categoryId.toString(),
-          memberId: schedule.memberId?.toString(),
-          type: toTransactionType(schedule.type),
-          amountCents: schedule.amountCents,
-          date: occurrence,
-          payee: schedule.payee,
-          notes: schedule.notes,
-          tags: schedule.tags ?? [],
-        },
-      );
-      if (result.duplicate) {
-        // A previous run wrote this one and died before advancing. Treat it as
-        // done and move on — aborting here would wedge the schedule forever,
-        // re-colliding on the same date every night.
-        summary.duplicate += 1;
-      } else {
-        summary.materialized += 1;
-      }
-
-      const next = addCadence(
-        occurrence,
-        schedule.cadence,
-        schedule.cadenceAnchorDay,
-      );
-
-      // Deactivate in the SAME write as the final advance when the schedule
-      // has now run its course — no extra round trip, and it drops the row out
-      // of the { isActive, nextDate } scan instead of being re-read forever.
-      const finished =
-        schedule.endDate !== undefined &&
-        utcDay(next) > utcDay(schedule.endDate);
-      const advanced = await this.advanceSchedule(
-        schedule,
-        occurrence,
-        next,
-        !finished,
-      );
-      if (!advanced) {
-        // Someone else moved nextDate between our read and this write, so the
-        // remaining periods are not ours to post. State what was OBSERVED
-        // rather than guessing a cause: leader election makes a second cron
-        // instance unlikely, and the realistic causes are a concurrent PATCH
-        // or the cursor re-visiting this document — an unsnapshotted scan over
-        // { isActive, nextDate } while the loop pushes nextDate forward within
-        // that same index. The guard makes a re-visit harmless (the insert
-        // dedupes, this advance misses, we stop) but it is not "concurrency".
-        summary.yielded += 1;
-        this.logger.warn(
-          {
-            householdId,
-            recurringId,
-            observedNextDate: occurrence.toISOString(),
-            attemptedNextDate: next.toISOString(),
-          },
-          'Guarded advance matched no schedule (concurrent edit or cursor re-visit); yielding the remaining periods',
-        );
-        return;
-      }
-      if (finished) {
-        summary.deactivated += 1;
-        return;
-      }
-
-      occurrence = next;
-      periods += 1;
+  // Post one occurrence to the ledger and count it. A duplicate means a
+  // previous run wrote this one and died before advancing. Treat it as done
+  // and move on, because aborting would wedge the schedule forever,
+  // re-colliding on the same date every night.
+  private async postOccurrence(
+    householdId: string,
+    recurringId: string,
+    accountId: Types.ObjectId,
+    schedule: DueSchedule,
+    occurrence: Date,
+    summary: MaterializationSummary,
+  ): Promise<void> {
+    const result = await this.transactionsService.materializeRecurring(
+      householdId,
+      {
+        recurringId,
+        accountId: accountId.toString(),
+        categoryId: schedule.categoryId.toString(),
+        memberId: schedule.memberId?.toString(),
+        type: toTransactionType(schedule.type),
+        amountCents: schedule.amountCents,
+        date: occurrence,
+        payee: schedule.payee,
+        notes: schedule.notes,
+        tags: schedule.tags ?? [],
+      },
+    );
+    if (result.duplicate) {
+      summary.duplicate += 1;
+    } else {
+      summary.materialized += 1;
     }
   }
 

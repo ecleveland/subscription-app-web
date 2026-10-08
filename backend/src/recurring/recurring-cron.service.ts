@@ -55,8 +55,13 @@ export class RecurringCronService {
 
     // Escalate the run-level verdict so an operator filtering to warn+ sees
     // aggregate context, not just isolated per-schedule errors.
+    // Dropped subscription renewals are lost ledger entries, so they warn too.
     const level =
-      summary.failed > 0 ? 'error' : summary.skipped > 0 ? 'warn' : 'log';
+      summary.failed > 0
+        ? 'error'
+        : summary.skipped > 0 || summary.droppedRenewals > 0
+          ? 'warn'
+          : 'log';
     this.logger[level](summary, 'Recurring materialization complete');
   }
 }

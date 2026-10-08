@@ -36,6 +36,8 @@ const recDoc = (overrides: Record<string, any> = {}) => ({
   payee: 'Netflix',
   cadence: 'monthly',
   nextDate: new Date('2026-08-01T00:00:00Z'),
+  cadenceAnchorDay: undefined as number | undefined,
+  accountId: undefined as Types.ObjectId | undefined,
   categoryId: CAT_STREAMING,
   subscriptionCategory: 'Streaming',
   notes: undefined,
@@ -481,16 +483,18 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
           expect(doc.nextDate.getTime()).toBeGreaterThanOrEqual(todayUtc());
         });
 
-        it('does not roll the date when re-pointing an already-tracked subscription', async () => {
-          const stale = eightMonthsAgo();
-          const doc = recDoc({ accountId: ACCOUNT, nextDate: stale });
+        it('rolls a stale date when re-pointing an active tracked subscription', async () => {
+          const doc = recDoc({
+            accountId: ACCOUNT,
+            nextDate: eightMonthsAgo(),
+          });
           model.findById.mockReturnValue(chain(doc));
 
           await service.update(HH, doc._id.toString(), {
             accountId: new Types.ObjectId().toString(),
           });
 
-          expect(doc.nextDate).toEqual(stale);
+          expect(doc.nextDate.getTime()).toBeGreaterThanOrEqual(todayUtc());
         });
 
         it('rolls a past nextDate forward when a tracked subscription is reactivated', async () => {
@@ -514,9 +518,13 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
           expect(doc.nextDate.getTime()).toBeLessThan(todayUtc() + 32 * DAY);
         });
 
-        it('leaves a past nextDate alone on an unrelated edit to an active tracked subscription', async () => {
+        it('leaves a past nextDate alone on an unrelated edit to a paused tracked subscription', async () => {
           const stale = eightMonthsAgo();
-          const doc = recDoc({ accountId: ACCOUNT, nextDate: stale });
+          const doc = recDoc({
+            accountId: ACCOUNT,
+            isActive: false,
+            nextDate: stale,
+          });
           model.findById.mockReturnValue(chain(doc));
 
           await service.update(HH, doc._id.toString(), { name: 'Renamed' });
@@ -525,12 +533,11 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
           expect(doc.nextDate).toEqual(stale);
         });
 
-        it('does not roll the date on create', async () => {
+        it('does not roll the date on create without an account', async () => {
           const stale = eightMonthsAgo();
           await service.create(HH, MEMBER, {
             ...base,
             nextBillingDate: stale.toISOString().slice(0, 10),
-            accountId: ACCOUNT.toString(),
           });
           expect(savedDocs[0].nextDate).toEqual(stale);
         });
@@ -562,6 +569,158 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
       await expect(
         service.remove(HH, new Types.ObjectId().toString()),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('tracked date invariant (VEG-486)', () => {
+    // Injected clock: every case below runs on 2026-05-10 UTC.
+    const NOW = new Date('2026-05-10T00:00:00Z');
+    const ACCOUNT = new Types.ObjectId();
+    const base = {
+      name: 'Netflix',
+      cost: 15.99,
+      billingCycle: 'monthly' as any,
+      category: 'Streaming',
+    };
+
+    it('rolls a date 12 months back forward on create with an account', async () => {
+      await service.create(
+        HH,
+        MEMBER,
+        {
+          ...base,
+          nextBillingDate: '2025-05-20',
+          accountId: ACCOUNT.toString(),
+        },
+        NOW,
+      );
+      expect(savedDocs[0].nextDate).toEqual(new Date('2026-05-20T00:00:00Z'));
+    });
+
+    it('anchors a monthly subscription to the day it was created on', async () => {
+      await service.create(
+        HH,
+        MEMBER,
+        { ...base, nextBillingDate: '2026-01-31' },
+        NOW,
+      );
+      expect(savedDocs[0].cadenceAnchorDay).toBe(31);
+    });
+
+    it('leaves the anchor unset for a weekly subscription', async () => {
+      await service.create(
+        HH,
+        MEMBER,
+        {
+          ...base,
+          billingCycle: 'weekly' as any,
+          nextBillingDate: '2026-01-31',
+        },
+        NOW,
+      );
+      expect(savedDocs[0].cadenceAnchorDay).toBeUndefined();
+    });
+
+    it('rolls a nextBillingDate edited 5 months back on an active tracked subscription', async () => {
+      const doc = recDoc({
+        accountId: ACCOUNT,
+        nextDate: new Date('2026-06-03T00:00:00Z'),
+      });
+      model.findById.mockReturnValue(chain(doc));
+
+      await service.update(
+        HH,
+        doc._id.toString(),
+        { nextBillingDate: '2025-12-03' },
+        NOW,
+      );
+
+      expect(doc.nextDate).toEqual(new Date('2026-06-03T00:00:00Z'));
+      expect(doc.cadenceAnchorDay).toBe(3);
+    });
+
+    it('leaves a past date on an account-less subscription untouched on create and update', async () => {
+      await service.create(
+        HH,
+        MEMBER,
+        { ...base, nextBillingDate: '2025-11-01' },
+        NOW,
+      );
+      expect(savedDocs[0].nextDate).toEqual(new Date('2025-11-01T00:00:00Z'));
+
+      const doc = recDoc({ nextDate: new Date('2025-11-01T00:00:00Z') });
+      model.findById.mockReturnValue(chain(doc));
+      await service.update(HH, doc._id.toString(), { name: 'X' }, NOW);
+      expect(doc.nextDate).toEqual(new Date('2025-11-01T00:00:00Z'));
+    });
+
+    it('keeps a tracked date that falls exactly on today', async () => {
+      const doc = recDoc({ accountId: ACCOUNT, nextDate: NOW });
+      model.findById.mockReturnValue(chain(doc));
+
+      await service.update(HH, doc._id.toString(), { name: 'X' }, NOW);
+
+      expect(doc.nextDate).toEqual(NOW);
+    });
+
+    it('rolls a weekly subscription in 7-day steps', async () => {
+      const doc = recDoc({
+        cadence: 'weekly',
+        nextDate: new Date('2026-04-20T00:00:00Z'),
+      });
+      model.findById.mockReturnValue(chain(doc));
+
+      await service.update(
+        HH,
+        doc._id.toString(),
+        { accountId: ACCOUNT.toString() },
+        NOW,
+      );
+
+      // 04-20, 04-27, 05-04, 05-11.
+      expect(doc.nextDate).toEqual(new Date('2026-05-11T00:00:00Z'));
+    });
+
+    it('keeps a legacy month-end subscription on the month end when it rolls', async () => {
+      // Migrated subscriptions carry no cadenceAnchorDay.
+      const doc = recDoc({
+        nextDate: new Date('2026-01-31T00:00:00Z'),
+        cadenceAnchorDay: undefined,
+      });
+      model.findById.mockReturnValue(chain(doc));
+
+      await service.update(
+        HH,
+        doc._id.toString(),
+        { accountId: ACCOUNT.toString() },
+        NOW,
+      );
+
+      expect(doc.nextDate).toEqual(new Date('2026-05-31T00:00:00Z'));
+    });
+
+    it('re-anchors when the billing cycle changes and clears the anchor for weekly', async () => {
+      const doc = recDoc({
+        nextDate: new Date('2026-06-30T00:00:00Z'),
+        cadenceAnchorDay: 31,
+      });
+      model.findById.mockReturnValue(chain(doc));
+
+      await service.update(
+        HH,
+        doc._id.toString(),
+        { billingCycle: 'yearly' as any },
+        NOW,
+      );
+      expect(doc.cadenceAnchorDay).toBe(30);
+
+      await service.update(
+        HH,
+        doc._id.toString(),
+        { billingCycle: 'weekly' as any },
+        NOW,
+      );
+      expect(doc.cadenceAnchorDay).toBeUndefined();
     });
   });
 
@@ -649,6 +808,53 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
       expect(accountsService.findOne).toHaveBeenCalledTimes(1);
       expect(model.updateMany).not.toHaveBeenCalled();
       expect(res).toEqual({ success: 0, failed: 2 });
+    });
+
+    it('activate rolls a paused tracked subscription past today and leaves account-less ones alone', async () => {
+      const NOW = new Date('2026-05-10T00:00:00Z');
+      const tracked = new Types.ObjectId();
+      const untracked = new Types.ObjectId();
+      model.find.mockReturnValue(
+        chain([
+          {
+            _id: tracked,
+            accountId: new Types.ObjectId(),
+            nextDate: new Date('2026-02-15T00:00:00Z'),
+            cadence: 'monthly',
+            cadenceAnchorDay: 15,
+            isActive: false,
+          },
+          {
+            _id: untracked,
+            nextDate: new Date('2026-02-15T00:00:00Z'),
+            cadence: 'monthly',
+            isActive: false,
+          },
+        ]),
+      );
+      model.updateMany.mockReturnValue(chain({ matchedCount: 1 }));
+      model.bulkWrite = jest.fn().mockResolvedValue({ matchedCount: 1 });
+
+      const res = await service.bulkOperation(
+        HH,
+        { ids: [tracked, untracked].map(String), action: BulkAction.ACTIVATE },
+        NOW,
+      );
+
+      expect(model.find().select).toHaveBeenCalledWith(
+        expect.stringContaining('nextDate'),
+      );
+      const ops = model.bulkWrite.mock.calls[0][0];
+      expect(ops).toHaveLength(1);
+      expect(String(ops[0].updateOne.filter._id)).toBe(String(tracked));
+      expect(ops[0].updateOne.filter.isSubscription).toBe(true);
+      expect(ops[0].updateOne.update.$set).toEqual({
+        isActive: true,
+        nextDate: new Date('2026-05-15T00:00:00Z'),
+      });
+      const filter = model.updateMany.mock.calls[0][0];
+      expect(filter._id.$in.map(String)).toEqual([String(untracked)]);
+      expect(res).toEqual({ success: 2, failed: 0 });
     });
 
     it('reports all failed when no ids belong to the household slice', async () => {

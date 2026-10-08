@@ -1122,6 +1122,46 @@ describe('RecurringService', () => {
         expect(summary).toMatchObject({ advancedOnly: 1, skipped: 0 });
       });
 
+      it('counts every renewal it rolls past as dropped', async () => {
+        accountsService.findOne.mockResolvedValue({
+          _id: new Types.ObjectId(ACC_ID),
+          isArchived: true,
+        });
+        const warn = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+        // 07-01 and 08-01 are both due on 08-15: two renewals never post.
+        scanReturns([subDoc({ nextDate: new Date('2026-07-01T00:00:00Z') })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({
+          advancedOnly: 2,
+          droppedRenewals: 2,
+          skipped: 0,
+        });
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reason: 'account archived',
+            droppedRenewals: 2,
+          }),
+          expect.any(String),
+        );
+      });
+
+      it('does not count an account-less subscription as dropped', async () => {
+        scanReturns([
+          subDoc({
+            accountId: undefined,
+            nextDate: new Date('2026-07-01T00:00:00Z'),
+          }),
+        ]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(summary).toMatchObject({ advancedOnly: 2, droppedRenewals: 0 });
+      });
+
       it('still skips an ordinary bill whose account is archived', async () => {
         accountsService.findOne.mockResolvedValue({
           _id: new Types.ObjectId(ACC_ID),
@@ -1133,6 +1173,62 @@ describe('RecurringService', () => {
 
         expect(mockModel.updateOne).not.toHaveBeenCalled();
         expect(summary).toMatchObject({ skipped: 1, advancedOnly: 0 });
+      });
+    });
+
+    describe('tracked subscriptions never backfill (VEG-486)', () => {
+      // A stale nextDate can reach a tracked subscription through
+      // /api/recurring, which bypasses SubscriptionsService. The scheduler
+      // rolls past occurrences without posting and posts only today's.
+      const behind = (overrides: Record<string, any> = {}) =>
+        scanDoc({
+          nextDate: new Date('2026-06-15T00:00:00Z'),
+          cadenceAnchorDay: 15,
+          ...overrides,
+        });
+
+      it('skips past occurrences and posts only the one due today', async () => {
+        const warn = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+        scanReturns([behind({ isSubscription: true })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        // 06-15 and 07-15 are past; 08-15 is today.
+        expect(transactionsService.materializeRecurring).toHaveBeenCalledTimes(
+          1,
+        );
+        expect(
+          transactionsService.materializeRecurring.mock.calls[0][1].date,
+        ).toEqual(new Date('2026-08-15T00:00:00Z'));
+        expect(mockModel.updateOne).toHaveBeenCalledTimes(3);
+        expect(advancedTo(2)).toEqual(new Date('2026-09-15T00:00:00Z'));
+        expect(summary).toMatchObject({
+          materialized: 1,
+          droppedRenewals: 2,
+          advancedOnly: 2,
+        });
+        const skipWarns = warn.mock.calls.filter(
+          ([ctx]) => ctx?.droppedRenewals !== undefined,
+        );
+        expect(skipWarns).toHaveLength(1);
+        expect(skipWarns[0][0]).toMatchObject({ droppedRenewals: 2 });
+      });
+
+      it('still backfills every missed period of an ordinary bill', async () => {
+        scanReturns([behind({ isSubscription: false })]);
+
+        const summary = await service.materializeDue(NOW);
+
+        expect(transactionsService.materializeRecurring).toHaveBeenCalledTimes(
+          3,
+        );
+        expect(summary).toMatchObject({
+          materialized: 3,
+          droppedRenewals: 0,
+          advancedOnly: 0,
+        });
       });
     });
 
