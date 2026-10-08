@@ -1,7 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, Matches } from 'class-validator';
-import { MONTH_REGEX } from '../../budgets/budget-month.util';
-import { MONTH_FORMAT } from './cash-flow-query.dto';
+import { MONTH_FORMAT, MONTH_REGEX } from '../../budgets/budget-month.util';
 
 export class SpendingQueryDto {
   @ApiProperty({ description: 'Month to report (YYYY-MM)', example: '2026-03' })

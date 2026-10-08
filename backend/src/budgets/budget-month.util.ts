@@ -6,6 +6,11 @@
 // controller/service can reject a malformed :month param before touching Mongo.
 export const MONTH_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+// class-validator options for a @Matches(MONTH_REGEX) check on a query DTO.
+export const MONTH_FORMAT = {
+  message: '$property must be a month in YYYY-MM format',
+};
+
 export function isValidMonth(month: string): boolean {
   return MONTH_REGEX.test(month);
 }

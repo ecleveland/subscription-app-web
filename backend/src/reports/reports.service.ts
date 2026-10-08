@@ -117,12 +117,11 @@ export class ReportsService {
    * alongside (`month` is "YYYY-MM", already validated by the query DTO).
    * Per-category actuals match the budget view because they come from the
    * same aggregation. The totals differ by design because the budget view
-   * drops orphaned spend and this report keeps it. Expense spend on a
-   * category that is not a live expense category of the household (an
-   * unknown id or an income category) rolls into uncategorizedCents, so the
-   * rows plus uncategorizedCents always add up to totalCents. Archived
-   * categories are included so spend recorded before an archive keeps its
-   * name.
+   * drops spend with no categoryId or an orphaned one and this report keeps
+   * it. Expense spend with no categoryId, an id the household does not have,
+   * or an income category rolls into uncategorizedCents, so the rows plus
+   * uncategorizedCents always add up to totalCents. Archived categories are
+   * included so spend recorded before an archive keeps its name.
    */
   async getSpending(
     householdId: string,
@@ -150,7 +149,15 @@ export class ReportsService {
         .map((c) => [c._id.toString(), c] as const),
     );
 
+    const householdCategoryIds = new Set(
+      categories.map((c) => c._id.toString()),
+    );
+
     const actualByCat = new Map<string, number>();
+    // Expense spend with no categoryId, or one the household does not have,
+    // is a data-integrity problem, so it is logged ("null" for a missing id).
+    // Spend on an income category is a user choice and is not.
+    const orphanedSpend: string[] = [];
     let uncategorizedCents = 0;
     let totalCents = 0;
     for (const actual of actuals) {
@@ -158,28 +165,37 @@ export class ReportsService {
         continue;
       }
       totalCents += actual.totalCents;
-      if (!expenseCategories.has(actual.categoryId)) {
+      const { categoryId } = actual;
+      if (categoryId === null || !expenseCategories.has(categoryId)) {
         uncategorizedCents += actual.totalCents;
+        if (categoryId === null) {
+          orphanedSpend.push('null');
+        } else if (!householdCategoryIds.has(categoryId)) {
+          orphanedSpend.push(categoryId);
+        }
         continue;
       }
       actualByCat.set(
-        actual.categoryId,
-        (actualByCat.get(actual.categoryId) ?? 0) + actual.totalCents,
+        categoryId,
+        (actualByCat.get(categoryId) ?? 0) + actual.totalCents,
+      );
+    }
+    if (orphanedSpend.length > 0) {
+      this.logger.warn(
+        { householdId, month, categoryIds: orphanedSpend },
+        'Spending report rolled spend on categories not in the household into uncategorizedCents',
       );
     }
 
     // A planned amount on a category the household does not have points at
     // nothing, so log it instead of dropping it without a trace. Plans on
     // income categories are a normal budget feature and simply get no row.
-    const householdCategoryIds = new Set(
-      categories.map((c) => c._id.toString()),
-    );
     const unplacedPlans = [...plannedByCat.keys()].filter(
       (categoryId) => !householdCategoryIds.has(categoryId),
-    ).length;
-    if (unplacedPlans > 0) {
+    );
+    if (unplacedPlans.length > 0) {
       this.logger.warn(
-        { householdId, month, count: unplacedPlans },
+        { householdId, month, categoryIds: unplacedPlans },
         'Spending report skipped planned rows on categories not in the household',
       );
     }
@@ -203,7 +219,7 @@ export class ReportsService {
         categoryId,
         categoryName: category.name,
         groupId,
-        groupName: groupName ?? '',
+        groupName: groupName ?? null,
         actualCents: actualCents ?? 0,
         plannedCents: plannedCents ?? null,
       });
@@ -218,7 +234,7 @@ export class ReportsService {
     rows.sort(
       (a, b) =>
         b.actualCents - a.actualCents ||
-        a.categoryName.localeCompare(b.categoryName),
+        a.categoryName.localeCompare(b.categoryName, 'en'),
     );
 
     return { month, categories: rows, uncategorizedCents, totalCents };

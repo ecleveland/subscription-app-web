@@ -21,6 +21,8 @@ import { CategoriesService } from '../categories/categories.service';
 // to insert already exists, which is the desired end state, so we re-read it.
 const DUPLICATE_KEY = 11000;
 
+type CategorizedActual = MonthlyCategoryActual & { categoryId: string };
+
 function isDuplicateKeyError(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -57,7 +59,7 @@ export class BudgetsService {
     this.assertValidMonth(month);
     const { start, end } = monthToUtcRange(month);
 
-    const [plannedByCat, actuals, categories] = await Promise.all([
+    const [plannedByCat, allActuals, categories] = await Promise.all([
       this.getPlannedByCategory(householdId, month),
       this.transactionsService.aggregateMonthlyActualsByCategory(
         householdId,
@@ -67,6 +69,11 @@ export class BudgetsService {
       this.categoriesService.listCategories(householdId, true),
     ]);
 
+    // The budget view only counts categorized spend. Rows with no categoryId
+    // stay out of both the per-category sums and incomeCents.
+    const actuals = allActuals.filter(
+      (a): a is CategorizedActual => a.categoryId !== null,
+    );
     const incomeByCat = this.sumByCategory(actuals, TransactionType.INCOME);
     const expenseByCat = this.sumByCategory(actuals, TransactionType.EXPENSE);
 
@@ -399,7 +406,7 @@ export class BudgetsService {
   }
 
   private sumByCategory(
-    actuals: MonthlyCategoryActual[],
+    actuals: CategorizedActual[],
     type: TransactionType.INCOME | TransactionType.EXPENSE,
   ): Map<string, number> {
     const sums = new Map<string, number>();

@@ -7,7 +7,11 @@ import {
   ValidatorConstraintInterface,
   ValidationArguments,
 } from 'class-validator';
-import { isValidMonth, MONTH_REGEX } from '../../budgets/budget-month.util';
+import {
+  isValidMonth,
+  MONTH_FORMAT,
+  MONTH_REGEX,
+} from '../../budgets/budget-month.util';
 import { monthIndex } from '../month-range.util';
 
 // Upper bound on months per cash flow request, inclusive of both ends. Keeps
@@ -53,10 +57,6 @@ class MaxMonthsConstraint implements ValidatorConstraintInterface {
     return `range must not exceed ${MAX_CASH_FLOW_MONTHS} months`;
   }
 }
-
-export const MONTH_FORMAT = {
-  message: '$property must be a month in YYYY-MM format',
-};
 
 export class CashFlowQueryDto {
   @ApiProperty({

@@ -55,10 +55,12 @@ export interface PaginatedTransactions {
 // One row of the monthly budget-vs-actual aggregation: the summed magnitude of
 // a household's transactions in a single category, split by type. `categoryId`
 // is a hex string (the aggregation's ObjectId `_id` stringified) so callers can
-// key a plain Map without ObjectId reference-equality pitfalls. Transfers are
-// excluded — they carry no category and are net-zero to the budget.
+// key a plain Map without ObjectId reference-equality pitfalls. It is null
+// for income/expense transactions saved without a category, so each caller
+// decides whether to skip them or roll them up. Transfers are excluded — they
+// carry no category and are net-zero to the budget.
 export interface MonthlyCategoryActual {
-  categoryId: string;
+  categoryId: string | null;
   type: TransactionType.INCOME | TransactionType.EXPENSE;
   totalCents: number;
 }
@@ -362,24 +364,22 @@ export class TransactionsService {
       totalCents: number;
     }[];
 
-    // Drop any income/expense row missing a categoryId (shouldn't occur — the
-    // create/update validation requires one — but never key a Map on null).
-    // Warn if it ever does, so a data-integrity issue surfaces instead of cents
-    // silently vanishing from a budget's actuals.
+    // An income/expense row with no categoryId shouldn't occur (the API
+    // requires one), but legacy or imported data can have it. Return it with
+    // categoryId null so callers choose how to handle it, and warn so the
+    // data-integrity issue surfaces.
     const withoutCategory = rows.filter((r) => r._id.categoryId == null);
     if (withoutCategory.length > 0) {
       this.logger.warn(
         { householdId, count: withoutCategory.length },
-        'Dropped income/expense transactions with no categoryId from budget actuals',
+        'Found income/expense transactions with no categoryId',
       );
     }
-    return rows
-      .filter((r) => r._id.categoryId != null)
-      .map((r) => ({
-        categoryId: (r._id.categoryId as Types.ObjectId).toString(),
-        type: r._id.type as TransactionType.INCOME | TransactionType.EXPENSE,
-        totalCents: r.totalCents,
-      }));
+    return rows.map((r) => ({
+      categoryId: r._id.categoryId == null ? null : r._id.categoryId.toString(),
+      type: r._id.type as TransactionType.INCOME | TransactionType.EXPENSE,
+      totalCents: r.totalCents,
+    }));
   }
 
   /**
@@ -466,7 +466,7 @@ export class TransactionsService {
       // transfer with no transferAccountId). Schema requires accountId and the
       // union guards `transferAccountId: { $ne: null }`, so this shouldn't
       // occur — but warn rather than crash the sweep on `null.toString()`, and
-      // never key the Map on null (mirrors aggregateMonthlyActualsByCategory).
+      // never key the Map on null.
       if (row._id == null) {
         this.logger.warn(
           { householdId: householdId ?? 'all' },

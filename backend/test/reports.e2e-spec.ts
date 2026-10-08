@@ -1,12 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 import { userIdFromToken } from './helpers/jwt';
 import { HouseholdsService } from '../src/households/households.service';
 import { Category } from '../src/categories/schemas/category.schema';
+import { Transaction } from '../src/transactions/schemas/transaction.schema';
 import { CategoryGroup } from '../src/categories/schemas/category-group.schema';
 
 describe('Reports (e2e)', () => {
@@ -400,6 +401,33 @@ describe('Reports (e2e)', () => {
       expect(budgetRow.actualCents).toBe(row.actualCents);
     });
 
+    it('returns a planned category with no transactions at actualCents 0', async () => {
+      // November belongs to this test alone and has no transactions.
+      await request(app.getHttpServer())
+        .put(`/api/budgets/2026-11/categories/${expenseA}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ plannedCents: 7700 })
+        .expect(200);
+
+      const res = await spending(tokenA, { month: '2026-11' }).expect(200);
+
+      expect(res.body).toEqual({
+        month: '2026-11',
+        categories: [
+          {
+            categoryId: expenseA,
+            categoryName: expect.any(String),
+            groupId: expect.any(String),
+            groupName: groupNameA,
+            actualCents: 0,
+            plannedCents: 7700,
+          },
+        ],
+        uncategorizedCents: 0,
+        totalCents: 0,
+      });
+    });
+
     it('rolls an expense on an income category into uncategorizedCents and keeps the totals reconciled', async () => {
       // October belongs to this test alone. Transactions do not check that an
       // expense's category is an expense category, so this can happen.
@@ -426,6 +454,42 @@ describe('Reports (e2e)', () => {
         actualCents: 1400,
       });
       expect(res.body.uncategorizedCents).toBe(600);
+      expect(res.body.totalCents).toBe(2000);
+    });
+
+    it('rolls an expense with no categoryId into uncategorizedCents', async () => {
+      // December belongs to this test alone. The API requires a category on
+      // an expense, so the row goes straight to the model to stand in for
+      // legacy or imported data.
+      const membership = await households.findMembershipByUser(
+        userIdFromToken(tokenA),
+      );
+      const transactionModel = app.get<Model<Transaction>>(
+        getModelToken(Transaction.name),
+      );
+      await transactionModel.create({
+        householdId: membership!.householdId,
+        accountId: new Types.ObjectId(checkingA),
+        type: 'expense',
+        amountCents: 900,
+        date: new Date('2026-12-05T00:00:00Z'),
+      });
+      await createTxn(tokenA, {
+        accountId: checkingA,
+        type: 'expense',
+        amountCents: 1100,
+        date: '2026-12-06',
+        categoryId: expenseA,
+      });
+
+      const res = await spending(tokenA, { month: '2026-12' }).expect(200);
+
+      expect(res.body.categories).toHaveLength(1);
+      expect(res.body.categories[0]).toMatchObject({
+        categoryId: expenseA,
+        actualCents: 1100,
+      });
+      expect(res.body.uncategorizedCents).toBe(900);
       expect(res.body.totalCents).toBe(2000);
     });
 

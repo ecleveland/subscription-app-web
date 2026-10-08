@@ -266,6 +266,32 @@ describe('BudgetsService', () => {
       expect(view.totalActualCents).toBe(0);
     });
 
+    it('ignores rows with a null categoryId, leaving the view unchanged', async () => {
+      categoriesService.listCategories.mockResolvedValue([
+        cat(CAT_EXP, false),
+        cat(CAT_INC, true),
+      ]);
+      const categorized = [
+        actual(CAT_EXP, TransactionType.EXPENSE, 8000),
+        actual(CAT_INC, TransactionType.INCOME, 310000),
+      ];
+      transactionsService.aggregateMonthlyActualsByCategory.mockResolvedValue(
+        categorized,
+      );
+      const baseline = await service.getBudgetVsActual(HH, '2026-06');
+
+      transactionsService.aggregateMonthlyActualsByCategory.mockResolvedValue([
+        ...categorized,
+        { categoryId: null, type: TransactionType.EXPENSE, totalCents: 999 },
+        { categoryId: null, type: TransactionType.INCOME, totalCents: 777 },
+      ]);
+      const view = await service.getBudgetVsActual(HH, '2026-06');
+
+      expect(view).toEqual(baseline);
+      expect(view.incomeCents).toBe(310000);
+      expect(view.totalActualCents).toBe(8000);
+    });
+
     it('drops actuals for a category not in the household', async () => {
       categoriesService.listCategories.mockResolvedValue([]); // unknown category
       transactionsService.aggregateMonthlyActualsByCategory.mockResolvedValue([

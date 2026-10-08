@@ -286,7 +286,7 @@ describe('ReportsService', () => {
       };
     }
 
-    function expense(categoryId: string, totalCents: number) {
+    function expense(categoryId: string | null, totalCents: number) {
       return { categoryId, type: TransactionType.EXPENSE, totalCents };
     }
 
@@ -303,6 +303,10 @@ describe('ReportsService', () => {
         { _id: new Types.ObjectId(GROUP_HOME), name: 'Home' },
       ]);
     });
+
+    // A failed assertion skips a test's own mockRestore. Restore here too so
+    // a warn spy never leaks into the next test.
+    afterEach(() => jest.restoreAllMocks());
 
     function mockActuals(rows: ReturnType<typeof expense>[]): void {
       transactionsService.aggregateMonthlyActualsByCategory.mockResolvedValue(
@@ -417,6 +421,58 @@ describe('ReportsService', () => {
       expect(result.totalCents).toBe(1700);
     });
 
+    it('warns once with the ids when expense spend points at a category not in the household', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const orphan = new Types.ObjectId().toString();
+      mockActuals([expense(orphan, 700), expense(GROCERIES, 1000)]);
+
+      await service.getSpending(householdId, '2026-03');
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        { householdId, month: '2026-03', categoryIds: [orphan] },
+        'Spending report rolled spend on categories not in the household into uncategorizedCents',
+      );
+      warn.mockRestore();
+    });
+
+    it('rolls expense spend with no categoryId into uncategorizedCents and warns with a null id', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      mockActuals([
+        expense(null, 500),
+        expense(GROCERIES, 1000),
+        { categoryId: null, type: TransactionType.INCOME, totalCents: 4000 },
+      ]);
+
+      const result = await service.getSpending(householdId, '2026-03');
+
+      expect(result.categories.map((c) => c.categoryId)).toEqual([GROCERIES]);
+      expect(result.uncategorizedCents).toBe(500);
+      expect(result.totalCents).toBe(1500);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        { householdId, month: '2026-03', categoryIds: ['null'] },
+        'Spending report rolled spend on categories not in the household into uncategorizedCents',
+      );
+    });
+
+    it('does not warn when expense spend sits on an income category', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      mockActuals([expense(SALARY, 300), expense(GROCERIES, 1000)]);
+
+      const result = await service.getSpending(householdId, '2026-03');
+
+      expect(result.uncategorizedCents).toBe(300);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
     it('reconciles rows plus uncategorizedCents to totalCents, rolling orphan and income-category expense into uncategorized', async () => {
       const orphan = new Types.ObjectId().toString();
       mockActuals([
@@ -439,13 +495,15 @@ describe('ReportsService', () => {
       expect(rowSum + result.uncategorizedCents).toBe(result.totalCents);
     });
 
-    it('warns once with the count of planned rows whose category is not in the household', async () => {
+    it('warns once with the ids of planned rows whose category is not in the household', async () => {
       const warn = jest
         .spyOn(Logger.prototype, 'warn')
         .mockImplementation(() => undefined);
+      const unknownA = new Types.ObjectId().toString();
+      const unknownB = new Types.ObjectId().toString();
       mockPlanned([
-        [new Types.ObjectId().toString(), 100],
-        [new Types.ObjectId().toString(), 200],
+        [unknownA, 100],
+        [unknownB, 200],
         [SALARY, 500000],
         [RENT, 150000],
       ]);
@@ -455,7 +513,7 @@ describe('ReportsService', () => {
       expect(result.categories.map((c) => c.categoryId)).toEqual([RENT]);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
-        { householdId, month: '2026-03', count: 2 },
+        { householdId, month: '2026-03', categoryIds: [unknownA, unknownB] },
         expect.stringMatching(/planned/i),
       );
       warn.mockRestore();
@@ -477,7 +535,7 @@ describe('ReportsService', () => {
       warn.mockRestore();
     });
 
-    it('warns once with the category ids when a group is missing, keeping an empty group name', async () => {
+    it('warns once with the category ids when a group is missing, with a null group name', async () => {
       const warn = jest
         .spyOn(Logger.prototype, 'warn')
         .mockImplementation(() => undefined);
@@ -494,7 +552,7 @@ describe('ReportsService', () => {
       expect(result.categories[0]).toMatchObject({
         categoryId: LOST,
         groupId: lostGroup,
-        groupName: '',
+        groupName: null,
       });
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
@@ -505,10 +563,17 @@ describe('ReportsService', () => {
     });
 
     it('sorts by actualCents descending, ties by categoryName ascending', async () => {
+      // Listed so that unsorted output would be wrong twice over. The tied
+      // pair comes in reverse alphabetical order and the top spender is last.
+      categoriesService.listCategories.mockResolvedValue([
+        category(RENT, 'Rent', GROUP_HOME),
+        category(DINING, 'Dining', GROUP_FOOD),
+        category(GROCERIES, 'Groceries', GROUP_FOOD),
+      ]);
       mockActuals([
         expense(RENT, 500),
-        expense(GROCERIES, 2000),
         expense(DINING, 500),
+        expense(GROCERIES, 2000),
       ]);
 
       const result = await service.getSpending(householdId, '2026-03');
