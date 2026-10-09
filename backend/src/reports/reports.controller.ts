@@ -10,7 +10,9 @@ import {
   CashFlowQueryDto,
   MAX_CASH_FLOW_MONTHS,
 } from './dto/cash-flow-query.dto';
+import { SpendingQueryDto } from './dto/spending-query.dto';
 import type { CashFlowReport } from './interfaces/cash-flow.interface';
+import type { SpendingReport } from './interfaces/spending.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { HouseholdGuard } from '../households/guards/household.guard';
 import type { HouseholdRequest } from '../households/interfaces/household-request.interface';
@@ -46,6 +48,29 @@ export class ReportsController {
       req.household.householdId,
       query.from,
       query.to,
+    );
+  }
+
+  @Get('spending')
+  @ApiOperation({
+    summary: 'Expense spend per category for one month, with planned amounts',
+    description:
+      'Sums expense transactions by category for a UTC month and pairs each ' +
+      "with that month's planned amount, or null when none is set. Income " +
+      'categories get no row. Expense spend on an unknown or income category ' +
+      'is reported as uncategorizedCents, so the rows plus uncategorizedCents ' +
+      'equal totalCents.',
+  })
+  @ApiResponse({ status: 200, description: 'Spending by category' })
+  @ApiResponse({ status: 400, description: 'Missing or malformed month' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getSpending(
+    @Req() req: HouseholdRequest,
+    @Query() query: SpendingQueryDto,
+  ): Promise<SpendingReport> {
+    return this.reportsService.getSpending(
+      req.household.householdId,
+      query.month,
     );
   }
 }

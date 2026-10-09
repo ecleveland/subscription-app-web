@@ -1080,7 +1080,10 @@ describe('TransactionsService', () => {
       expect(result).toEqual([]);
     });
 
-    it('drops rows with a null categoryId rather than keying a Map on null', async () => {
+    it('returns rows with a null categoryId as null and warns with the count', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
       mockModel.aggregate.mockReturnValue(
         createChainable([
           {
@@ -1104,8 +1107,14 @@ describe('TransactionsService', () => {
       );
 
       expect(result).toEqual([
+        { categoryId: null, type: TransactionType.EXPENSE, totalCents: 999 },
         { categoryId: CAT_EXP, type: TransactionType.EXPENSE, totalCents: 100 },
       ]);
+      expect(warn).toHaveBeenCalledWith(
+        { householdId: HOUSEHOLD_ID, count: 1 },
+        'Found income/expense transactions with no categoryId',
+      );
+      warn.mockRestore();
     });
   });
 

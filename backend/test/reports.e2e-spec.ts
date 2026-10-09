@@ -1,12 +1,14 @@
 import { INestApplication } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createTestApp, closeTestApp } from './helpers/test-app';
 import { userIdFromToken } from './helpers/jwt';
 import { HouseholdsService } from '../src/households/households.service';
 import { Category } from '../src/categories/schemas/category.schema';
+import { Transaction } from '../src/transactions/schemas/transaction.schema';
+import { CategoryGroup } from '../src/categories/schemas/category-group.schema';
 
 describe('Reports (e2e)', () => {
   let app: INestApplication<App>;
@@ -268,6 +270,234 @@ describe('Reports (e2e)', () => {
         to: '2026-04',
         extra: 'x',
       }).expect(400);
+    });
+  });
+
+  describe('GET /reports/spending', () => {
+    let expenseA: string;
+    let expenseB: string;
+    let incomeA: string;
+    let groupNameA: string;
+    let checkingA: string;
+
+    function spending(token: string, query: Record<string, string>) {
+      return request(app.getHttpServer())
+        .get('/api/reports/spending')
+        .query(query)
+        .set('Authorization', `Bearer ${token}`);
+    }
+
+    beforeAll(async () => {
+      incomeA = await categoryFor(tokenA, true);
+      expenseA = await categoryFor(tokenA, false);
+      expenseB = await categoryFor(tokenB, false);
+      const groupModel = app.get<Model<CategoryGroup>>(
+        getModelToken(CategoryGroup.name),
+      );
+      const category = await categoryModel.findById(expenseA).exec();
+      const group = await groupModel.findById(category!.groupId).exec();
+      groupNameA = group!.name;
+
+      checkingA = await createAccount(tokenA, {
+        name: 'Spending Checking',
+        type: 'checking',
+        balanceCents: 1000000,
+      });
+      const checkingB = await createAccount(tokenB, {
+        name: 'B Spending Checking',
+        type: 'checking',
+        balanceCents: 1000000,
+      });
+
+      // June: no Budget document for either household. A has an expense and
+      // income, B has an expense in the same month.
+      await createTxn(tokenA, {
+        accountId: checkingA,
+        type: 'expense',
+        amountCents: 8000,
+        date: '2026-06-10',
+        categoryId: expenseA,
+      });
+      await createTxn(tokenA, {
+        accountId: checkingA,
+        type: 'income',
+        amountCents: 300000,
+        date: '2026-06-01',
+        categoryId: incomeA,
+      });
+      await createTxn(tokenB, {
+        accountId: checkingB,
+        type: 'expense',
+        amountCents: 1100,
+        date: '2026-06-12',
+        categoryId: expenseB,
+      });
+    });
+
+    it('requires authentication', async () => {
+      await request(app.getHttpServer())
+        .get('/api/reports/spending?month=2026-06')
+        .expect(401);
+    });
+
+    it("returns household A's expense categories only, with income left out", async () => {
+      const res = await spending(tokenA, { month: '2026-06' }).expect(200);
+      expect(res.body).toEqual({
+        month: '2026-06',
+        categories: [
+          {
+            categoryId: expenseA,
+            categoryName: expect.any(String),
+            groupId: expect.any(String),
+            groupName: groupNameA,
+            actualCents: 8000,
+            plannedCents: null,
+          },
+        ],
+        uncategorizedCents: 0,
+        totalCents: 8000,
+      });
+    });
+
+    it("returns only household B's spend for the same month", async () => {
+      const res = await spending(tokenB, { month: '2026-06' }).expect(200);
+      expect(res.body.categories).toHaveLength(1);
+      expect(res.body.categories[0]).toMatchObject({
+        categoryId: expenseB,
+        actualCents: 1100,
+        plannedCents: null,
+      });
+      expect(res.body.totalCents).toBe(1100);
+    });
+
+    it('shows the planned amount and the same actual as the budget view', async () => {
+      // September belongs to this test alone.
+      await createTxn(tokenA, {
+        accountId: checkingA,
+        type: 'expense',
+        amountCents: 2500,
+        date: '2026-09-04',
+        categoryId: expenseA,
+      });
+      await request(app.getHttpServer())
+        .put(`/api/budgets/2026-09/categories/${expenseA}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ plannedCents: 5000 })
+        .expect(200);
+
+      const res = await spending(tokenA, { month: '2026-09' }).expect(200);
+      const budget = await request(app.getHttpServer())
+        .get('/api/budgets/2026-09')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      const row = res.body.categories.find(
+        (c: { categoryId: string }) => c.categoryId === expenseA,
+      );
+      expect(row).toMatchObject({ actualCents: 2500, plannedCents: 5000 });
+      const budgetRow = budget.body.categories.find(
+        (c: { categoryId: string }) => c.categoryId === expenseA,
+      );
+      expect(budgetRow.actualCents).toBe(row.actualCents);
+    });
+
+    it('returns a planned category with no transactions at actualCents 0', async () => {
+      // November belongs to this test alone and has no transactions.
+      await request(app.getHttpServer())
+        .put(`/api/budgets/2026-11/categories/${expenseA}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ plannedCents: 7700 })
+        .expect(200);
+
+      const res = await spending(tokenA, { month: '2026-11' }).expect(200);
+
+      expect(res.body).toEqual({
+        month: '2026-11',
+        categories: [
+          {
+            categoryId: expenseA,
+            categoryName: expect.any(String),
+            groupId: expect.any(String),
+            groupName: groupNameA,
+            actualCents: 0,
+            plannedCents: 7700,
+          },
+        ],
+        uncategorizedCents: 0,
+        totalCents: 0,
+      });
+    });
+
+    it('rolls an expense on an income category into uncategorizedCents and keeps the totals reconciled', async () => {
+      // October belongs to this test alone. Transactions do not check that an
+      // expense's category is an expense category, so this can happen.
+      await createTxn(tokenA, {
+        accountId: checkingA,
+        type: 'expense',
+        amountCents: 600,
+        date: '2026-10-02',
+        categoryId: incomeA,
+      });
+      await createTxn(tokenA, {
+        accountId: checkingA,
+        type: 'expense',
+        amountCents: 1400,
+        date: '2026-10-03',
+        categoryId: expenseA,
+      });
+
+      const res = await spending(tokenA, { month: '2026-10' }).expect(200);
+
+      expect(res.body.categories).toHaveLength(1);
+      expect(res.body.categories[0]).toMatchObject({
+        categoryId: expenseA,
+        actualCents: 1400,
+      });
+      expect(res.body.uncategorizedCents).toBe(600);
+      expect(res.body.totalCents).toBe(2000);
+    });
+
+    it('rolls an expense with no categoryId into uncategorizedCents', async () => {
+      // December belongs to this test alone. The API requires a category on
+      // an expense, so the row goes straight to the model to stand in for
+      // legacy or imported data.
+      const membership = await households.findMembershipByUser(
+        userIdFromToken(tokenA),
+      );
+      const transactionModel = app.get<Model<Transaction>>(
+        getModelToken(Transaction.name),
+      );
+      await transactionModel.create({
+        householdId: membership!.householdId,
+        accountId: new Types.ObjectId(checkingA),
+        type: 'expense',
+        amountCents: 900,
+        date: new Date('2026-12-05T00:00:00Z'),
+      });
+      await createTxn(tokenA, {
+        accountId: checkingA,
+        type: 'expense',
+        amountCents: 1100,
+        date: '2026-12-06',
+        categoryId: expenseA,
+      });
+
+      const res = await spending(tokenA, { month: '2026-12' }).expect(200);
+
+      expect(res.body.categories).toHaveLength(1);
+      expect(res.body.categories[0]).toMatchObject({
+        categoryId: expenseA,
+        actualCents: 1100,
+      });
+      expect(res.body.uncategorizedCents).toBe(900);
+      expect(res.body.totalCents).toBe(2000);
+    });
+
+    it.each([
+      ['a malformed month', { month: '2026-13' }],
+      ['a missing month', {}],
+    ])('rejects %s with 400', async (_label, query) => {
+      await spending(tokenA, query as Record<string, string>).expect(400);
     });
   });
 });

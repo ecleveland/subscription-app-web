@@ -105,6 +105,39 @@ describe('BudgetsService', () => {
     );
   }
 
+  describe('getPlannedByCategory', () => {
+    it('returns an empty map without reading rows when the month has no budget', async () => {
+      const planned = await service.getPlannedByCategory(HH, '2026-06');
+      expect(planned.size).toBe(0);
+      expect(budgetCategoryModel.find).not.toHaveBeenCalled();
+    });
+
+    it('looks up the budget by household and month', async () => {
+      await service.getPlannedByCategory(HH, '2026-06');
+      const filter = budgetModel.findOne.mock.calls[0][0];
+      expect(filter.householdId.toString()).toBe(HH);
+      expect(filter.month).toBe('2026-06');
+    });
+
+    it("keys the budget's rows by category id string, keeping a planned 0", async () => {
+      withExistingBudget();
+      withPlanned([
+        { categoryId: CAT_EXP, plannedCents: 5000 },
+        { categoryId: CAT_SPEND_ONLY, plannedCents: 0 },
+      ]);
+
+      const planned = await service.getPlannedByCategory(HH, '2026-06');
+
+      expect(budgetCategoryModel.find).toHaveBeenCalledWith({
+        budgetId: BUDGET_ID,
+      });
+      expect([...planned.entries()]).toEqual([
+        [CAT_EXP, 5000],
+        [CAT_SPEND_ONLY, 0],
+      ]);
+    });
+  });
+
   describe('getBudgetVsActual', () => {
     it('rejects a malformed month before touching the ledger', async () => {
       await expect(service.getBudgetVsActual(HH, '2026-13')).rejects.toThrow(
@@ -231,6 +264,32 @@ describe('BudgetsService', () => {
       // ...but its planned limit does not inflate the (expense-only) rollup.
       expect(view.totalPlannedCents).toBe(0);
       expect(view.totalActualCents).toBe(0);
+    });
+
+    it('ignores rows with a null categoryId, leaving the view unchanged', async () => {
+      categoriesService.listCategories.mockResolvedValue([
+        cat(CAT_EXP, false),
+        cat(CAT_INC, true),
+      ]);
+      const categorized = [
+        actual(CAT_EXP, TransactionType.EXPENSE, 8000),
+        actual(CAT_INC, TransactionType.INCOME, 310000),
+      ];
+      transactionsService.aggregateMonthlyActualsByCategory.mockResolvedValue(
+        categorized,
+      );
+      const baseline = await service.getBudgetVsActual(HH, '2026-06');
+
+      transactionsService.aggregateMonthlyActualsByCategory.mockResolvedValue([
+        ...categorized,
+        { categoryId: null, type: TransactionType.EXPENSE, totalCents: 999 },
+        { categoryId: null, type: TransactionType.INCOME, totalCents: 777 },
+      ]);
+      const view = await service.getBudgetVsActual(HH, '2026-06');
+
+      expect(view).toEqual(baseline);
+      expect(view.incomeCents).toBe(310000);
+      expect(view.totalActualCents).toBe(8000);
     });
 
     it('drops actuals for a category not in the household', async () => {
