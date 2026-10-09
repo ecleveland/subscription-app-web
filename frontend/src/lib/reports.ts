@@ -62,15 +62,24 @@ export interface NetWorthReport {
 export const MAX_REPORT_MONTHS = 36;
 
 export function getCashFlow(from: string, to: string): Promise<CashFlowReport> {
-  return apiFetch<CashFlowReport>(`/reports/cash-flow?from=${from}&to=${to}`);
+  return apiFetch<CashFlowReport>(`/reports/cash-flow?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
 }
 
 export function getSpending(month: string): Promise<SpendingReport> {
-  return apiFetch<SpendingReport>(`/reports/spending?month=${month}`);
+  return apiFetch<SpendingReport>(`/reports/spending?month=${encodeURIComponent(month)}`);
 }
 
 export function getNetWorth(from: string, to: string): Promise<NetWorthReport> {
-  return apiFetch<NetWorthReport>(`/reports/net-worth?from=${from}&to=${to}`);
+  return apiFetch<NetWorthReport>(`/reports/net-worth?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+}
+
+// Same pattern the backend validates against. Safari renders
+// <input type="month"> as a text box, so partial input like "2026-1" can reach
+// the page and must not be sent.
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export function isValidMonth(value: string): boolean {
+  return MONTH_PATTERN.test(value);
 }
 
 // The last 12 months, ending with the current UTC month. UTC matches how the

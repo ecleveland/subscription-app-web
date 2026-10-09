@@ -70,6 +70,22 @@ export function goalProgress(goal: Goal): {
   return { percent, remainingCents: goal.targetCents - goal.currentCents };
 }
 
+const dateOnlyFormat = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+/**
+ * Format a date-only target ("2027-06-01" or its full ISO echo) as that UTC
+ * calendar day, so the label matches daysUntilTarget's UTC day count in every
+ * viewer timezone.
+ */
+export function formatDateOnly(value: string): string {
+  return dateOnlyFormat.format(new Date(`${value.slice(0, 10)}T00:00:00Z`));
+}
+
 /** Whole UTC days until the target date, negative when overdue, null if unset. */
 export function daysUntilTarget(goal: Goal): number | null {
   return goal.targetDate ? daysUntil(goal.targetDate) : null;

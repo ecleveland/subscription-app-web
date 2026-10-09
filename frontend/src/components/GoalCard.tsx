@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { daysUntilTarget, goalProgress } from '@/lib/goals';
-import { dollarsToCents, formatCents, formatDate } from '@/lib/utils';
+import { daysUntilTarget, formatDateOnly, goalProgress } from '@/lib/goals';
+import { dollarsToCents, formatCents } from '@/lib/utils';
 import type { Goal } from '@/lib/types';
 
 interface Props {
@@ -82,9 +82,7 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
           </div>
           {goal.targetDate && days !== null && (
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              {/* Noon UTC keeps a date-only value on the same calendar day in
-                  any viewer timezone when formatDate renders it locally. */}
-              {formatDate(`${goal.targetDate.slice(0, 10)}T12:00:00Z`)} ·{' '}
+              {formatDateOnly(goal.targetDate)} ·{' '}
               <span className={days < 0 ? 'text-red-600 dark:text-red-400' : ''}>
                 {daysLabel(days)}
               </span>

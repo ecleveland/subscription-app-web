@@ -1,17 +1,18 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useAccounts } from '@/lib/accounts-context';
-import { showErrorToast } from '@/lib/toast';
+import { useReport, type ReportState } from '@/lib/use-report';
 import {
   getCashFlow,
   getSpending,
   getNetWorth,
   defaultRange,
   monthSpan,
+  isValidMonth,
   MAX_REPORT_MONTHS,
   type CashFlowReport,
   type SpendingReport,
@@ -29,57 +30,11 @@ import SpendingByCategoryChart from '@/components/SpendingByCategoryChart';
 // transactions into months.
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 
-interface ReportState<T> {
-  data: T | null;
-  error: string | null;
-  loading: boolean;
-}
-
-/**
- * Fetch one section's report. Each section owns its state so a failure in one
- * never blanks the others. `key` identifies the request: a change refetches
- * and drops the old result, and a null key (an invalid input, or signed out)
- * skips the fetch and keeps whatever is on screen.
- */
-function useReport<T>(
-  key: string | null,
-  load: () => Promise<T>,
-  fallbackError: string,
-): ReportState<T> {
-  const [state, setState] = useState<ReportState<T> & { key: string | null }>({
-    key: null,
-    data: null,
-    error: null,
-    loading: true,
-  });
-
-  useEffect(() => {
-    if (key === null) return;
-    let cancelled = false;
-    setState({ key, data: null, error: null, loading: true });
-    load()
-      .then((data) => {
-        if (!cancelled) setState({ key, data, error: null, loading: false });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const message = err instanceof Error ? err.message : fallbackError;
-        showErrorToast(message);
-        setState({ key, data: null, error: message, loading: false });
-      });
-    return () => {
-      cancelled = true;
-    };
-    // `load` closes over the values that make up `key`, so `key` alone
-    // decides when to refetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-
-  return state;
-}
-
 function validateRange(from: string, to: string): string | null {
   if (!from || !to) return 'Choose both months';
+  if (!isValidMonth(from) || !isValidMonth(to)) {
+    return 'Months must be in YYYY-MM format';
+  }
   const span = monthSpan(from, to);
   if (span < 1) return 'From must not be after to';
   if (span > MAX_REPORT_MONTHS) {
@@ -152,7 +107,11 @@ function ReportBody<T>({
 
 export default function ReportsPage() {
   const { isAuthenticated } = useAuth();
-  const { accounts } = useAccounts();
+  const {
+    accounts,
+    loading: accountsLoading,
+    error: accountsError,
+  } = useAccounts();
 
   const [initial] = useState(defaultRange);
   const [fromInput, setFromInput] = useState(initial.from);
@@ -170,22 +129,28 @@ export default function ReportsPage() {
 
   const rangeKey = isAuthenticated ? `${range.from}..${range.to}` : null;
 
+  const monthValid = isValidMonth(month);
+
   const cashFlow = useReport<CashFlowReport>(
+    'Cash flow',
     rangeKey,
     () => getCashFlow(range.from, range.to),
     'Failed to load cash flow',
   );
   const netWorth = useReport<NetWorthReport>(
+    'Net worth',
     rangeKey,
     () => getNetWorth(range.from, range.to),
     'Failed to load net worth',
   );
   const spending = useReport<SpendingReport>(
-    isAuthenticated && month ? month : null,
+    'Spending by category',
+    isAuthenticated && monthValid ? month : null,
     () => getSpending(month),
     'Failed to load spending',
   );
   const subscriptions = useReport<Subscription[]>(
+    'Subscriptions',
     isAuthenticated ? 'subscriptions' : null,
     () =>
       apiFetch<PaginatedResponse<Subscription>>('/subscriptions?limit=0').then(
@@ -279,7 +244,7 @@ export default function ReportsPage() {
           </label>
         }
       >
-        {month ? (
+        {monthValid ? (
           <ReportBody
             state={spending}
             loadingText="Loading spending…"
@@ -297,7 +262,8 @@ export default function ReportsPage() {
             {(r) => <SpendingReportChart report={r} />}
           </ReportBody>
         ) : (
-          // A cleared input skips the fetch, so hide the old month's chart.
+          // An empty or partial month skips the fetch, so hide the old
+          // month's chart.
           <p className="text-sm text-red-600 dark:text-red-400">
             Choose a month
           </p>
@@ -306,7 +272,10 @@ export default function ReportsPage() {
 
       <ReportSection id="report-net-worth" title="Net worth">
         <ReportBody
-          state={netWorth}
+          // The empty state depends on the accounts list, so wait for it.
+          state={
+            accountsLoading ? { data: null, error: null, loading: true } : netWorth
+          }
           loadingText="Loading net worth…"
           // The backend leaves an account out of months before it existed,
           // so only a range where no month has any account is empty.
@@ -314,7 +283,11 @@ export default function ReportsPage() {
           empty={
             // The accounts list holds active accounts only. A household whose
             // accounts are all archived gets the "No accounts yet" prompt.
-            accounts.length > 0 ? (
+            accountsError ? (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                Couldn&apos;t load accounts
+              </p>
+            ) : accounts.length > 0 ? (
               <p className="text-gray-500 dark:text-gray-400">
                 No account history in this range
               </p>

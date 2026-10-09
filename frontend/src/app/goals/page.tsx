@@ -21,6 +21,9 @@ export default function GoalsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<Goal | null>(null);
+  const [categoriesUnavailable, setCategoriesUnavailable] = useState(false);
+  // Bumped by "Try again" to rerun the goals load with the same filter.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -47,7 +50,7 @@ export default function GoalsPage() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, showArchived]);
+  }, [isAuthenticated, showArchived, reloadKey]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -57,7 +60,10 @@ export default function GoalsPage() {
         if (!cancelled) setCategories(list);
       })
       .catch((err) => {
-        // Goals still work without categories; only the picker is empty.
+        if (cancelled) return;
+        // Goals still work without categories. Only the picker is empty, and
+        // GoalForm says so.
+        setCategoriesUnavailable(true);
         showErrorToast(errorMessage(err, 'Failed to load categories'));
       });
     return () => {
@@ -87,6 +93,8 @@ export default function GoalsPage() {
     const isArchived = !goal.isArchived;
     try {
       replaceGoal(await updateGoal(goal._id, { isArchived }));
+      // The card may leave the list, so don't leave its edit form open.
+      setEditing((current) => (current?._id === goal._id ? null : current));
       showSuccessToast(isArchived ? 'Goal archived' : 'Goal restored');
     } catch (err) {
       showErrorToast(errorMessage(err, 'Failed to update goal'));
@@ -120,7 +128,7 @@ export default function GoalsPage() {
     <div className="max-w-3xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Goals</h1>
-        {!showCreate && !editing && goals.length > 0 && addButton}
+        {!showCreate && !editing && (goals.length > 0 || error) && addButton}
       </div>
 
       <label className="inline-flex items-center gap-2 mb-4 text-sm text-gray-700 dark:text-gray-300">
@@ -135,12 +143,26 @@ export default function GoalsPage() {
         Show archived
       </label>
 
-      {error && <p className="text-red-500 dark:text-red-400 text-sm mb-4">{error}</p>}
+      {error && (
+        <div className="flex items-center gap-3 mb-4">
+          <p className="text-red-500 dark:text-red-400 text-sm">{error}</p>
+          <button
+            onClick={() => {
+              setLoading(true);
+              setReloadKey((k) => k + 1);
+            }}
+            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
       {showCreate && (
         <div className="mb-6">
           <GoalForm
             categories={categories}
+            categoriesUnavailable={categoriesUnavailable}
             onSaved={handleSaved}
             onCancel={() => setShowCreate(false)}
           />
@@ -153,6 +175,7 @@ export default function GoalsPage() {
             key={editing._id}
             goal={editing}
             categories={categories}
+            categoriesUnavailable={categoriesUnavailable}
             onSaved={handleSaved}
             onCancel={() => setEditing(null)}
           />

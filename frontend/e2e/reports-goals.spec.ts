@@ -21,6 +21,11 @@ test.describe('Reports and goals', () => {
         page.getByRole('heading', { level: 2, name }),
       ).toBeVisible();
     }
+    // Headings render even when a fetch fails, so also require that no
+    // section shows an error. Wait for loading to finish first, or the
+    // check could pass before any error has rendered.
+    await expect(page.getByText(/^Loading /)).toHaveCount(0);
+    await expect(page.getByText(/failed/i)).toHaveCount(0);
   });
 
   test('create a goal, contribute, then archive and unarchive', async ({
@@ -36,14 +41,14 @@ test.describe('Reports and goals', () => {
     await page.getByRole('button', { name: 'Create', exact: true }).click();
 
     // Scoped to this spec's unique name so parallel specs' goals don't
-    // interfere. If the page renders cards with a different role, change it here.
+    // interfere.
     const card = page.getByRole('listitem').filter({ hasText: name });
     await expect(card).toBeVisible();
-    await expect(card).toContainText('0%');
+    await expect(card.getByText('0%', { exact: true })).toBeVisible();
 
     await card.getByLabel('Contribution ($)').fill('25');
     await card.getByRole('button', { name: 'Add', exact: true }).click();
-    await expect(card).toContainText('25%');
+    await expect(card.getByText('25%', { exact: true })).toBeVisible();
 
     await card.getByRole('button', { name: 'Archive', exact: true }).click();
     await expect(card).toHaveCount(0);

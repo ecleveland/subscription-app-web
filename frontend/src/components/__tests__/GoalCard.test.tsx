@@ -83,6 +83,13 @@ describe('GoalCard', () => {
       expect(screen.getByText(/10 days left/)).toBeInTheDocument();
     });
 
+    it('shows tomorrow UTC as that calendar day with 1 day left', () => {
+      vi.setSystemTime(new Date('2026-10-08T23:30:00Z'));
+      renderCard({ targetDate: '2026-10-09' });
+      expect(screen.getByText(/^Oct 9, 2026/)).toBeInTheDocument();
+      expect(screen.getByText('1 day left')).toBeInTheDocument();
+    });
+
     it('uses the singular for one day', () => {
       renderCard({ targetDate: '2026-10-09' });
       expect(screen.getByText(/1 day left/)).toBeInTheDocument();

@@ -14,6 +14,8 @@ import type { BudgetCategory, Goal, GoalType } from '@/lib/types';
 interface Props {
   goal?: Goal;
   categories: BudgetCategory[];
+  // True when the categories fetch failed, so the empty picker is explained.
+  categoriesUnavailable?: boolean;
   onSaved: (goal: Goal) => void;
   onCancel: () => void;
 }
@@ -21,7 +23,13 @@ interface Props {
 const inputClass =
   'w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700';
 
-export default function GoalForm({ goal, categories, onSaved, onCancel }: Props) {
+export default function GoalForm({
+  goal,
+  categories,
+  categoriesUnavailable = false,
+  onSaved,
+  onCancel,
+}: Props) {
   const isEditing = !!goal;
   // The date input wants YYYY-MM-DD; the API may echo a full ISO timestamp.
   const initialDate = goal?.targetDate ? goal.targetDate.slice(0, 10) : '';
@@ -50,6 +58,10 @@ export default function GoalForm({ goal, categories, onSaved, onCancel }: Props)
     setError('');
 
     const targetCents = dollarsToCents(target);
+    if (targetCents === null && target.trim() !== '') {
+      setError('Target must be a dollar amount with at most 2 decimals');
+      return;
+    }
     if (targetCents === null || targetCents <= 0) {
       setError('Target must be greater than $0');
       return;
@@ -130,8 +142,9 @@ export default function GoalForm({ goal, categories, onSaved, onCancel }: Props)
         </label>
         <input
           id="goal-target"
-          type="number"
-          step="0.01"
+          // Text, not number: a number input accepts and normalizes forms
+          // like "1e3", which should fail dollarsToCents with a clear message.
+          inputMode="decimal"
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           placeholder="0.00"
@@ -175,6 +188,11 @@ export default function GoalForm({ goal, categories, onSaved, onCancel }: Props)
             </option>
           ))}
         </select>
+        {categoriesUnavailable && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Couldn&apos;t load categories. You can set one later.
+          </p>
+        )}
       </div>
 
       {error && <p className="text-red-500 dark:text-red-400 text-sm">{error}</p>}

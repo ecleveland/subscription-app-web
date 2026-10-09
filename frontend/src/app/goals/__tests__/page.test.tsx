@@ -77,6 +77,7 @@ describe('GoalsPage', () => {
     authState = { isAuthenticated: false };
     render(<GoalsPage />);
     expect(listGoals).not.toHaveBeenCalled();
+    expect(listCategories).not.toHaveBeenCalled();
   });
 
   it('shows loading, then goals with progress labels and clamped bars', async () => {
@@ -105,6 +106,50 @@ describe('GoalsPage', () => {
     vi.mocked(listGoals).mockRejectedValue(new Error('Network down'));
     render(<GoalsPage />);
     expect(await screen.findByText('Network down')).toBeInTheDocument();
+  });
+
+  it('offers Try again and + Add goal after a failed load, and retry refetches', async () => {
+    const user = userEvent.setup();
+    vi.mocked(listGoals).mockRejectedValueOnce(new Error('Network down'));
+    render(<GoalsPage />);
+    expect(await screen.findByText('Network down')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '+ Add goal' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByRole('article', { name: 'Vacation' })).toBeInTheDocument();
+    expect(listGoals).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('Network down')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  it('toasts a categories failure while goals still render', async () => {
+    vi.mocked(listCategories).mockRejectedValue(new Error('Categories down'));
+    render(<GoalsPage />);
+    expect(await screen.findByRole('article', { name: 'Vacation' })).toBeInTheDocument();
+    await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('Categories down'));
+  });
+
+  it('hints in the create form when categories failed to load', async () => {
+    const user = userEvent.setup();
+    vi.mocked(listCategories).mockRejectedValue(new Error('Categories down'));
+    render(<GoalsPage />);
+    await screen.findByRole('article', { name: 'Vacation' });
+    await waitFor(() => expect(showErrorToast).toHaveBeenCalled());
+
+    await user.click(screen.getByRole('button', { name: '+ Add goal' }));
+
+    expect(
+      screen.getByText("Couldn't load categories. You can set one later."),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no categories hint when categories loaded', async () => {
+    const user = userEvent.setup();
+    render(<GoalsPage />);
+    await screen.findByRole('article', { name: 'Vacation' });
+    await user.click(screen.getByRole('button', { name: '+ Add goal' }));
+    expect(screen.queryByText(/Couldn't load categories/)).toBeNull();
   });
 
   it('posts a contribution and re-renders the card from the response', async () => {
@@ -209,6 +254,75 @@ describe('GoalsPage', () => {
     await waitFor(() =>
       expect(within(card('Old laptop')).getByRole('button', { name: 'Archive' })).toBeInTheDocument(),
     );
+  });
+
+  it.each([
+    { label: 'Archive', start: half, showArchived: false },
+    { label: 'Unarchive', start: archived, showArchived: true },
+  ])('toasts a failed $label and leaves the card as it was', async ({ label, start, showArchived }) => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoal).mockRejectedValue(new Error('Update failed'));
+    render(<GoalsPage />);
+    await screen.findByRole('article', { name: 'Vacation' });
+    if (showArchived) {
+      await user.click(screen.getByRole('checkbox', { name: 'Show archived' }));
+    }
+    await screen.findByRole('article', { name: start.name });
+
+    await user.click(within(card(start.name)).getByRole('button', { name: label }));
+
+    await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('Update failed'));
+    expect(updateGoal).toHaveBeenCalledWith(start._id, { isArchived: !start.isArchived });
+    expect(within(card(start.name)).getByRole('button', { name: label })).toBeInTheDocument();
+  });
+
+  it('keeps the edit form open with the error when updateGoal rejects', async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoal).mockRejectedValue(new Error('Name taken'));
+    render(<GoalsPage />);
+    await screen.findByRole('article', { name: 'Emergency fund' });
+
+    await user.click(within(card('Emergency fund')).getByRole('button', { name: 'Edit' }));
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Rainy day');
+    await user.click(screen.getByRole('button', { name: 'Update' }));
+
+    await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('Name taken'));
+    expect(screen.getByText('Name taken', { selector: 'p' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Update' })).toBeInTheDocument();
+    expect(screen.getByRole('article', { name: 'Emergency fund' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: 'Rainy day' })).toBeNull();
+  });
+
+  it('closes the edit form when the goal being edited is archived', async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoal).mockResolvedValue({ ...half, isArchived: true });
+    render(<GoalsPage />);
+    await screen.findByRole('article', { name: 'Emergency fund' });
+
+    await user.click(within(card('Emergency fund')).getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('button', { name: 'Update' })).toBeInTheDocument();
+    await user.click(within(card('Emergency fund')).getByRole('button', { name: 'Archive' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('article', { name: 'Emergency fund' })).toBeNull(),
+    );
+    expect(screen.queryByRole('button', { name: 'Update' })).toBeNull();
+  });
+
+  it('keeps the edit form open when a different goal is archived', async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoal).mockResolvedValue({ ...empty, isArchived: true });
+    render(<GoalsPage />);
+    await screen.findByRole('article', { name: 'Emergency fund' });
+
+    await user.click(within(card('Emergency fund')).getByRole('button', { name: 'Edit' }));
+    await user.click(within(card('Vacation')).getByRole('button', { name: 'Archive' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('article', { name: 'Vacation' })).toBeNull(),
+    );
+    expect(screen.getByLabelText('Name')).toHaveValue('Emergency fund');
   });
 
   it('adds a created goal to the list', async () => {

@@ -9,6 +9,7 @@ import {
   deleteGoal,
   goalProgress,
   daysUntilTarget,
+  formatDateOnly,
 } from '../goals';
 import type { Goal } from '../types';
 
@@ -121,5 +122,25 @@ describe('daysUntilTarget', () => {
 
   it('accepts a full ISO timestamp and goes negative when overdue', () => {
     expect(daysUntilTarget(goal({ targetDate: '2026-10-05T00:00:00.000Z' }))).toBe(-3);
+  });
+});
+
+describe('formatDateOnly', () => {
+  it('formats a date-only value as that UTC calendar day', () => {
+    expect(formatDateOnly('2026-10-09')).toBe('Oct 9, 2026');
+  });
+
+  it('uses the date part of a full ISO timestamp', () => {
+    expect(formatDateOnly('2027-01-01T00:00:00.000Z')).toBe('Jan 1, 2027');
+  });
+
+  it('matches daysUntilTarget near a UTC day boundary', () => {
+    vi.useFakeTimers();
+    // 23:30 UTC on Oct 8 is already Oct 9 in UTC+12; both answers stay UTC.
+    vi.setSystemTime(new Date('2026-10-08T23:30:00Z'));
+    const target = goal({ targetDate: '2026-10-09' });
+    expect(formatDateOnly(target.targetDate!)).toBe('Oct 9, 2026');
+    expect(daysUntilTarget(target)).toBe(1);
+    vi.useRealTimers();
   });
 });

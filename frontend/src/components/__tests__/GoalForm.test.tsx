@@ -117,6 +117,22 @@ describe('GoalForm', () => {
     expect(createGoal).not.toHaveBeenCalled();
   });
 
+  it.each(['10.505', '1e3'])(
+    'rejects an unparseable target %s with the decimals message',
+    async (value) => {
+      const user = userEvent.setup();
+      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      await user.type(screen.getByLabelText('Name'), 'Car');
+      await user.type(screen.getByLabelText('Target ($)'), value);
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+      expect(
+        screen.getByText('Target must be a dollar amount with at most 2 decimals'),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Target must be greater than $0')).toBeNull();
+      expect(createGoal).not.toHaveBeenCalled();
+    },
+  );
+
   it('shows a rejected save inline and as a toast', async () => {
     const user = userEvent.setup();
     vi.mocked(createGoal).mockRejectedValue(new Error('Category not found'));
@@ -141,7 +157,7 @@ describe('GoalForm', () => {
     );
 
     expect(screen.getByLabelText('Name')).toHaveValue('Car');
-    expect(screen.getByLabelText('Target ($)')).toHaveValue(5000);
+    expect(screen.getByLabelText('Target ($)')).toHaveValue('5000');
     expect(screen.getByLabelText('Target date')).toHaveValue('2027-06-01');
     expect(screen.getByLabelText('Category')).toHaveValue('c1');
 
@@ -157,6 +173,42 @@ describe('GoalForm', () => {
     );
     expect(showSuccessToast).toHaveBeenCalledWith('Goal updated');
     expect(onSaved).toHaveBeenCalledWith(updated);
+  });
+
+  it('shows a rejected update inline and as a toast without calling onSaved', async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateGoal).mockRejectedValue(new Error('Goal not found'));
+    const onSaved = vi.fn();
+    render(
+      <GoalForm goal={existing} categories={categories} onSaved={onSaved} onCancel={vi.fn()} />,
+    );
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Truck');
+    await user.click(screen.getByRole('button', { name: 'Update' }));
+
+    await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('Goal not found'));
+    expect(screen.getByText('Goal not found')).toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(showSuccessToast).not.toHaveBeenCalled();
+  });
+
+  it('hints when categories are unavailable and keeps the edit placeholder', () => {
+    render(
+      <GoalForm
+        goal={existing}
+        categories={[]}
+        categoriesUnavailable
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("Couldn't load categories. You can set one later."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Category')).toHaveValue('c1');
+    expect(
+      screen.getByRole('option', { name: 'Current category (unavailable)' }),
+    ).toBeDisabled();
   });
 
   it('sends only changed fields in edit mode', async () => {

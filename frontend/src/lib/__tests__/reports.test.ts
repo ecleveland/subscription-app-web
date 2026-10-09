@@ -7,6 +7,7 @@ import {
   getNetWorth,
   defaultRange,
   monthSpan,
+  isValidMonth,
   MAX_REPORT_MONTHS,
 } from '../reports';
 
@@ -32,6 +33,28 @@ describe('reports api helpers', () => {
     await getNetWorth('2025-11', '2026-10');
     expect(apiFetch).toHaveBeenCalledWith(
       '/reports/net-worth?from=2025-11&to=2026-10',
+    );
+  });
+});
+
+describe('query encoding', () => {
+  beforeEach(() => {
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch).mockResolvedValue({});
+  });
+
+  it('encodes month values so they cannot add query parameters', async () => {
+    await getSpending('2026-10&month=1999-01');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/spending?month=2026-10%26month%3D1999-01',
+    );
+    await getCashFlow('2025-11#x', '2026-10 ');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/cash-flow?from=2025-11%23x&to=2026-10%20',
+    );
+    await getNetWorth('a&b', 'c=d');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/net-worth?from=a%26b&to=c%3Dd',
     );
   });
 });
@@ -73,4 +96,18 @@ describe('monthSpan', () => {
     expect(monthSpan('2026-10', '2026-09')).toBe(0);
     expect(monthSpan('2026-10', '2026-01')).toBeLessThan(0);
   });
+});
+
+describe('isValidMonth', () => {
+  it('accepts YYYY-MM months', () => {
+    expect(isValidMonth('2026-01')).toBe(true);
+    expect(isValidMonth('2026-12')).toBe(true);
+  });
+
+  it.each(['', 'abc', '2026-1', '2026-0', '2026-00', '2026-13', '26-01', '2026-01-01', ' 2026-01'])(
+    'rejects %j',
+    (value) => {
+      expect(isValidMonth(value)).toBe(false);
+    },
+  );
 });

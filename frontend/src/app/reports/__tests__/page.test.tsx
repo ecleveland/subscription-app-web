@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@/lib/reports', async (importActual) => {
   const actual = await importActual<typeof import('@/lib/reports')>();
@@ -10,12 +10,15 @@ vi.mock('@/lib/reports', async (importActual) => {
     getNetWorth: vi.fn(),
   };
 });
-let accountsState: { accounts: unknown[] };
+let accountsState: {
+  accounts: unknown[];
+  loading: boolean;
+  error: string | null;
+};
 vi.mock('@/lib/accounts-context', () => ({ useAccounts: () => accountsState }));
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
-vi.mock('@/lib/auth-context', () => ({
-  useAuth: () => ({ isAuthenticated: true }),
-}));
+let authState = { isAuthenticated: true };
+vi.mock('@/lib/auth-context', () => ({ useAuth: () => authState }));
 vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
@@ -106,6 +109,15 @@ const subscriptions: PaginatedResponse<Subscription> = {
   meta: { total: 1, page: 1, limit: 0, totalPages: 1 },
 } as PaginatedResponse<Subscription>;
 
+// jsdom sanitizes a malformed value on a month input to "", which would hide
+// the bug. Safari has no month picker and renders a text input, so partial
+// keystrokes reach onChange as typed. Switch the input to text to match.
+function typeLikeSafari(label: string, value: string) {
+  const input = screen.getByLabelText(label);
+  input.setAttribute('type', 'text');
+  fireEvent.change(input, { target: { value } });
+}
+
 function section(name: string): HTMLElement {
   return screen.getByRole('region', { name });
 }
@@ -117,7 +129,12 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockReset().mockResolvedValue(subscriptions);
   vi.mocked(showErrorToast).mockReset();
   vi.mocked(defaultRange).mockClear();
-  accountsState = { accounts: [{ _id: 'a1', name: 'Checking' }] };
+  authState = { isAuthenticated: true };
+  accountsState = {
+    accounts: [{ _id: 'a1', name: 'Checking' }],
+    loading: false,
+    error: null,
+  };
 });
 
 describe('ReportsPage', () => {
@@ -163,13 +180,52 @@ describe('ReportsPage', () => {
         within(section('Net worth')).getByText('Net worth exploded'),
       ).toBeInTheDocument(),
     );
-    expect(showErrorToast).toHaveBeenCalledWith('Net worth exploded');
+    expect(showErrorToast).toHaveBeenCalledWith(
+      'Net worth: Net worth exploded',
+    );
     await waitFor(() =>
       expect(within(section('Cash flow')).getByText('Sep 2026')).toBeInTheDocument(),
     );
     expect(
       within(section('Spending by category')).getByText('Groceries'),
     ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(section('Subscriptions')).getByText('Netflix')).toBeInTheDocument(),
+    );
+  });
+
+  it('shows a subscriptions error without blanking the other sections', async () => {
+    vi.mocked(apiFetch).mockRejectedValue(new Error('Subscriptions down'));
+    render(<ReportsPage />);
+
+    await waitFor(() =>
+      expect(
+        within(section('Subscriptions')).getByText('Subscriptions down'),
+      ).toBeInTheDocument(),
+    );
+    expect(showErrorToast).toHaveBeenCalledWith(
+      'Subscriptions: Subscriptions down',
+    );
+    await waitFor(() =>
+      expect(within(section('Cash flow')).getByText('Sep 2026')).toBeInTheDocument(),
+    );
+  });
+
+  it('fetches nothing when signed out', async () => {
+    authState = { isAuthenticated: false };
+    render(<ReportsPage />);
+
+    // Let any effects and microtasks settle before asserting absence.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { level: 1, name: 'Reports' }),
+      ).toBeInTheDocument(),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getCashFlow).not.toHaveBeenCalled();
+    expect(getNetWorth).not.toHaveBeenCalled();
+    expect(getSpending).not.toHaveBeenCalled();
+    expect(apiFetch).not.toHaveBeenCalled();
   });
 
   it('shows the cash flow empty state when every month is zero', async () => {
@@ -194,7 +250,7 @@ describe('ReportsPage', () => {
   });
 
   it('shows the net worth empty state when there are no accounts', async () => {
-    accountsState = { accounts: [] };
+    accountsState = { accounts: [], loading: false, error: null };
     vi.mocked(getNetWorth).mockResolvedValue({
       months: [
         {
@@ -378,5 +434,112 @@ describe('ReportsPage', () => {
     render(<ReportsPage />);
     await waitFor(() => expect(getCashFlow).toHaveBeenCalledTimes(1));
     expect(defaultRange).toHaveBeenCalledTimes(1);
+  });
+
+  describe.each(['From', 'To'])('a malformed %s month', (label) => {
+    it.each(['2026-1', 'abc'])('rejects %j without fetching', async (value) => {
+      render(<ReportsPage />);
+      await waitFor(() => expect(getCashFlow).toHaveBeenCalledTimes(1));
+
+      typeLikeSafari(label, value);
+
+      expect(
+        await screen.findByText('Months must be in YYYY-MM format'),
+      ).toBeInTheDocument();
+      expect(getCashFlow).toHaveBeenCalledTimes(1);
+      expect(getNetWorth).toHaveBeenCalledTimes(1);
+      expect(showErrorToast).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(['2026-1', 'abc'])(
+    'asks for a month without fetching when Month is %j',
+    async (value) => {
+      render(<ReportsPage />);
+      const spend = section('Spending by category');
+      await waitFor(() =>
+        expect(within(spend).getByText('Groceries')).toBeInTheDocument(),
+      );
+
+      typeLikeSafari('Month', value);
+
+      expect(await within(spend).findByText('Choose a month')).toBeInTheDocument();
+      expect(within(spend).queryByText('Groceries')).not.toBeInTheDocument();
+      expect(getSpending).toHaveBeenCalledTimes(1);
+      expect(showErrorToast).not.toHaveBeenCalled();
+    },
+  );
+
+  const noAccountMonths: NetWorthReport = {
+    months: [
+      {
+        month: '2026-10',
+        assetsCents: 0,
+        liabilitiesCents: 0,
+        netWorthCents: 0,
+        accounts: [],
+      },
+    ],
+  };
+
+  it('shows net worth as loading while the accounts list is still loading', async () => {
+    accountsState = { accounts: [], loading: true, error: null };
+    vi.mocked(getNetWorth).mockResolvedValue(noAccountMonths);
+    render(<ReportsPage />);
+
+    const net = section('Net worth');
+    await waitFor(() => expect(getNetWorth).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(within(net).getByText('Loading net worth…')).toBeInTheDocument(),
+    );
+    // Give the resolved report a chance to render before asserting absence.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(within(net).getByText('Loading net worth…')).toBeInTheDocument();
+    expect(within(net).queryByText('No accounts yet')).not.toBeInTheDocument();
+    expect(within(net).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('says accounts could not load instead of prompting to add one', async () => {
+    accountsState = { accounts: [], loading: false, error: 'Accounts down' };
+    vi.mocked(getNetWorth).mockResolvedValue(noAccountMonths);
+    render(<ReportsPage />);
+
+    const net = section('Net worth');
+    await waitFor(() =>
+      expect(within(net).getByText("Couldn't load accounts")).toBeInTheDocument(),
+    );
+    expect(within(net).queryByText('No accounts yet')).not.toBeInTheDocument();
+    expect(within(net).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('hides the old cash flow chart while a new range loads', async () => {
+    render(<ReportsPage />);
+    const cash = section('Cash flow');
+    await waitFor(() =>
+      expect(within(cash).getByText('Sep 2026')).toBeInTheDocument(),
+    );
+
+    let resolveNext!: (r: CashFlowReport) => void;
+    vi.mocked(getCashFlow).mockReturnValue(
+      new Promise<CashFlowReport>((res) => {
+        resolveNext = res;
+      }),
+    );
+    const { to } = defaultRange();
+    fireEvent.change(screen.getByLabelText('From'), {
+      target: { value: shiftMonth(to, -2) },
+    });
+
+    expect(within(cash).queryByText('Sep 2026')).not.toBeInTheDocument();
+    expect(within(cash).getByText('Loading cash flow…')).toBeInTheDocument();
+
+    await act(async () =>
+      resolveNext({
+        months: [
+          { month: '2026-08', incomeCents: 100, expenseCents: 0, netCents: 100 },
+        ],
+      }),
+    );
+    expect(within(cash).getByText('Aug 2026')).toBeInTheDocument();
   });
 });
