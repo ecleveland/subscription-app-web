@@ -87,6 +87,13 @@ export default function Header() {
             Budget
           </Link>
           <Link
+            href="/goals"
+            onClick={closeMenu}
+            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
+          >
+            Goals
+          </Link>
+          <Link
             href="/categories"
             onClick={closeMenu}
             className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
@@ -94,11 +101,11 @@ export default function Header() {
             Categories
           </Link>
           <Link
-            href="/analytics"
+            href="/reports"
             onClick={closeMenu}
             className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
           >
-            Analytics
+            Reports
           </Link>
           <Link
             href="/calendar"

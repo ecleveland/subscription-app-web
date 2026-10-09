@@ -255,3 +255,22 @@ export interface PaginatedResponse<T> {
   data: T[];
   meta: PaginationMeta;
 }
+
+export type GoalType = 'savings' | 'debt';
+
+// Mirrors backend/src/goals/schemas/goal.schema.ts. All money is integer cents.
+// Savings goals count up toward targetCents. Debt goals also count up, with
+// targetCents the starting balance owed, so progress has one shape.
+export interface Goal {
+  _id: string;
+  householdId: string;
+  name: string;
+  type: GoalType;
+  targetCents: number;
+  currentCents: number;
+  targetDate?: string | null;
+  categoryId?: string | null;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
