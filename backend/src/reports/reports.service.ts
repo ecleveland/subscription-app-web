@@ -9,8 +9,10 @@ import {
 import { TransactionsService } from '../transactions/transactions.service';
 import { BudgetsService } from '../budgets/budgets.service';
 import { CategoriesService } from '../categories/categories.service';
+import { AccountsService } from '../accounts/accounts.service';
+import { AccountType } from '../accounts/schemas/account.schema';
 import { monthToUtcRange } from '../budgets/budget-month.util';
-import { monthsInRange } from './month-range.util';
+import { monthIndex, monthsInRange } from './month-range.util';
 import type {
   CashFlowReport,
   CashFlowMonth,
@@ -19,6 +21,25 @@ import type {
   SpendingCategoryRow,
   SpendingReport,
 } from './interfaces/spending.interface';
+import type {
+  NetWorthAccount,
+  NetWorthMonth,
+  NetWorthReport,
+} from './interfaces/net-worth.interface';
+
+// Account types whose balances count toward each net worth total. Liability
+// balances are negative when money is owed. A type in neither set counts in
+// neither total and is logged.
+const ASSET_TYPES: ReadonlySet<AccountType> = new Set([
+  AccountType.CHECKING,
+  AccountType.SAVINGS,
+  AccountType.CASH,
+  AccountType.INVESTMENT,
+]);
+const LIABILITY_TYPES: ReadonlySet<AccountType> = new Set([
+  AccountType.CREDIT,
+  AccountType.LOAN,
+]);
 
 @Injectable()
 export class ReportsService {
@@ -30,6 +51,7 @@ export class ReportsService {
     private readonly transactionsService: TransactionsService,
     private readonly budgetsService: BudgetsService,
     private readonly categoriesService: CategoriesService,
+    private readonly accountsService: AccountsService,
   ) {}
 
   /**
@@ -238,5 +260,122 @@ export class ReportsService {
     );
 
     return { month, categories: rows, uncategorizedCents, totalCents };
+  }
+
+  /**
+   * Each account's balance at the end of every UTC month from `from` to `to`
+   * inclusive (both "YYYY-MM", already validated by the query DTO), with
+   * asset, liability and net worth totals. Balances derive forward from
+   * openingBalanceCents plus the signed ledger deltas dated before the next
+   * month, which is the reconciliation invariant. The cached balanceCents is
+   * never read. So a month before an account's first transaction shows its
+   * opening balance, and a backdated transaction counts in the month it is
+   * dated. An account appears only from the UTC month of its createdAt
+   * onward. Earlier months leave it out of `accounts` and the totals, and
+   * its first month still counts every delta dated before that month ends,
+   * backdated ones included. Archived accounts are included because they
+   * held money in the months the report covers.
+   */
+  async getNetWorth(
+    householdId: string,
+    from: string,
+    to: string,
+  ): Promise<NetWorthReport> {
+    const { end } = monthToUtcRange(to);
+    const [accounts, deltas] = await Promise.all([
+      this.accountsService.findAll(householdId, true),
+      this.transactionsService.sumLedgerDeltasByAccountAndMonth(
+        householdId,
+        end,
+      ),
+    ]);
+
+    // Ledger rows on an account the household does not have point at
+    // nothing, so log them instead of dropping cents without a trace.
+    const accountIds = new Set(accounts.map((a) => a._id.toString()));
+    const unknownAccounts = [...deltas.keys()].filter(
+      (accountId) => !accountIds.has(accountId),
+    );
+    if (unknownAccounts.length > 0) {
+      this.logger.warn(
+        { householdId, accountIds: unknownAccounts },
+        'Net worth report ignored ledger deltas on accounts not in the household',
+      );
+    }
+
+    // Types outside both sets would otherwise vanish from the totals
+    // without a trace.
+    const unclassified = accounts.filter(
+      (a) => !ASSET_TYPES.has(a.type) && !LIABILITY_TYPES.has(a.type),
+    );
+    if (unclassified.length > 0) {
+      this.logger.warn(
+        {
+          householdId,
+          accountIds: unclassified.map((a) => a._id.toString()),
+          types: unclassified.map((a) => a.type),
+        },
+        'Net worth report left accounts of unknown type out of the totals',
+      );
+    }
+
+    const months = monthsInRange(from, to);
+    const fromIndex = monthIndex(from);
+    const series = accounts.map((account) => {
+      const byMonth =
+        deltas.get(account._id.toString()) ?? new Map<string, number>();
+      let balance = account.openingBalanceCents;
+      for (const [month, deltaCents] of byMonth) {
+        if (monthIndex(month) < fromIndex) {
+          balance += deltaCents;
+        }
+      }
+      const { createdAt } = account as unknown as { createdAt?: Date };
+      return {
+        account,
+        // Months before this index are before the account existed. A
+        // document with no createdAt shows in every month.
+        firstMonthIndex: createdAt
+          ? createdAt.getUTCFullYear() * 12 + createdAt.getUTCMonth()
+          : -Infinity,
+        // balances[m] is the balance at the end of months[m].
+        balances: months.map((month) => {
+          balance += byMonth.get(month) ?? 0;
+          return balance;
+        }),
+      };
+    });
+
+    return {
+      months: months.map((month, m): NetWorthMonth => {
+        let assetsCents = 0;
+        let liabilitiesCents = 0;
+        const rows: NetWorthAccount[] = [];
+        for (const { account, firstMonthIndex, balances } of series) {
+          if (monthIndex(month) < firstMonthIndex) {
+            continue;
+          }
+          const balanceCents = balances[m];
+          if (ASSET_TYPES.has(account.type)) {
+            assetsCents += balanceCents;
+          } else if (LIABILITY_TYPES.has(account.type)) {
+            liabilitiesCents += balanceCents;
+          }
+          rows.push({
+            accountId: account._id.toString(),
+            name: account.name,
+            type: account.type,
+            balanceCents,
+          });
+        }
+        return {
+          month,
+          assetsCents,
+          liabilitiesCents,
+          netWorthCents: assetsCents + liabilitiesCents,
+          accounts: rows,
+        };
+      }),
+    };
   }
 }

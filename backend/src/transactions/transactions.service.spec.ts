@@ -1190,4 +1190,156 @@ describe('TransactionsService', () => {
       expect(stage(pipeline, '$match').$match).toEqual({});
     });
   });
+
+  describe('sumLedgerDeltasByAccountAndMonth', () => {
+    const BEFORE = new Date('2026-07-01T00:00:00.000Z');
+
+    function stage(pipeline: any[], op: string): any {
+      return pipeline.find((s) => Object.prototype.hasOwnProperty.call(s, op));
+    }
+
+    async function builtPipeline(): Promise<any[]> {
+      mockModel.aggregate.mockReturnValue(createChainable([]));
+      await service.sumLedgerDeltasByAccountAndMonth(HOUSEHOLD_ID, BEFORE);
+      return mockModel.aggregate.mock.calls[0][0];
+    }
+
+    it('puts a transfer at -amount on the source month and +amount on the destination month', async () => {
+      const pipeline = await builtPipeline();
+
+      // Source leg: the transfer branch negates the amount at accountId and
+      // carries the date through for the month group.
+      const project = stage(pipeline, '$project').$project;
+      expect(project.account).toBe('$accountId');
+      expect(project.date).toBe('$date');
+      const transfer = project.delta.$switch.branches.find(
+        (b: any) => b.case.$eq[1] === TransactionType.TRANSFER,
+      );
+      expect(transfer.then).toEqual({ $multiply: ['$amountCents', -1] });
+
+      // Destination leg: +amount at transferAccountId, same date.
+      const union = stage(pipeline, '$unionWith').$unionWith;
+      expect(union.pipeline[0].$match.type).toBe(TransactionType.TRANSFER);
+      expect(union.pipeline[1].$project).toEqual({
+        account: '$transferAccountId',
+        delta: '$amountCents',
+        date: '$date',
+      });
+
+      // Both legs group by account and UTC month of the transaction date.
+      expect(stage(pipeline, '$group').$group).toEqual({
+        _id: {
+          account: '$account',
+          month: {
+            $dateToString: { format: '%Y-%m', date: '$date', timezone: 'UTC' },
+          },
+        },
+        deltaCents: { $sum: '$delta' },
+      });
+
+      // The two legs of a March transfer fold into opposite-signed entries.
+      mockModel.aggregate.mockReturnValue(
+        createChainable([
+          {
+            _id: { account: new Types.ObjectId(ACC_A), month: '2026-03' },
+            deltaCents: -30000,
+          },
+          {
+            _id: { account: new Types.ObjectId(ACC_B), month: '2026-03' },
+            deltaCents: 30000,
+          },
+        ]),
+      );
+      const deltas = await service.sumLedgerDeltasByAccountAndMonth(
+        HOUSEHOLD_ID,
+        BEFORE,
+      );
+      expect(deltas.get(ACC_A)?.get('2026-03')).toBe(-30000);
+      expect(deltas.get(ACC_B)?.get('2026-03')).toBe(30000);
+    });
+
+    it('signs income +amount and expense -amount', async () => {
+      const pipeline = await builtPipeline();
+      const branches = stage(pipeline, '$project').$project.delta.$switch
+        .branches;
+      const byType = (t: string) =>
+        branches.find((b: any) => b.case.$eq[1] === t).then;
+      expect(byType(TransactionType.INCOME)).toBe('$amountCents');
+      expect(byType(TransactionType.EXPENSE)).toEqual({
+        $multiply: ['$amountCents', -1],
+      });
+    });
+
+    it('limits both match stages to this household and dates before the cutoff', async () => {
+      const pipeline = await builtPipeline();
+
+      const base = stage(pipeline, '$match').$match;
+      expect(base.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(base.date).toEqual({ $lt: BEFORE });
+
+      const unionMatch = stage(pipeline, '$unionWith').$unionWith.pipeline[0]
+        .$match;
+      expect(unionMatch.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(unionMatch.date).toEqual({ $lt: BEFORE });
+      expect(unionMatch.transferAccountId).toEqual({ $ne: null });
+    });
+
+    it('nests rows by account then month', async () => {
+      mockModel.aggregate.mockReturnValue(
+        createChainable([
+          {
+            _id: { account: new Types.ObjectId(ACC_A), month: '2026-01' },
+            deltaCents: 5000,
+          },
+          {
+            _id: { account: new Types.ObjectId(ACC_A), month: '2026-02' },
+            deltaCents: -1200,
+          },
+          {
+            _id: { account: new Types.ObjectId(ACC_C), month: '2026-02' },
+            deltaCents: 700,
+          },
+        ]),
+      );
+
+      const deltas = await service.sumLedgerDeltasByAccountAndMonth(
+        HOUSEHOLD_ID,
+        BEFORE,
+      );
+
+      expect(deltas.size).toBe(2);
+      expect([...deltas.get(ACC_A)!.entries()]).toEqual([
+        ['2026-01', 5000],
+        ['2026-02', -1200],
+      ]);
+      expect([...deltas.get(ACC_C)!.entries()]).toEqual([['2026-02', 700]]);
+    });
+
+    it('warns and skips rows with a null account id', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      mockModel.aggregate.mockReturnValue(
+        createChainable([
+          { _id: { account: null, month: '2026-02' }, deltaCents: 999 },
+          {
+            _id: { account: new Types.ObjectId(ACC_A), month: '2026-02' },
+            deltaCents: 100,
+          },
+        ]),
+      );
+
+      const deltas = await service.sumLedgerDeltasByAccountAndMonth(
+        HOUSEHOLD_ID,
+        BEFORE,
+      );
+
+      expect(deltas.size).toBe(1);
+      expect(deltas.get(ACC_A)?.get('2026-02')).toBe(100);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ householdId: HOUSEHOLD_ID }),
+        expect.stringMatching(/null account id/),
+      );
+    });
+  });
 });
