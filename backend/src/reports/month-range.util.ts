@@ -7,6 +7,11 @@ export function monthIndex(month: string): number {
   return year * 12 + (monthNumber - 1);
 }
 
+/** The monthIndex of the UTC month that contains `date`. */
+export function monthIndexOfDate(date: Date): number {
+  return date.getUTCFullYear() * 12 + date.getUTCMonth();
+}
+
 function monthFromIndex(index: number): string {
   const year = Math.floor(index / 12);
   const monthNumber = (index % 12) + 1;

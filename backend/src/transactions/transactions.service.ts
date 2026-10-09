@@ -390,12 +390,12 @@ export class TransactionsService {
    *
    * The signed arithmetic is the exact twin of `balanceDeltas` (income +amount,
    * expense −amount, transfer −amount at the source): whenever that write-path
-   * mapping changes, the `$switch` here must change with it. A transfer touches
-   * TWO accounts, and its destination `+amount` leg lives on a different field
-   * (`transferAccountId`), which a single group-by-`accountId` cannot capture —
-   * so a `$unionWith` folds in the destination legs before the final group. One
-   * pipeline, one consistent snapshot. Returns a Map keyed by stringified
-   * account id.
+   * mapping changes, the `$switch` in `signedDeltaStages` must change with it.
+   * A transfer touches TWO accounts, and its destination `+amount` leg lives on
+   * a different field (`transferAccountId`), which a single
+   * group-by-`accountId` cannot capture — so a `$unionWith` folds in the
+   * destination legs before the final group. One pipeline, one consistent
+   * snapshot. Returns a Map keyed by stringified account id.
    */
   async sumLedgerDeltasByAccount(
     householdId?: string,
@@ -405,51 +405,7 @@ export class TransactionsService {
       match.householdId = new Types.ObjectId(householdId);
     }
     const pipeline: PipelineStage[] = [
-      { $match: match },
-      {
-        $project: {
-          account: '$accountId',
-          delta: {
-            $switch: {
-              branches: [
-                {
-                  case: { $eq: ['$type', TransactionType.INCOME] },
-                  then: '$amountCents',
-                },
-                {
-                  case: { $eq: ['$type', TransactionType.EXPENSE] },
-                  then: { $multiply: ['$amountCents', -1] },
-                },
-                {
-                  case: { $eq: ['$type', TransactionType.TRANSFER] },
-                  then: { $multiply: ['$amountCents', -1] },
-                },
-              ],
-              default: 0,
-            },
-          },
-        },
-      },
-      {
-        $unionWith: {
-          coll: this.transactionModel.collection.name,
-          pipeline: [
-            {
-              $match: {
-                ...match,
-                type: TransactionType.TRANSFER,
-                transferAccountId: { $ne: null },
-              },
-            },
-            {
-              $project: {
-                account: '$transferAccountId',
-                delta: '$amountCents',
-              },
-            },
-          ],
-        },
-      },
+      ...this.signedDeltaStages(match, false),
       { $group: { _id: '$account', deltaCents: { $sum: '$delta' } } },
     ];
 
@@ -477,6 +433,132 @@ export class TransactionsService {
       deltas.set(row._id.toString(), row.deltaCents);
     }
     return deltas;
+  }
+
+  /**
+   * Each account's signed ledger delta per UTC month, for transactions dated
+   * before `before`. Uses the same signed stages as `sumLedgerDeltasByAccount`,
+   * so the net worth report and reconciliation agree on every sign. Both match
+   * stages carry the date cutoff, so a transfer's two legs always land in the
+   * same month. Returns account id, then "YYYY-MM", then delta cents.
+   */
+  async sumLedgerDeltasByAccountAndMonth(
+    householdId: string,
+    before: Date,
+  ): Promise<Map<string, Map<string, number>>> {
+    const match: Record<string, unknown> = {
+      householdId: new Types.ObjectId(householdId),
+      date: { $lt: before },
+    };
+    const pipeline: PipelineStage[] = [
+      ...this.signedDeltaStages(match, true),
+      {
+        $group: {
+          _id: {
+            account: '$account',
+            month: {
+              $dateToString: {
+                format: '%Y-%m',
+                date: '$date',
+                timezone: 'UTC',
+              },
+            },
+          },
+          deltaCents: { $sum: '$delta' },
+        },
+      },
+    ];
+
+    const rows = (await this.transactionModel
+      .aggregate(pipeline)
+      .exec()) as unknown as {
+      _id: { account: Types.ObjectId | null; month: string };
+      deltaCents: number;
+    }[];
+
+    const deltas = new Map<string, Map<string, number>>();
+    for (const row of rows) {
+      // Same guard as sumLedgerDeltasByAccount. Never key the Map on null.
+      if (row._id.account == null) {
+        this.logger.warn(
+          { householdId, month: row._id.month },
+          'Dropped a monthly ledger delta group with a null account id',
+        );
+        continue;
+      }
+      const accountId = row._id.account.toString();
+      let byMonth = deltas.get(accountId);
+      if (!byMonth) {
+        byMonth = new Map();
+        deltas.set(accountId, byMonth);
+      }
+      byMonth.set(row._id.month, row.deltaCents);
+    }
+    return deltas;
+  }
+
+  /**
+   * The signed ledger arithmetic shared by the reconciliation and net worth
+   * sums. Emits one `{ account, delta }` row per balance effect. Income is
+   * +amount and expense is -amount at `accountId`. A transfer is -amount at
+   * `accountId`, and a `$unionWith` adds its +amount leg at
+   * `transferAccountId`. `match` filters both legs. `withDate` carries each
+   * transaction's `date` into the rows so a caller can group by month.
+   */
+  private signedDeltaStages(
+    match: Record<string, unknown>,
+    withDate: boolean,
+  ): PipelineStage[] {
+    const date = withDate ? { date: '$date' } : {};
+    return [
+      { $match: match },
+      {
+        $project: {
+          account: '$accountId',
+          delta: {
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ['$type', TransactionType.INCOME] },
+                  then: '$amountCents',
+                },
+                {
+                  case: { $eq: ['$type', TransactionType.EXPENSE] },
+                  then: { $multiply: ['$amountCents', -1] },
+                },
+                {
+                  case: { $eq: ['$type', TransactionType.TRANSFER] },
+                  then: { $multiply: ['$amountCents', -1] },
+                },
+              ],
+              default: 0,
+            },
+          },
+          ...date,
+        },
+      },
+      {
+        $unionWith: {
+          coll: this.transactionModel.collection.name,
+          pipeline: [
+            {
+              $match: {
+                ...match,
+                type: TransactionType.TRANSFER,
+                transferAccountId: { $ne: null },
+              },
+            },
+            {
+              $project: {
+                account: '$transferAccountId',
+                delta: '$amountCents',
+                ...date,
+              },
+            },
+          ],
+        },
+      },
+    ];
   }
 
   async findOne(householdId: string, id: string): Promise<TransactionDocument> {

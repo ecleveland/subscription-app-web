@@ -1,10 +1,25 @@
-import { monthIndex, monthsInRange } from './month-range.util';
+import {
+  monthIndex,
+  monthIndexOfDate,
+  monthsInRange,
+} from './month-range.util';
 
 describe('month-range util', () => {
   describe('monthIndex', () => {
     it('counts months since year 0 so ranges can be compared with subtraction', () => {
       expect(monthIndex('2026-04') - monthIndex('2026-03')).toBe(1);
       expect(monthIndex('2027-01') - monthIndex('2026-12')).toBe(1);
+    });
+  });
+
+  describe('monthIndexOfDate', () => {
+    it('uses the UTC month of the date, matching monthIndex', () => {
+      expect(monthIndexOfDate(new Date('2026-03-31T23:59:59.000Z'))).toBe(
+        monthIndex('2026-03'),
+      );
+      expect(monthIndexOfDate(new Date('2026-04-01T00:00:00.000Z'))).toBe(
+        monthIndex('2026-04'),
+      );
     });
   });
 

@@ -10,13 +10,15 @@ import { HouseholdsModule } from '../households/households.module';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { BudgetsModule } from '../budgets/budgets.module';
 import { CategoriesModule } from '../categories/categories.module';
+import { AccountsModule } from '../accounts/accounts.module';
 
 // Phase 5 reports (VEG-582 onward). Read-only. Cash flow aggregates the
 // Transaction collection directly. Spending reuses the per-category actuals
 // from TransactionsService, planned amounts from BudgetsService, and names
-// from CategoriesService so it matches the budget view. None of those modules
-// import ReportsModule, so the graph stays acyclic. HouseholdsModule provides
-// the HouseholdGuard.
+// from CategoriesService so it matches the budget view. Net worth reads the
+// account list from AccountsService and the monthly ledger deltas from
+// TransactionsService. None of those modules import ReportsModule, so the
+// graph stays acyclic. HouseholdsModule provides the HouseholdGuard.
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -26,6 +28,7 @@ import { CategoriesModule } from '../categories/categories.module';
     TransactionsModule,
     BudgetsModule,
     CategoriesModule,
+    AccountsModule,
   ],
   controllers: [ReportsController],
   providers: [ReportsService],
