@@ -1151,6 +1151,9 @@ describe('TransactionsService', () => {
 
       // Destination leg: transfers add +amount to transferAccountId.
       const union = stage(pipeline, '$unionWith').$unionWith;
+      expect(union.pipeline[0].$match.householdId.toString()).toBe(
+        HOUSEHOLD_ID,
+      );
       expect(union.pipeline[0].$match.type).toBe(TransactionType.TRANSFER);
       // Guard against a destination-less transfer grouping under _id: null.
       expect(union.pipeline[0].$match.transferAccountId).toEqual({ $ne: null });

@@ -508,7 +508,11 @@ describe('Reports (e2e)', () => {
     let tokenNB: string;
     let checkingNA: string;
     let creditNA: string;
+    let cashNA: string;
     let checkingNB: string;
+    let tokenNC: string;
+    let checkingNC: string;
+    let savingsNC: string;
 
     type NetWorthBody = {
       months: {
@@ -602,6 +606,20 @@ describe('Reports (e2e)', () => {
         { $set: { createdAt: new Date('2026-01-15T00:00:00.000Z') } },
       );
 
+      // A third account keeps today's createdAt. Its only transaction is
+      // backdated to February, so it shows from February, not January.
+      cashNA = await createAccount(tokenNA, {
+        name: 'NW Cash',
+        type: 'cash',
+      });
+      await createTxn(tokenNA, {
+        accountId: cashNA,
+        type: 'expense',
+        amountCents: 1000,
+        date: '2026-02-20',
+        categoryId: expenseNA,
+      });
+
       // Household B has its own activity in the same months.
       checkingNB = await createAccount(tokenNB, {
         name: 'NW B Checking',
@@ -626,6 +644,26 @@ describe('Reports (e2e)', () => {
         { _id: new Types.ObjectId(checkingNB) },
         { $set: { createdAt: new Date('2026-01-15T00:00:00.000Z') } },
       );
+
+      // Household C has one transfer on the last second of March, between
+      // two accounts created today.
+      tokenNC = await register('networthc');
+      checkingNC = await createAccount(tokenNC, {
+        name: 'NW C Checking',
+        type: 'checking',
+        balanceCents: 30000,
+      });
+      savingsNC = await createAccount(tokenNC, {
+        name: 'NW C Savings',
+        type: 'savings',
+      });
+      await createTxn(tokenNC, {
+        accountId: checkingNC,
+        type: 'transfer',
+        amountCents: 8000,
+        date: '2026-03-31T23:59:59Z',
+        transferAccountId: savingsNC,
+      });
     });
 
     it('requires authentication', async () => {
@@ -650,9 +688,11 @@ describe('Reports (e2e)', () => {
         '2026-02',
         '2026-03',
       ]);
-      // January has no transactions, so both accounts sit at opening.
+      // January has no transactions, so both accounts sit at opening. The
+      // cash account is not visible yet.
       expect(balanceOf(months[0], checkingNA)).toBe(50000);
       expect(balanceOf(months[0], creditNA)).toBe(0);
+      expect(balanceOf(months[0], cashNA)).toBeUndefined();
       expect(months[0]).toMatchObject({
         assetsCents: 50000,
         liabilitiesCents: 0,
@@ -661,18 +701,20 @@ describe('Reports (e2e)', () => {
 
       expect(balanceOf(months[1], checkingNA)).toBe(60000);
       expect(balanceOf(months[1], creditNA)).toBe(-4000);
+      expect(balanceOf(months[1], cashNA)).toBe(-1000);
       expect(months[1]).toMatchObject({
-        assetsCents: 60000,
+        assetsCents: 59000,
         liabilitiesCents: -4000,
-        netWorthCents: 56000,
+        netWorthCents: 55000,
       });
 
       expect(balanceOf(months[2], checkingNA)).toBe(45000);
       expect(balanceOf(months[2], creditNA)).toBe(11000);
+      expect(balanceOf(months[2], cashNA)).toBe(-1000);
       expect(months[2]).toMatchObject({
-        assetsCents: 45000,
+        assetsCents: 44000,
         liabilitiesCents: 11000,
-        netWorthCents: 56000,
+        netWorthCents: 55000,
       });
       // The transfer moves 15000 between the pair and nets to zero.
       const pairFeb =
@@ -709,6 +751,44 @@ describe('Reports (e2e)', () => {
       );
     });
 
+    it('shows an account created today from its earliest backdated transaction', async () => {
+      const res = await netWorth(tokenNA, {
+        from: '2026-01',
+        to: '2026-03',
+      }).expect(200);
+      const { months } = res.body as NetWorthBody;
+
+      expect(months[0].accounts.map((a) => a.accountId)).not.toContain(cashNA);
+      expect(balanceOf(months[1], cashNA)).toBe(-1000);
+      expect(balanceOf(months[2], cashNA)).toBe(-1000);
+    });
+
+    it('carries earlier activity into a single-month query', async () => {
+      const res = await netWorth(tokenNA, {
+        from: '2026-03',
+        to: '2026-03',
+      }).expect(200);
+      const { months } = res.body as NetWorthBody;
+
+      expect(months).toHaveLength(1);
+      expect(balanceOf(months[0], checkingNA)).toBe(45000);
+      expect(balanceOf(months[0], creditNA)).toBe(11000);
+      expect(balanceOf(months[0], cashNA)).toBe(-1000);
+    });
+
+    it('lands both legs of a transfer on the last second of a month in that month', async () => {
+      const res = await netWorth(tokenNC, {
+        from: '2026-02',
+        to: '2026-03',
+      }).expect(200);
+      const { months } = res.body as NetWorthBody;
+
+      expect(months[0].accounts).toEqual([]);
+      expect(balanceOf(months[1], checkingNC)).toBe(22000);
+      expect(balanceOf(months[1], savingsNC)).toBe(8000);
+      expect(months[1].netWorthCents).toBe(30000);
+    });
+
     it('ends on the same balances as the reconciled accounts', async () => {
       await app
         .get(ReconciliationService)
@@ -720,7 +800,7 @@ describe('Reports (e2e)', () => {
       }).expect(200);
       const last = (res.body as NetWorthBody).months[2];
 
-      for (const accountId of [checkingNA, creditNA]) {
+      for (const accountId of [checkingNA, creditNA, cashNA]) {
         const account = await request(app.getHttpServer())
           .get(`/api/accounts/${accountId}`)
           .set('Authorization', `Bearer ${tokenNA}`)
@@ -737,11 +817,13 @@ describe('Reports (e2e)', () => {
         await netWorth(tokenNB, { from: '2026-01', to: '2026-03' }).expect(200)
       ).body as NetWorthBody;
 
-      for (const m of a.months) {
-        expect(m.accounts.map((x) => x.accountId).sort()).toEqual(
-          [checkingNA, creditNA].sort(),
-        );
-      }
+      expect(
+        a.months.map((m) => m.accounts.map((x) => x.accountId).sort()),
+      ).toEqual([
+        [checkingNA, creditNA].sort(),
+        [checkingNA, creditNA, cashNA].sort(),
+        [checkingNA, creditNA, cashNA].sort(),
+      ]);
       for (const m of b.months) {
         expect(m.accounts.map((x) => x.accountId)).toEqual([checkingNB]);
       }

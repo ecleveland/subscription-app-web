@@ -12,7 +12,11 @@ import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { AccountType } from '../accounts/schemas/account.schema';
 import { monthToUtcRange } from '../budgets/budget-month.util';
-import { monthIndex, monthsInRange } from './month-range.util';
+import {
+  monthIndex,
+  monthIndexOfDate,
+  monthsInRange,
+} from './month-range.util';
 import type {
   CashFlowReport,
   CashFlowMonth,
@@ -268,13 +272,15 @@ export class ReportsService {
    * asset, liability and net worth totals. Balances derive forward from
    * openingBalanceCents plus the signed ledger deltas dated before the next
    * month, which is the reconciliation invariant. The cached balanceCents is
-   * never read. So a month before an account's first transaction shows its
-   * opening balance, and a backdated transaction counts in the month it is
-   * dated. An account appears only from the UTC month of its createdAt
-   * onward. Earlier months leave it out of `accounts` and the totals, and
-   * its first month still counts every delta dated before that month ends,
-   * backdated ones included. Archived accounts are included because they
-   * held money in the months the report covers.
+   * never read, and a backdated transaction counts in the month it is dated.
+   * An account appears from the earlier of the UTC month of its createdAt and
+   * its earliest month with a ledger delta. So entering past transactions on
+   * a new account shows its history, and a backdated transfer into a newer
+   * account shows both legs. Earlier months leave it out of `accounts` and
+   * the totals. Once it appears, a month with no deltas repeats the prior
+   * balance, starting from openingBalanceCents. A missing or unparseable
+   * createdAt sets no creation limit and is logged. Archived accounts are
+   * included because they held money in the months the report covers.
    */
   async getNetWorth(
     householdId: string,
@@ -321,6 +327,7 @@ export class ReportsService {
 
     const months = monthsInRange(from, to);
     const fromIndex = monthIndex(from);
+    const undated: string[] = [];
     const series = accounts.map((account) => {
       const byMonth =
         deltas.get(account._id.toString()) ?? new Map<string, number>();
@@ -330,14 +337,19 @@ export class ReportsService {
           balance += deltaCents;
         }
       }
-      const { createdAt } = account as unknown as { createdAt?: Date };
+      // The account shows from the earlier of its creation month and its
+      // first delta month. With neither, it shows in every month.
+      const firstMonths = [...byMonth.keys()].map(monthIndex);
+      const createdIndex = this.creationMonthIndex(account);
+      if (createdIndex === null) {
+        undated.push(account._id.toString());
+      } else {
+        firstMonths.push(createdIndex);
+      }
       return {
         account,
-        // Months before this index are before the account existed. A
-        // document with no createdAt shows in every month.
-        firstMonthIndex: createdAt
-          ? createdAt.getUTCFullYear() * 12 + createdAt.getUTCMonth()
-          : -Infinity,
+        firstMonthIndex:
+          firstMonths.length > 0 ? Math.min(...firstMonths) : -Infinity,
         // balances[m] is the balance at the end of months[m].
         balances: months.map((month) => {
           balance += byMonth.get(month) ?? 0;
@@ -345,6 +357,12 @@ export class ReportsService {
         }),
       };
     });
+    if (undated.length > 0) {
+      this.logger.warn(
+        { householdId, accountIds: undated },
+        'Net worth report found accounts with a missing or invalid createdAt',
+      );
+    }
 
     return {
       months: months.map((month, m): NetWorthMonth => {
@@ -377,5 +395,19 @@ export class ReportsService {
         };
       }),
     };
+  }
+
+  // The monthIndex of an account's createdAt, or null when it is missing or
+  // does not parse. Lean or legacy documents may carry a string.
+  private creationMonthIndex(account: unknown): number | null {
+    const { createdAt } = account as { createdAt?: unknown };
+    if (createdAt == null) {
+      return null;
+    }
+    const date =
+      createdAt instanceof Date
+        ? createdAt
+        : new Date(createdAt as string | number);
+    return Number.isNaN(date.getTime()) ? null : monthIndexOfDate(date);
   }
 }

@@ -15,7 +15,8 @@ import {
 import { monthIndex } from '../month-range.util';
 
 // Upper bound on months per report request, inclusive of both ends. Keeps
-// the per-month response and the aggregation scan bounded.
+// the per-month response bounded. It does not bound every scan, because the
+// net worth delta scan reads all history through the end of `to`.
 export const MAX_REPORT_MONTHS = 36;
 
 // Inclusive month span from `from` to `to`, or null when either side is

@@ -931,7 +931,7 @@ describe('ReportsService', () => {
       }
     });
 
-    it('counts deltas backdated before creation in the first month the account appears', async () => {
+    it('shows an account from its earliest delta month when that precedes creation', async () => {
       const LATE = new Types.ObjectId().toString();
       accountsService.findAll.mockResolvedValue([
         account(
@@ -944,26 +944,123 @@ describe('ReportsService', () => {
         ),
       ]);
       transactionsService.sumLedgerDeltasByAccountAndMonth.mockResolvedValue(
+        new Map([[LATE, new Map([['2026-02', 700]])]]),
+      );
+
+      const { months } = await service.getNetWorth(
+        householdId,
+        '2026-01',
+        '2026-07',
+      );
+
+      expect(months[0].accounts).toEqual([]);
+      expect(months[0].assetsCents).toBe(0);
+      for (const m of months.slice(1)) {
+        expect(balances(m)).toEqual({ [LATE]: 500700 });
+        expect(m.assetsCents).toBe(500700);
+      }
+    });
+
+    it('shows both legs of a transfer backdated into a newer account', async () => {
+      const SAVINGS_NEW = new Types.ObjectId().toString();
+      accountsService.findAll.mockResolvedValue([
+        account(
+          SAVINGS_NEW,
+          'New savings',
+          AccountType.SAVINGS,
+          0,
+          false,
+          new Date('2026-03-05T00:00:00.000Z'),
+        ),
+        account(
+          CHECKING,
+          'Checking',
+          AccountType.CHECKING,
+          100000,
+          false,
+          new Date('2026-01-10T00:00:00.000Z'),
+        ),
+      ]);
+      transactionsService.sumLedgerDeltasByAccountAndMonth.mockResolvedValue(
         new Map([
-          [
-            LATE,
-            new Map([
-              ['2026-03', 100],
-              ['2026-06', 20],
-            ]),
-          ],
+          [CHECKING, new Map([['2026-01', -20000]])],
+          [SAVINGS_NEW, new Map([['2026-01', 20000]])],
         ]),
       );
 
       const { months } = await service.getNetWorth(
         householdId,
-        '2026-05',
-        '2026-06',
+        '2026-01',
+        '2026-04',
       );
 
-      expect(months[0].accounts).toEqual([]);
-      expect(months[0].assetsCents).toBe(0);
-      expect(balances(months[1])).toEqual({ [LATE]: 500120 });
+      for (const m of months) {
+        expect(balances(m)).toEqual({
+          [SAVINGS_NEW]: 20000,
+          [CHECKING]: 80000,
+        });
+        expect(m.netWorthCents).toBe(100000);
+      }
+    });
+
+    it('treats a missing or invalid createdAt as no creation limit and warns once with the ids', async () => {
+      const NO_DATE_WITH_DELTA = new Types.ObjectId().toString();
+      const NO_DATE_QUIET = new Types.ObjectId().toString();
+      const BAD_DATE = new Types.ObjectId().toString();
+      const STRING_DATE = new Types.ObjectId().toString();
+      const withoutDate = account(
+        NO_DATE_WITH_DELTA,
+        'No date',
+        AccountType.CASH,
+        1000,
+      ) as Record<string, unknown>;
+      delete withoutDate.createdAt;
+      const quiet = account(
+        NO_DATE_QUIET,
+        'Quiet',
+        AccountType.CASH,
+        2000,
+      ) as Record<string, unknown>;
+      delete quiet.createdAt;
+      accountsService.findAll.mockResolvedValue([
+        withoutDate,
+        quiet,
+        {
+          ...account(BAD_DATE, 'Bad', AccountType.CASH, 3000),
+          createdAt: 'nope',
+        },
+        // A string that parses is coerced and still limits visibility.
+        {
+          ...account(STRING_DATE, 'Stringy', AccountType.CASH, 4000),
+          createdAt: '2026-02-10T00:00:00.000Z',
+        },
+      ]);
+      transactionsService.sumLedgerDeltasByAccountAndMonth.mockResolvedValue(
+        new Map([[NO_DATE_WITH_DELTA, new Map([['2026-03', 50]])]]),
+      );
+
+      const { months } = await service.getNetWorth(
+        householdId,
+        '2026-01',
+        '2026-04',
+      );
+
+      expect(months.map((m) => Object.keys(balances(m)).sort())).toEqual([
+        [BAD_DATE, NO_DATE_QUIET].sort(),
+        [BAD_DATE, NO_DATE_QUIET, STRING_DATE].sort(),
+        [BAD_DATE, NO_DATE_QUIET, NO_DATE_WITH_DELTA, STRING_DATE].sort(),
+        [BAD_DATE, NO_DATE_QUIET, NO_DATE_WITH_DELTA, STRING_DATE].sort(),
+      ]);
+      expect(balances(months[2])[NO_DATE_WITH_DELTA]).toBe(1050);
+
+      const dateWarnings = warn.mock.calls.filter(([, message]) =>
+        /createdAt/.test(String(message)),
+      );
+      expect(dateWarnings).toHaveLength(1);
+      expect(dateWarnings[0][0]).toEqual({
+        householdId,
+        accountIds: [NO_DATE_WITH_DELTA, NO_DATE_QUIET, BAD_DATE],
+      });
     });
 
     it('counts an unknown account type in neither total and warns once with its id and type', async () => {

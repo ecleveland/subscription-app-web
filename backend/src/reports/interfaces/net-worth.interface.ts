@@ -7,8 +7,8 @@ export interface NetWorthAccount {
   type: AccountType;
   // The balance at the end of the month, derived forward from the account's
   // openingBalanceCents plus every ledger delta dated before the next month.
-  // A month before the account's first transaction shows the opening
-  // balance. Credit and loan balances are negative when money is owed.
+  // A visible month before the account's first transaction shows the
+  // opening balance. Credit and loan balances are negative when money is owed.
   balanceCents: number;
 }
 
@@ -20,10 +20,10 @@ export interface NetWorthMonth {
   // Sum of credit and loan balances. Negative when money is owed.
   liabilitiesCents: number;
   netWorthCents: number; // assetsCents + liabilitiesCents
-  // Every household account that exists by this month, archived ones
-  // included, in the account list's order. An account appears from the UTC
-  // month of its createdAt onward and is left out of earlier months and
-  // their totals.
+  // Every household account visible by this month, archived ones included,
+  // in the account list's order. An account is visible from the earlier of
+  // the UTC month of its createdAt and its earliest month with a ledger
+  // delta, and is left out of earlier months and their totals.
   accounts: NetWorthAccount[];
 }
 
