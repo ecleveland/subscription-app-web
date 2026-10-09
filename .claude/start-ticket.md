@@ -13,8 +13,10 @@ mandatory docs in `.claude/architecture/` (`testing.md`, `backend-patterns.md`,
 - Branch from Linear's `gitBranchName` (e.g. `syrix/veg-NNN-slug`) — don't invent names.
 - Free-tier issue cap: if creating issues hits the limit, the `archive-linear`
   skill bulk-archives closed issues (they stop counting once archived).
-- Move the ticket to **In Progress** and assign it to the user at the start;
-  the GitHub integration moves it to **In Review** on PR open and **Done** on merge.
+- Move the ticket to **In Progress** and assign it to the user at the start.
+  The GitHub integration does not move it to **In Review**. Set In Review
+  yourself right after `gh pr create`. After merge, check that **Done** fired
+  and set it if not.
 
 ## Pre-flight
 
@@ -62,15 +64,26 @@ final gate, not the inner loop. See `testing.md` for the component-vs-E2E split.
 
 ## Verification gate (run before committing — mirrors CI)
 
-There is no `verify.sh`. Run per package; all must pass:
+Run `./verify.sh` from the repo root. All modes must pass:
 
-1. **Backend** — `cd backend && npm run lint && npm test && npm run build`
-   (production `nest build` catches strict `tsc` errors the dev server tolerates —
-   see `backend-patterns.md` on Mongoose filter casting; verify "Found 0 errors").
-2. **Frontend** — `cd frontend && npm run lint && npm test && npm run build`.
-3. **Backend E2E** — `cd backend && npm run test:e2e` (in-memory Mongo; no deps).
-4. **Frontend E2E (Playwright)** — `docker compose up -d mongo`, then
-   `cd frontend && npm run test:e2e`. Run only the spec(s) for this ticket.
+1. **Backend**: `./verify.sh backend` (lint:check, unit tests, `nest build`).
+   The production build catches strict `tsc` errors the dev server tolerates.
+   See `backend-patterns.md` on Mongoose filter casting.
+2. **Frontend**: `./verify.sh frontend` (lint, unit tests, `next build`).
+3. **Backend E2E**: `./verify.sh e2e` (in-memory Mongo, no deps).
+4. **Frontend E2E (Playwright)**: `docker compose up -d mongo`, then
+   `./verify.sh e2e <spec>`. Run only the spec(s) for this ticket.
+
+Rules for the gate:
+
+- Never pipe a gate step through `grep` or `tail`. A pipe hides the step's exit
+  code, and an `&& echo OK` after it then prints OK on failure. `verify.sh`
+  logs each step to `verify-logs/` in the git dir and prints the summary lines for you.
+- Run the backend E2E only when no other gate or review agent is running.
+- A lone "socket hang up" in the backend E2E is CPU load, not a test failure.
+  Rerun that file alone (`cd backend && npx jest --config ./test/jest-e2e.json <file>`)
+  before investigating.
+- Only `./verify.sh all` unlocks push and PR creation; stage first, since the marker records the staged tree.
    - **Stop the frontend dev server first.** Playwright's `webServer` runs
      `npm run dev` in the same `frontend/` dir on port 3100; Next 16's
      per-directory `.next/dev` lock conflicts with a dev server on 3000, and the
@@ -111,7 +124,7 @@ money handling (integer-cents fields, per `budgeting.md`).
 |------|------|--------|
 | **skip** | Docs/markdown-only, CI/config tweaks, dependency-pin bumps, or ≤30 changed lines across ≤3 files with no risk trigger and no behavior change | None — CI is the gate |
 | **standard** | Anything between skip and deep: typical bug fixes, small UI tweaks, single-component changes | `code-review medium --comment`, max 1 re-review |
-| **deep** | Risk trigger hit, OR full feature (new page, endpoint, or data model), OR ≥400 changed lines, OR ≥10 files | `/pr-review-toolkit:review-pr` + `code-review high --comment`, max 3 iterations |
+| **deep** | Risk trigger hit, OR full feature (new page, endpoint, or data model), OR ≥400 changed lines, OR ≥10 files | `code-review xhigh --comment` plus `pr-test-analyzer` and `type-design-analyzer`, once. Never the full review-pr toolkit alongside it |
 
 Note: posting review comments to GitHub (`--comment` / `gh api …/comments`) may
 be blocked by the permission classifier. If so, present the findings inline for
