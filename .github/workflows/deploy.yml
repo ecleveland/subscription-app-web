@@ -18,8 +18,13 @@ jobs:
     name: E2E
     uses: ./.github/workflows/e2e.yml
 
+  # Both deploy jobs are skipped until Railway exists. Set the repository
+  # variable DEPLOY_ENABLED to "true" once VEG-160 provisions Railway and Atlas
+  # and VEG-161 adds the RAILWAY_TOKEN secret. A variable, not the secret, gates
+  # the jobs because the secrets context is not available in a job-level `if`.
   deploy-backend:
     name: Deploy Backend
+    if: vars.DEPLOY_ENABLED == 'true'
     needs: [ci, e2e]
     runs-on: ubuntu-latest
     environment: production
@@ -42,6 +47,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy Frontend
+    if: vars.DEPLOY_ENABLED == 'true'
     needs: [ci, e2e]
     runs-on: ubuntu-latest
     environment: production
