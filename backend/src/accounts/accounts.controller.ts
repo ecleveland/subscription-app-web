@@ -67,9 +67,19 @@ export class AccountsController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an account' })
+  @ApiOperation({
+    summary: 'Update an account',
+    description:
+      'Updates the name, type, or archive flag. balanceCents cannot be set ' +
+      'here; the balance moves only through transactions and reconciliation. ' +
+      'A type change cannot cross between asset and liability types.',
+  })
   @ApiResponse({ status: 200, description: 'Account updated' })
-  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, balanceCents in body, or a type change between asset and liability types',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Account not found' })
   update(

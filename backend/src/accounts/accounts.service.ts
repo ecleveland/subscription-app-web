@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ConflictException,
@@ -6,7 +7,13 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Account, AccountDocument } from './schemas/account.schema';
+import {
+  ASSET_TYPES,
+  Account,
+  AccountDocument,
+  AccountType,
+  LIABILITY_TYPES,
+} from './schemas/account.schema';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 
@@ -35,6 +42,16 @@ export interface AccountMissingOpeningBalance {
   id: string;
   householdId: string;
   balanceCents: number;
+}
+
+// Whether two account types sit in different classes, one asset and one
+// liability. Goals pair with a single class, so a change inside one class
+// never breaks a linked goal.
+function crossesTypeClass(from: AccountType, to: AccountType): boolean {
+  return (
+    (ASSET_TYPES.has(from) && LIABILITY_TYPES.has(to)) ||
+    (LIABILITY_TYPES.has(from) && ASSET_TYPES.has(to))
+  );
 }
 
 @Injectable()
@@ -116,21 +133,35 @@ export class AccountsService {
     return account;
   }
 
-  /** Update an account (name/type/archive flag), scoped to the household. */
+  /**
+   * Update an account (name/type/archive flag), scoped to the household.
+   * A type change cannot cross between asset and liability types, because the
+   * balance's sign would no longer match the new type in net worth.
+   */
   async update(
     householdId: string,
     id: string,
     dto: UpdateAccountDto,
   ): Promise<AccountDocument> {
     const existing = await this.findOne(householdId, id);
-    // Assign only the fields actually provided. A PartialType DTO instance can
-    // carry unset optional fields as `undefined` own-properties (TS class
-    // fields); assigning those would clobber required schema fields like
-    // `isArchived`/`balanceCents` and fail validation on save.
-    for (const [key, value] of Object.entries(dto)) {
-      if (value !== undefined) {
-        (existing as unknown as Record<string, unknown>)[key] = value;
-      }
+    if (dto.type !== undefined && crossesTypeClass(existing.type, dto.type)) {
+      throw new BadRequestException(
+        'Cannot change an account between asset and liability types. Archive it and create a new account.',
+      );
+    }
+    // Copy only the fields an update may change, and only when provided. A
+    // PartialType DTO instance can carry unset optional fields as `undefined`
+    // own-properties, and assigning those would clobber required schema paths.
+    // Reading an allowlist also keeps any field the DTO does not declare off
+    // the document, whatever the pipe lets through.
+    if (dto.name !== undefined) {
+      existing.name = dto.name;
+    }
+    if (dto.type !== undefined) {
+      existing.type = dto.type;
+    }
+    if (dto.isArchived !== undefined) {
+      existing.isArchived = dto.isArchived;
     }
     const saved = await existing.save();
     this.logger.log({ householdId, accountId: id }, 'Account updated');

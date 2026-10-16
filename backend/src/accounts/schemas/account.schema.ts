@@ -12,6 +12,21 @@ export enum AccountType {
   LOAN = 'loan',
 }
 
+// The two classes of account type. Asset balances are positive. Liability
+// balances are negative when money is owed. Net worth sums each class into
+// its own total, goals pair with one class, and an account never moves
+// between classes after create.
+export const ASSET_TYPES: ReadonlySet<AccountType> = new Set([
+  AccountType.CHECKING,
+  AccountType.SAVINGS,
+  AccountType.CASH,
+  AccountType.INVESTMENT,
+]);
+export const LIABILITY_TYPES: ReadonlySet<AccountType> = new Set([
+  AccountType.CREDIT,
+  AccountType.LOAN,
+]);
+
 @Schema({ timestamps: true })
 export class Account {
   // Ownership/visibility scope: the household this account belongs to. Mirrors

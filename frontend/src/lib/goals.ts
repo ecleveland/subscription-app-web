@@ -1,6 +1,12 @@
 import { apiFetch } from './api';
 import { daysUntil } from './utils';
-import type { AccountType, Goal, GoalType } from './types';
+import {
+  ASSET_ACCOUNT_TYPES,
+  LIABILITY_ACCOUNT_TYPES,
+  type AccountType,
+  type Goal,
+  type GoalType,
+} from './types';
 
 // Mirrors backend/src/goals/dto. All money is integer cents.
 
@@ -26,13 +32,8 @@ export interface UpdateGoalBody {
   isArchived?: boolean;
 }
 
-const SAVINGS_ACCOUNT_TYPES: readonly AccountType[] = [
-  'checking',
-  'savings',
-  'cash',
-  'investment',
-];
-const DEBT_ACCOUNT_TYPES: readonly AccountType[] = ['credit', 'loan'];
+const SAVINGS_ACCOUNT_TYPES = ASSET_ACCOUNT_TYPES;
+const DEBT_ACCOUNT_TYPES = LIABILITY_ACCOUNT_TYPES;
 
 /** Mirrors the backend pairing rule. Savings goals track asset accounts, and debt
  *  goals track credit and loan accounts. */

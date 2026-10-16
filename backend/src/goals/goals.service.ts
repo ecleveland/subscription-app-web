@@ -12,11 +12,9 @@ import { CreateGoalDto } from './dto/create-goal.dto';
 import { UpdateGoalDto } from './dto/update-goal.dto';
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
-import {
-  AccountDocument,
-  AccountType,
-} from '../accounts/schemas/account.schema';
+import { AccountDocument } from '../accounts/schemas/account.schema';
 import { parseUtcDate } from '../common/utc-date.util';
+import { accountFitsGoal } from './goal-account-pairing';
 
 /** The account a goal tracks, as the API returns it. */
 export interface LinkedAccount {
@@ -35,20 +33,6 @@ export interface GoalView extends Omit<Goal, 'baselineCents'> {
   updatedAt?: Date;
   linkedAccount: LinkedAccount | null;
 }
-
-// Which accounts can back each goal type. Asset balances are positive and grow
-// as you save. Credit and loan balances are negative and rise toward 0 as you
-// pay down, so balanceCents - baselineCents counts up for both goal types.
-// Same split as ASSET_TYPES and LIABILITY_TYPES in reports.service.ts.
-const LINKABLE_ACCOUNT_TYPES: Record<GoalType, ReadonlySet<AccountType>> = {
-  [GoalType.SAVINGS]: new Set([
-    AccountType.CHECKING,
-    AccountType.SAVINGS,
-    AccountType.CASH,
-    AccountType.INVESTMENT,
-  ]),
-  [GoalType.DEBT]: new Set([AccountType.CREDIT, AccountType.LOAN]),
-};
 
 const PAIRING_ERRORS: Record<GoalType, string> = {
   [GoalType.SAVINGS]: 'A savings goal can only track an asset account',
@@ -523,7 +507,7 @@ export class GoalsService {
   }
 
   private assertPairing(account: AccountDocument, goalType: GoalType): void {
-    if (!LINKABLE_ACCOUNT_TYPES[goalType].has(account.type)) {
+    if (!accountFitsGoal(goalType, account.type)) {
       throw new BadRequestException(PAIRING_ERRORS[goalType]);
     }
   }

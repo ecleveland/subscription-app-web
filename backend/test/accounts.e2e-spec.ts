@@ -230,6 +230,194 @@ describe('Accounts (e2e)', () => {
         .send({ balanceCents: 1.5 })
         .expect(400);
     });
+
+    it('rejects an integer balanceCents on PATCH', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/accounts')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Steady', type: 'checking', balanceCents: 5000 })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${created.body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ balanceCents: 999999 })
+        .expect(400);
+
+      // The rejected patch left the balance alone.
+      const res = await request(app.getHttpServer())
+        .get(`/api/accounts/${created.body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(res.body.balanceCents).toBe(5000);
+    });
+  });
+
+  describe('PATCH field validation', () => {
+    let accountId: string;
+
+    beforeAll(async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/accounts')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Guarded', type: 'checking' })
+        .expect(201);
+      accountId = res.body._id;
+    });
+
+    async function getAccount() {
+      const res = await request(app.getHttpServer())
+        .get(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      return res.body;
+    }
+
+    it.each([['type'], ['name'], ['isArchived']])(
+      'rejects a null %s and leaves the account unchanged',
+      async (field) => {
+        await request(app.getHttpServer())
+          .patch(`/api/accounts/${accountId}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .send({ [field]: null })
+          .expect(400);
+
+        const account = await getAccount();
+        expect(account.name).toBe('Guarded');
+        expect(account.type).toBe('checking');
+        expect(account.isArchived).toBe(false);
+      },
+    );
+
+    it('rejects a whitespace-only name on PATCH', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: '   ' })
+        .expect(400);
+
+      expect((await getAccount()).name).toBe('Guarded');
+    });
+
+    it('rejects a whitespace-only name on POST', async () => {
+      await request(app.getHttpServer())
+        .post('/api/accounts')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: '   ', type: 'checking' })
+        .expect(400);
+    });
+
+    it('rejects the string "false" for isArchived and keeps the account archived', async () => {
+      await request(app.getHttpServer())
+        .delete(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isArchived: 'false' })
+        .expect(400);
+
+      expect((await getAccount()).isArchived).toBe(true);
+    });
+  });
+
+  describe('type changes', () => {
+    async function createAccount(name: string, type: string): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post('/api/accounts')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name, type })
+        .expect(201);
+      return res.body._id;
+    }
+
+    it('rejects a change from checking to loan', async () => {
+      const accountId = await createAccount('Cross Checking', 'checking');
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ type: 'loan' })
+        .expect(400);
+
+      expect(res.body.message).toBe(
+        'Cannot change an account between asset and liability types. Archive it and create a new account.',
+      );
+    });
+
+    it('rejects a change from loan to checking', async () => {
+      const accountId = await createAccount('Car Loan', 'loan');
+
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ type: 'checking' })
+        .expect(400);
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(res.body.type).toBe('loan');
+    });
+
+    it('allows a change from checking to savings', async () => {
+      const accountId = await createAccount('Asset Checking', 'checking');
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ type: 'savings' })
+        .expect(200);
+
+      expect(res.body.type).toBe('savings');
+    });
+
+    it('allows a change from credit to loan', async () => {
+      const accountId = await createAccount('Store Card', 'credit');
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ type: 'loan' })
+        .expect(200);
+
+      expect(res.body.type).toBe('loan');
+    });
+
+    it('keeps a linked savings goal tracking the account after checking to savings', async () => {
+      const accountId = await createAccount('Linked Checking', 'checking');
+      const goal = await request(app.getHttpServer())
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Emergency fund',
+          type: 'savings',
+          targetCents: 100000,
+          accountId,
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .patch(`/api/accounts/${accountId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ type: 'savings' })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .get('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const listed = res.body.find(
+        (g: { _id: string }) => g._id === goal.body._id,
+      );
+      expect(listed.linkedAccount).toEqual({
+        accountId,
+        name: 'Linked Checking',
+      });
+    });
   });
 
   describe('cross-household isolation', () => {

@@ -10,7 +10,10 @@ import { TransactionsService } from '../transactions/transactions.service';
 import { BudgetsService } from '../budgets/budgets.service';
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
-import { AccountType } from '../accounts/schemas/account.schema';
+import {
+  ASSET_TYPES,
+  LIABILITY_TYPES,
+} from '../accounts/schemas/account.schema';
 import { monthToUtcRange } from '../budgets/budget-month.util';
 import {
   monthIndex,
@@ -30,20 +33,6 @@ import type {
   NetWorthMonth,
   NetWorthReport,
 } from './interfaces/net-worth.interface';
-
-// Account types whose balances count toward each net worth total. Liability
-// balances are negative when money is owed. A type in neither set counts in
-// neither total and is logged.
-const ASSET_TYPES: ReadonlySet<AccountType> = new Set([
-  AccountType.CHECKING,
-  AccountType.SAVINGS,
-  AccountType.CASH,
-  AccountType.INVESTMENT,
-]);
-const LIABILITY_TYPES: ReadonlySet<AccountType> = new Set([
-  AccountType.CREDIT,
-  AccountType.LOAN,
-]);
 
 @Injectable()
 export class ReportsService {
@@ -374,6 +363,9 @@ export class ReportsService {
             continue;
           }
           const balanceCents = balances[m];
+          // ASSET_TYPES and LIABILITY_TYPES decide which total a balance
+          // counts toward. A type in neither set counts in neither total and
+          // was logged above.
           if (ASSET_TYPES.has(account.type)) {
             assetsCents += balanceCents;
           } else if (LIABILITY_TYPES.has(account.type)) {

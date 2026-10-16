@@ -115,6 +115,22 @@ export const ACCOUNT_TYPES: readonly AccountType[] = [
   'loan',
 ];
 
+// The backend rejects a PATCH that moves an account between these two classes.
+export const ASSET_ACCOUNT_TYPES: readonly AccountType[] = [
+  'checking',
+  'savings',
+  'cash',
+  'investment',
+];
+export const LIABILITY_ACCOUNT_TYPES: readonly AccountType[] = ['credit', 'loan'];
+
+/** The asset or liability types that share a class with the given type. */
+export function accountTypesInSameClass(type: AccountType): readonly AccountType[] {
+  return LIABILITY_ACCOUNT_TYPES.includes(type)
+    ? LIABILITY_ACCOUNT_TYPES
+    : ASSET_ACCOUNT_TYPES;
+}
+
 export interface Account {
   _id: string;
   householdId: string;

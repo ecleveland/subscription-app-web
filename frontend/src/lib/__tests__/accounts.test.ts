@@ -8,6 +8,12 @@ import {
   updateAccount,
   archiveAccount,
 } from '../accounts';
+import {
+  ACCOUNT_TYPES,
+  ASSET_ACCOUNT_TYPES,
+  LIABILITY_ACCOUNT_TYPES,
+  accountTypesInSameClass,
+} from '../types';
 
 describe('accounts api wrappers', () => {
   afterEach(() => vi.clearAllMocks());
@@ -43,5 +49,26 @@ describe('accounts api wrappers', () => {
   it('archiveAccount DELETEs', async () => {
     await archiveAccount('a1');
     expect(apiFetch).toHaveBeenCalledWith('/accounts/a1', { method: 'DELETE' });
+  });
+});
+
+describe('account type classes', () => {
+  it('returns the four asset types for an asset account', () => {
+    expect(accountTypesInSameClass('savings')).toEqual([
+      'checking',
+      'savings',
+      'cash',
+      'investment',
+    ]);
+  });
+
+  it('returns credit and loan for a liability account', () => {
+    expect(accountTypesInSameClass('loan')).toEqual(['credit', 'loan']);
+  });
+
+  it('splits all six types into the two classes with no overlap', () => {
+    const combined = [...ASSET_ACCOUNT_TYPES, ...LIABILITY_ACCOUNT_TYPES];
+    expect(new Set(combined).size).toBe(combined.length);
+    expect([...combined].sort()).toEqual([...ACCOUNT_TYPES].sort());
   });
 });
