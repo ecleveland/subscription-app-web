@@ -71,6 +71,30 @@ describe('CreateGoalDto', () => {
     );
   });
 
+  it('accepts an accountId that is a Mongo id', () => {
+    expect(
+      errorsFor(CreateGoalDto, {
+        ...valid,
+        accountId: '507f191e810c19729de86021',
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects a malformed accountId', () => {
+    expect(errorsFor(CreateGoalDto, { ...valid, accountId: 'nope' })).toEqual([
+      'accountId',
+    ]);
+    expect(errorsFor(CreateGoalDto, { ...valid, accountId: 42 })).toEqual([
+      'accountId',
+    ]);
+  });
+
+  // IsOptional lets null through, same as categoryId. The service treats it
+  // as absent, so a create never links on null.
+  it('treats a null accountId as absent', () => {
+    expect(errorsFor(CreateGoalDto, { ...valid, accountId: null })).toEqual([]);
+  });
+
   it('rejects a malformed categoryId and targetDate', () => {
     expect(
       errorsFor(CreateGoalDto, {
@@ -91,6 +115,23 @@ describe('UpdateGoalDto', () => {
     expect(
       errorsFor(UpdateGoalDto, { targetDate: null, categoryId: null }),
     ).toEqual([]);
+  });
+
+  it('accepts an accountId that is a Mongo id', () => {
+    expect(
+      errorsFor(UpdateGoalDto, { accountId: '507f191e810c19729de86021' }),
+    ).toEqual([]);
+  });
+
+  it('accepts null for accountId to unlink', () => {
+    expect(errorsFor(UpdateGoalDto, { accountId: null })).toEqual([]);
+  });
+
+  it('rejects a malformed accountId', () => {
+    expect(errorsFor(UpdateGoalDto, { accountId: 'nope' })).toEqual([
+      'accountId',
+    ]);
+    expect(errorsFor(UpdateGoalDto, { accountId: '' })).toEqual(['accountId']);
   });
 
   it('rejects null on a required field', () => {

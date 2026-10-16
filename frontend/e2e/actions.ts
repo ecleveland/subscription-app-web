@@ -66,16 +66,23 @@ export async function createAccount(
   ).toBeVisible();
 }
 
-/** Record an expense through the /transactions form and wait for its row
- *  (which also keeps a following navigation from aborting the POST). The
- *  form's date defaults to today, so the expense lands in the current month. */
-export async function addExpense(
-  page: Page,
-  tx: { account: string; category: string; amount: string; payee: string },
-): Promise<void> {
+export interface NewTransaction {
+  type: 'expense' | 'income';
+  account: string;
+  category: string;
+  amount: string;
+  payee: string;
+}
+
+/** Record an expense or income through the /transactions form and wait for its
+ *  row (which also keeps a following navigation from aborting the POST). The
+ *  form's date defaults to today, so the transaction lands in the current
+ *  month. The category must match the type: the form only offers income
+ *  categories for income. */
+export async function addTransaction(page: Page, tx: NewTransaction): Promise<void> {
   await page.goto('/transactions');
   await page.getByRole('button', { name: '+ Add transaction' }).click();
-  await page.getByLabel('Type', { exact: true }).selectOption('expense');
+  await page.getByLabel('Type', { exact: true }).selectOption(tx.type);
   await page
     .getByLabel('Account', { exact: true })
     .selectOption({ label: tx.account });
@@ -91,6 +98,23 @@ export async function addExpense(
   await expect(
     page.getByRole('listitem').filter({ hasText: tx.payee }).first(),
   ).toBeVisible();
+}
+
+/** Record an expense. See addTransaction. */
+export function addExpense(
+  page: Page,
+  tx: Omit<NewTransaction, 'type'>,
+): Promise<void> {
+  return addTransaction(page, { ...tx, type: 'expense' });
+}
+
+/** Record income, for instance with the seeded "Paycheck" category. See
+ *  addTransaction. */
+export function addIncome(
+  page: Page,
+  tx: Omit<NewTransaction, 'type'>,
+): Promise<void> {
+  return addTransaction(page, { ...tx, type: 'income' });
 }
 
 export interface NewBill {

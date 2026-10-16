@@ -270,6 +270,9 @@ export interface Goal {
   currentCents: number;
   targetDate?: string | null;
   categoryId?: string | null;
+  // Set while the goal tracks a ledger account. currentCents then follows that
+  // account's balance and contributions are rejected.
+  linkedAccount: { accountId: string; name: string } | null;
   isArchived: boolean;
   createdAt: string;
   updatedAt: string;

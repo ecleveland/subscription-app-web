@@ -80,6 +80,11 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
               {goal.type === 'debt' ? 'Debt' : 'Savings'}
             </span>
           </div>
+          {goal.linkedAccount && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Tracks {goal.linkedAccount.name}
+            </p>
+          )}
           {goal.targetDate && days !== null && (
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {formatDateOnly(goal.targetDate)} ·{' '}
@@ -129,33 +134,37 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
         />
       </div>
 
-      <form onSubmit={handleContribute} className="mt-3 flex flex-wrap items-end gap-2">
-        <div>
-          <label
-            htmlFor={inputId}
-            className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"
+      {/* A linked goal follows its account's balance, so manual contributions
+          would be rejected. */}
+      {!goal.linkedAccount && (
+        <form onSubmit={handleContribute} className="mt-3 flex flex-wrap items-end gap-2">
+          <div>
+            <label
+              htmlFor={inputId}
+              className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"
+            >
+              Contribution ($)
+            </label>
+            <input
+              id={inputId}
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              className="w-32 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={saving}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
-            Contribution ($)
-          </label>
-          <input
-            id={inputId}
-            type="number"
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            className="w-32 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={saving}
-          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-        >
-          Add
-        </button>
-        {error && <p className="w-full text-red-500 dark:text-red-400 text-sm">{error}</p>}
-      </form>
+            Add
+          </button>
+          {error && <p className="w-full text-red-500 dark:text-red-400 text-sm">{error}</p>}
+        </form>
+      )}
     </article>
   );
 }

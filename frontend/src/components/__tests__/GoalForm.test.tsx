@@ -1,19 +1,51 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-vi.mock('@/lib/goals', () => ({
-  createGoal: vi.fn(),
-  updateGoal: vi.fn(),
-}));
+vi.mock('@/lib/goals', async (importOriginal) => {
+  // accountFitsGoal runs for real. Only the network wrappers are mocked.
+  const actual = await importOriginal<typeof import('@/lib/goals')>();
+  return { ...actual, createGoal: vi.fn(), updateGoal: vi.fn() };
+});
 vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
 }));
 
+const accountsState = {
+  accounts: [] as Account[],
+  loading: false,
+  error: null as string | null,
+  refresh: vi.fn(),
+};
+vi.mock('@/lib/accounts-context', () => ({
+  useAccounts: () => accountsState,
+}));
+
 import { createGoal, updateGoal } from '@/lib/goals';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import GoalForm from '@/components/GoalForm';
-import type { BudgetCategory, Goal } from '@/lib/types';
+import type { Account, AccountType, BudgetCategory, Goal } from '@/lib/types';
+
+function account(_id: string, name: string, type: AccountType, isArchived = false): Account {
+  return {
+    _id,
+    householdId: 'h',
+    name,
+    type,
+    balanceCents: 0,
+    isArchived,
+    createdAt: '',
+    updatedAt: '',
+  };
+}
+
+const ledgerAccounts: Account[] = [
+  account('a-chk', 'Checking', 'checking'),
+  account('a-sav', 'Rainy day', 'savings'),
+  account('a-cc', 'Visa', 'credit'),
+  account('a-loan', 'Car loan', 'loan'),
+  account('a-old', 'Old savings', 'savings', true),
+];
 
 const categories: BudgetCategory[] = [
   {
@@ -49,12 +81,28 @@ const existing: Goal = {
   currentCents: 1000,
   targetDate: '2027-06-01T00:00:00.000Z',
   categoryId: 'c1',
+  linkedAccount: null,
   isArchived: false,
   createdAt: '',
   updatedAt: '',
 };
 
+const linked: Goal = {
+  ...existing,
+  linkedAccount: { accountId: 'a-sav', name: 'Rainy day' },
+};
+
+function accountOptions(): string[] {
+  const select = screen.getByLabelText('Account');
+  return Array.from(select.querySelectorAll('option')).map((o) => o.textContent ?? '');
+}
+
 describe('GoalForm', () => {
+  beforeEach(() => {
+    accountsState.accounts = ledgerAccounts;
+    accountsState.loading = false;
+    accountsState.error = null;
+  });
   afterEach(() => vi.clearAllMocks());
 
   it('creates a goal in cents and omits empty optional fields', async () => {
@@ -266,6 +314,249 @@ describe('GoalForm', () => {
     await waitFor(() =>
       expect(updateGoal).toHaveBeenCalledWith('g1', { categoryId: null }),
     );
+  });
+
+  describe('account link', () => {
+    it('lists only unarchived accounts that fit the goal type', async () => {
+      const user = userEvent.setup();
+      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      expect(accountOptions()).toEqual(['None (manual)', 'Checking', 'Rainy day']);
+
+      await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      expect(accountOptions()).toEqual(['None (manual)', 'Visa', 'Car loan']);
+    });
+
+    it('sends accountId on create when an account is picked', async () => {
+      const user = userEvent.setup();
+      vi.mocked(createGoal).mockResolvedValue(linked);
+      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      await user.type(screen.getByLabelText('Name'), 'Rainy day fund');
+      await user.type(screen.getByLabelText('Target ($)'), '100');
+      await user.selectOptions(screen.getByLabelText('Account'), 'a-sav');
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() =>
+        expect(createGoal).toHaveBeenCalledWith({
+          name: 'Rainy day fund',
+          type: 'savings',
+          targetCents: 10000,
+          accountId: 'a-sav',
+        }),
+      );
+    });
+
+    it('omits accountId on create when None is picked', async () => {
+      const user = userEvent.setup();
+      vi.mocked(createGoal).mockResolvedValue(existing);
+      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      await user.type(screen.getByLabelText('Name'), 'Car');
+      await user.type(screen.getByLabelText('Target ($)'), '100');
+      await user.selectOptions(screen.getByLabelText('Account'), 'a-chk');
+      await user.selectOptions(screen.getByLabelText('Account'), '');
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => expect(createGoal).toHaveBeenCalled());
+      expect(vi.mocked(createGoal).mock.calls[0][0]).not.toHaveProperty('accountId');
+    });
+
+    it('prefills the linked account and sends null when switched to None', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue({ ...linked, linkedAccount: null });
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      expect(screen.getByLabelText('Account')).toHaveValue('a-sav');
+
+      await user.selectOptions(screen.getByLabelText('Account'), '');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { accountId: null }),
+      );
+    });
+
+    it('omits accountId on edit when the link is unchanged', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(linked);
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      await user.clear(screen.getByLabelText('Name'));
+      await user.type(screen.getByLabelText('Name'), 'Truck');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { name: 'Truck' }),
+      );
+    });
+
+    it('sends a new accountId on edit when the link changes', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(linked);
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      await user.selectOptions(screen.getByLabelText('Account'), 'a-chk');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { accountId: 'a-chk' }),
+      );
+    });
+
+    it('clears a checking selection when the type switches to debt', async () => {
+      const user = userEvent.setup();
+      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      await user.selectOptions(screen.getByLabelText('Account'), 'a-chk');
+      await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      expect(screen.getByLabelText('Account')).toHaveValue('');
+    });
+
+    it('unlinks on edit when the type switch drops the account', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { type: 'debt', accountId: null }),
+      );
+    });
+
+    it('unlinks on a type switch when the linked account is not in the list', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm
+          goal={{ ...existing, linkedAccount: { accountId: 'gone', name: 'Closed' } }}
+          categories={categories}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+      await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { type: 'debt', accountId: null }),
+      );
+    });
+
+    it('keeps the link on a type switch when accounts failed to load', async () => {
+      const user = userEvent.setup();
+      accountsState.accounts = [];
+      accountsState.error = 'Network down';
+      vi.mocked(updateGoal).mockResolvedValue(linked);
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { type: 'debt' }),
+      );
+    });
+
+    it('keeps the link on a type switch while accounts are still loading', async () => {
+      const user = userEvent.setup();
+      accountsState.accounts = [];
+      accountsState.loading = true;
+      vi.mocked(updateGoal).mockResolvedValue(linked);
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { type: 'debt' }),
+      );
+    });
+
+    it('shows a disabled loading option while accounts load', () => {
+      accountsState.loading = true;
+      accountsState.accounts = [];
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      const select = screen.getByLabelText('Account');
+      expect(select).toBeDisabled();
+      expect(select).toHaveValue('a-sav');
+      expect(screen.getByRole('option', { name: 'Loading accounts...' })).toBeInTheDocument();
+    });
+
+    it('keeps an archived linked account as a disabled placeholder', () => {
+      render(
+        <GoalForm
+          goal={{ ...existing, linkedAccount: { accountId: 'a-old', name: 'Old savings' } }}
+          categories={categories}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+      expect(screen.getByLabelText('Account')).toHaveValue('a-old');
+      expect(
+        screen.getByRole('option', { name: 'Old savings (archived or unavailable)' }),
+      ).toBeDisabled();
+      expect(screen.queryByRole('option', { name: 'Old savings' })).toBeNull();
+    });
+
+    it('keeps a missing linked account as a placeholder that None can clear', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm
+          goal={{ ...existing, linkedAccount: { accountId: 'gone', name: 'Closed' } }}
+          categories={categories}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+      const select = screen.getByLabelText('Account');
+      expect(select).toHaveValue('gone');
+      expect(
+        screen.getByRole('option', { name: 'Closed (archived or unavailable)' }),
+      ).toBeDisabled();
+
+      await user.selectOptions(select, '');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { accountId: null }),
+      );
+    });
+
+    it('hints when accounts failed to load and keeps the linked placeholder', () => {
+      accountsState.accounts = [];
+      accountsState.error = 'Network down';
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      expect(
+        screen.getByText("Couldn't load accounts. You can link one later."),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText('Account')).toHaveValue('a-sav');
+      expect(
+        screen.getByRole('option', { name: 'Rainy day (could not load accounts)' }),
+      ).toBeDisabled();
+    });
+
+    it('shows a rejected linked create as a toast', async () => {
+      const user = userEvent.setup();
+      vi.mocked(createGoal).mockRejectedValue(new Error('Account does not fit goal'));
+      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      await user.type(screen.getByLabelText('Name'), 'Car');
+      await user.type(screen.getByLabelText('Target ($)'), '100');
+      await user.selectOptions(screen.getByLabelText('Account'), 'a-sav');
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() =>
+        expect(showErrorToast).toHaveBeenCalledWith('Account does not fit goal'),
+      );
+    });
   });
 
   it('calls onCancel', async () => {

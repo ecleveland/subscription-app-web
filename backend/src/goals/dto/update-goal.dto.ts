@@ -19,7 +19,7 @@ import {
 
 // Every field optional. Required schema fields use ValidateIfDefined so a null
 // is a 400, not a Mongoose error. targetDate and categoryId accept null to
-// clear them. currentCents is not here, so the global pipe rejects it.
+// clear them, and accountId accepts null to unlink. currentCents is not here, so the global pipe rejects it.
 // Numeric and boolean fields read the raw value and name is trimmed, for the
 // same reasons as in CreateGoalDto.
 export class UpdateGoalDto {
@@ -58,6 +58,16 @@ export class UpdateGoalDto {
   @ValidateIfNotNullish
   @IsMongoId()
   categoryId?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Account in the same household to track, or null to unlink. Unlinking ' +
+      'freezes the tracked progress into currentCents.',
+    nullable: true,
+  })
+  @ValidateIfNotNullish
+  @IsMongoId()
+  accountId?: string | null;
 
   @ApiPropertyOptional({
     description: 'Hide the goal from the default list',

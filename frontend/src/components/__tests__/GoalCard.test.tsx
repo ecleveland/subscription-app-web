@@ -13,6 +13,7 @@ function goal(over: Partial<Goal> = {}): Goal {
     currentCents: 50000,
     targetDate: null,
     categoryId: null,
+    linkedAccount: null,
     isArchived: false,
     createdAt: '',
     updatedAt: '',
@@ -104,6 +105,20 @@ describe('GoalCard', () => {
       renderCard({ targetDate: '2026-10-05' });
       expect(screen.getByText(/3 days overdue/)).toBeInTheDocument();
     });
+  });
+
+  it('shows the tracked account and hides contributions for a linked goal', () => {
+    renderCard({ linkedAccount: { accountId: 'a1', name: 'Savings' } });
+    expect(screen.getByText('Tracks Savings')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Contribution ($)')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
+    expect(screen.getByText('50%')).toBeInTheDocument();
+  });
+
+  it('offers contributions and no tracked line for an unlinked goal', () => {
+    renderCard();
+    expect(screen.queryByText(/^Tracks /)).toBeNull();
+    expect(screen.getByLabelText('Contribution ($)')).toBeInTheDocument();
   });
 
   it('submits a contribution in cents and clears the input', async () => {

@@ -17,6 +17,10 @@ vi.mock('@/lib/goals', async (importOriginal) => {
 vi.mock('@/lib/categories', () => ({ listCategories: vi.fn() }));
 let authState = { isAuthenticated: true };
 vi.mock('@/lib/auth-context', () => ({ useAuth: () => authState }));
+// GoalForm reads the ledger accounts for its Account picker.
+vi.mock('@/lib/accounts-context', () => ({
+  useAccounts: () => ({ accounts: [], loading: false, error: null, refresh: vi.fn() }),
+}));
 vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
@@ -42,6 +46,7 @@ function goal(over: Partial<Goal>): Goal {
     currentCents: 0,
     targetDate: null,
     categoryId: null,
+    linkedAccount: null,
     isArchived: false,
     createdAt: '',
     updatedAt: '',

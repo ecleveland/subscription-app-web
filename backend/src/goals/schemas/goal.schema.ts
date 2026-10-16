@@ -6,6 +6,12 @@ export type GoalDocument = HydratedDocument<Goal>;
 // Both goal types count up, so progress always reads currentCents / targetCents.
 // A savings goal's target is the amount to save. A debt goal's target is the
 // starting balance owed, and currentCents is how much of it has been paid off.
+//
+// A goal can track an account instead of manual contributions. While linked,
+// GoalsService derives progress on read as balanceCents - baselineCents, so the
+// stored currentCents goes stale. It is rewritten only at unlink and at
+// relink, when the derived value is frozen into it. accountId and
+// baselineCents are both set or both unset.
 export enum GoalType {
   SAVINGS = 'savings',
   DEBT = 'debt',
@@ -35,9 +41,10 @@ export class Goal {
   @Prop({ required: true, min: 1, validate: integerCents('targetCents') })
   targetCents: number;
 
-  // Changed only through the contributions endpoint, as an atomic $inc. Never
-  // set from a create or update body. Can go negative after an over-correction;
-  // that is left visible rather than clamped.
+  // Changed only through the contributions endpoint, as an atomic $inc, or by
+  // GoalsService when a link starts or ends. Never set from a create or update
+  // body. Can go negative after an over-correction; that is left visible
+  // rather than clamped.
   @Prop({ required: true, default: 0, validate: integerCents('currentCents') })
   currentCents: number;
 
@@ -46,6 +53,17 @@ export class Goal {
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Category' })
   categoryId?: MongooseSchema.Types.ObjectId;
+
+  // The account whose balance drives progress. Same household, validated by
+  // GoalsService.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Account' })
+  accountId?: MongooseSchema.Types.ObjectId;
+
+  // The account balance that counts as currentCents 0. Set at link time to
+  // balanceCents - currentCents so linking never moves the progress bar.
+  // Internal, never returned by the API.
+  @Prop({ validate: integerCents('baselineCents') })
+  baselineCents?: number;
 
   // Lets a reached goal leave the default list without deleting its history.
   @Prop({ required: true, default: false })

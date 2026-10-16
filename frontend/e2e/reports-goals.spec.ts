@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { uniqueName } from './helpers';
+import { addIncome, createAccount } from './actions';
 
 test.describe('Reports and goals', () => {
   test('analytics redirects to reports and the four sections render', async ({
@@ -58,5 +59,39 @@ test.describe('Reports and goals', () => {
     await expect(
       card.getByRole('button', { name: 'Unarchive', exact: true }),
     ).toBeVisible();
+  });
+
+  test('a goal linked to an account follows its balance', async ({ page }) => {
+    const account = uniqueName('E2E Goal Savings');
+    const name = uniqueName('E2E Linked Goal');
+
+    // The opening balance predates the link, so progress starts at 0%.
+    await createAccount(page, account, 'savings', '500');
+
+    await page.goto('/goals');
+    await page.getByRole('button', { name: '+ Add goal' }).click();
+    await page.getByLabel('Name', { exact: true }).fill(name);
+    await page.getByLabel('Type', { exact: true }).selectOption('savings');
+    await page.getByLabel('Target ($)').fill('100');
+    await page
+      .getByLabel('Account', { exact: true })
+      .selectOption({ label: account });
+    await page.getByRole('button', { name: 'Create', exact: true }).click();
+
+    const card = page.getByRole('listitem').filter({ hasText: name });
+    await expect(card).toBeVisible();
+    await expect(card.getByText('0%', { exact: true })).toBeVisible();
+    await expect(card.getByText(`Tracks ${account}`)).toBeVisible();
+    await expect(card.getByLabel('Contribution ($)')).toHaveCount(0);
+
+    await addIncome(page, {
+      account,
+      category: 'Paycheck',
+      amount: '25',
+      payee: uniqueName('E2E Goal Deposit'),
+    });
+
+    await page.goto('/goals');
+    await expect(card.getByText('25%', { exact: true })).toBeVisible();
   });
 });
