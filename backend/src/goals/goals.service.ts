@@ -353,8 +353,9 @@ export class GoalsService {
     return this.toView(linked, account);
   }
 
-  // Unlink as one atomic write, filtered on the link still being there, so a
-  // concurrent unlink cannot freeze a stale value over the first one's result.
+  // Unlink as one atomic write. The filter pins the link that was read, so a
+  // concurrent unlink or relink makes it match nothing instead of overwriting
+  // the newer state with a value frozen from the old account.
   private async unlink(
     householdId: string,
     goal: GoalDocument,
@@ -362,12 +363,13 @@ export class GoalsService {
   ): Promise<GoalView> {
     const account = await this.findLinkedAccount(householdId, goal);
     const id = goal._id.toString();
+    const linkedId = linkedAccountId(goal);
     const unlinked = await this.goalModel
       .findOneAndUpdate(
         {
           _id: goal._id,
           householdId: new Types.ObjectId(householdId),
-          accountId: { $exists: true },
+          accountId: new Types.ObjectId(linkedId),
         } as Record<string, unknown>,
         {
           $set: {
@@ -384,8 +386,8 @@ export class GoalsService {
       return this.toView(unlinked);
     }
 
-    // Another request unlinked it first. Its frozen value stands. Apply the
-    // remaining edits to whatever is there now.
+    // Another request unlinked or relinked it first. Its state stands. Apply
+    // the remaining edits to whatever is there now.
     const current = await this.findDoc(householdId, id);
     this.applyWrites(current, writes);
     const saved = await current.save();

@@ -445,13 +445,45 @@ describe('GoalForm', () => {
       );
     });
 
-    it('keeps the link on a type switch when accounts failed to load', async () => {
+    it('unlinks on a type switch when accounts failed to load', async () => {
       const user = userEvent.setup();
       accountsState.accounts = [];
       accountsState.error = 'Network down';
-      vi.mocked(updateGoal).mockResolvedValue(linked);
+      vi.mocked(updateGoal).mockResolvedValue(existing);
       render(
         <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { type: 'debt', accountId: null }),
+      );
+    });
+
+    it('unlinks on a type switch while accounts are still loading', async () => {
+      const user = userEvent.setup();
+      accountsState.accounts = [];
+      accountsState.loading = true;
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      );
+      await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { type: 'debt', accountId: null }),
+      );
+    });
+
+    it('sends only the type for an unlinked goal when accounts failed to load', async () => {
+      const user = userEvent.setup();
+      accountsState.accounts = [];
+      accountsState.error = 'Network down';
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm goal={existing} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
       await user.click(screen.getByRole('button', { name: 'Update' }));
@@ -461,19 +493,46 @@ describe('GoalForm', () => {
       );
     });
 
-    it('keeps the link on a type switch while accounts are still loading', async () => {
+    it('keeps the link when the type switches away and back', async () => {
       const user = userEvent.setup();
-      accountsState.accounts = [];
-      accountsState.loading = true;
       vi.mocked(updateGoal).mockResolvedValue(linked);
       render(
         <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
+      expect(screen.getByLabelText('Account')).toHaveValue('');
+      await user.selectOptions(screen.getByLabelText('Type'), 'savings');
+      expect(screen.getByLabelText('Account')).toHaveValue('a-sav');
+
+      await user.clear(screen.getByLabelText('Name'));
+      await user.type(screen.getByLabelText('Name'), 'Truck');
       await user.click(screen.getByRole('button', { name: 'Update' }));
 
       await waitFor(() =>
-        expect(updateGoal).toHaveBeenCalledWith('g1', { type: 'debt' }),
+        expect(updateGoal).toHaveBeenCalledWith('g1', { name: 'Truck' }),
+      );
+    });
+
+    it('shows None and unlinks when a known linked account no longer fits', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      // The account's type changed server-side to credit after the link.
+      render(
+        <GoalForm
+          goal={{ ...existing, linkedAccount: { accountId: 'a-cc', name: 'Visa' } }}
+          categories={categories}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+      expect(screen.getByLabelText('Account')).toHaveValue('');
+      expect(
+        screen.getByRole('option', { name: "Visa (doesn't fit this goal type)" }),
+      ).toBeDisabled();
+
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+      await waitFor(() =>
+        expect(updateGoal).toHaveBeenCalledWith('g1', { accountId: null }),
       );
     });
 

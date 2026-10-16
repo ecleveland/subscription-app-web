@@ -61,25 +61,34 @@ export default function GoalForm({
   const accountOptions = accounts.filter(
     (a) => !a.isArchived && accountFitsGoal(type, a.type),
   );
-  // An archived account drops out of the options but stays linked server-side,
-  // and a failed load can leave the list empty. Same placeholder reasoning as
-  // the category select. While loading, nothing can be called missing yet.
+  // The shown and saved account derives from type, so switching the type away
+  // and back restores the pick. A known account must fit the current type. An
+  // account missing from the list has no known type: it may be archived, or
+  // the list may still be loading or have failed. It survives only while the
+  // type is unchanged, because the savings and debt account types are
+  // disjoint and a changed type always rules it out.
+  const selectedAccount = accounts.find((a) => a._id === accountId);
+  const linkFits =
+    !accountId ||
+    (selectedAccount
+      ? accountFitsGoal(type, selectedAccount.type)
+      : type === goal?.type);
+  const effectiveAccountId = linkFits ? accountId : '';
+  // Without a placeholder the select would show "None" for a stored id with no
+  // option, and picking "None" would never fire onChange. Same reasoning as the
+  // category select.
   const linkedAccountMissing =
-    !accountsLoading &&
-    !!initialAccount &&
-    !accounts.some((a) => a._id === initialAccount && !a.isArchived);
-
-  function handleTypeChange(next: GoalType) {
-    setType(next);
-    // A savings goal can't track a credit card and vice versa, so drop a
-    // selection the new type rules out. The list never holds archived
-    // accounts, so a selection missing from it is dropped too. While the list
-    // is loading or failed to load it is unknown, so keep the link and let the
-    // backend judge.
-    if (!accountId || accountsLoading || accountsError) return;
-    const selected = accounts.find((a) => a._id === accountId);
-    if (!selected || !accountFitsGoal(next, selected.type)) setAccountId('');
-  }
+    !!initialAccount && !accountOptions.some((a) => a._id === initialAccount);
+  // A linked account that is listed and unarchived is known, so it is missing
+  // from the options only because it doesn't fit the current type.
+  const linkedAccountUnfit = accounts.some(
+    (a) => a._id === initialAccount && !a.isArchived,
+  );
+  const linkedAccountReason = linkedAccountUnfit
+    ? "(doesn't fit this goal type)"
+    : accountsError
+      ? '(could not load accounts)'
+      : '(archived or unavailable)';
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -105,14 +114,16 @@ export default function GoalForm({
         if (targetCents !== goal.targetCents) body.targetCents = targetCents;
         if (targetDate !== initialDate) body.targetDate = targetDate || null;
         if (categoryId !== initialCategory) body.categoryId = categoryId || null;
-        if (accountId !== initialAccount) body.accountId = accountId || null;
+        if (effectiveAccountId !== initialAccount) {
+          body.accountId = effectiveAccountId || null;
+        }
         saved = await updateGoal(goal._id, body);
         showSuccessToast('Goal updated');
       } else {
         const body: CreateGoalBody = { name, type, targetCents };
         if (targetDate) body.targetDate = targetDate;
         if (categoryId) body.categoryId = categoryId;
-        if (accountId) body.accountId = accountId;
+        if (effectiveAccountId) body.accountId = effectiveAccountId;
         saved = await createGoal(body);
         showSuccessToast('Goal created');
       }
@@ -153,7 +164,7 @@ export default function GoalForm({
         <select
           id="goal-type"
           value={type}
-          onChange={(e) => handleTypeChange(e.target.value as GoalType)}
+          onChange={(e) => setType(e.target.value as GoalType)}
           className={inputClass}
         >
           <option value="savings">Savings</option>
@@ -231,20 +242,19 @@ export default function GoalForm({
         </label>
         <select
           id="goal-account"
-          value={accountId}
+          value={effectiveAccountId}
           onChange={(e) => setAccountId(e.target.value)}
           disabled={accountsLoading}
           className={`${inputClass} disabled:opacity-50`}
         >
           {accountsLoading ? (
-            <option value={accountId}>Loading accounts...</option>
+            <option value={effectiveAccountId}>Loading accounts...</option>
           ) : (
             <>
               <option value="">None (manual)</option>
               {linkedAccountMissing && (
                 <option value={initialAccount} disabled>
-                  {goal?.linkedAccount?.name}{' '}
-                  {accountsError ? '(could not load accounts)' : '(archived or unavailable)'}
+                  {goal?.linkedAccount?.name} {linkedAccountReason}
                 </option>
               )}
               {accountOptions.map((a) => (

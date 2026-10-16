@@ -34,7 +34,7 @@ const SAVINGS_ACCOUNT_TYPES: readonly AccountType[] = [
 ];
 const DEBT_ACCOUNT_TYPES: readonly AccountType[] = ['credit', 'loan'];
 
-/** Mirrors the backend pairing rule: savings goals track asset accounts, debt
+/** Mirrors the backend pairing rule. Savings goals track asset accounts, and debt
  *  goals track credit and loan accounts. */
 export function accountFitsGoal(goalType: GoalType, accountType: AccountType): boolean {
   const allowed = goalType === 'debt' ? DEBT_ACCOUNT_TYPES : SAVINGS_ACCOUNT_TYPES;

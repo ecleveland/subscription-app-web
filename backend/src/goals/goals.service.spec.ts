@@ -751,7 +751,8 @@ describe('GoalsService', () => {
           {
             _id: new Types.ObjectId(GOAL_ID),
             householdId: new Types.ObjectId(HH),
-            accountId: { $exists: true },
+            // The link that was read, so a concurrent relink misses.
+            accountId: new Types.ObjectId(ACC_ID),
           },
           {
             $set: { currentCents: 3000, name: 'Renamed' },
@@ -811,6 +812,45 @@ describe('GoalsService', () => {
           name: 'Renamed',
           currentCents: 3000,
           linkedAccount: null,
+        });
+      });
+
+      it('leaves a concurrent relink in place and applies the other edits by save', async () => {
+        const relinked = linkedGoalDoc({
+          accountId: new Types.ObjectId(ACC2_ID),
+          currentCents: 6000,
+          baselineCents: 44000,
+        });
+        goalModel.findById
+          .mockReturnValueOnce(createChainable(linkedGoalDoc()))
+          .mockReturnValueOnce(createChainable(relinked));
+        accountsService.findOne.mockImplementation((_hh: string, id: string) =>
+          Promise.resolve(
+            id === ACC_ID
+              ? accountDoc({ balanceCents: 13000 })
+              : accountDoc({
+                  _id: new Types.ObjectId(ACC2_ID),
+                  name: 'Brokerage',
+                  type: AccountType.INVESTMENT,
+                  balanceCents: 45000,
+                }),
+          ),
+        );
+        goalModel.findOneAndUpdate.mockReturnValue(createChainable(null));
+
+        const view = await service.update(HH, GOAL_ID, {
+          accountId: null,
+          name: 'Renamed',
+        });
+
+        expect(relinked.name).toBe('Renamed');
+        expect(relinked.currentCents).toBe(6000);
+        expect(relinked.accountId).toEqual(new Types.ObjectId(ACC2_ID));
+        expect(relinked.save).toHaveBeenCalled();
+        expect(view).toMatchObject({
+          name: 'Renamed',
+          currentCents: 1000,
+          linkedAccount: { accountId: ACC2_ID, name: 'Brokerage' },
         });
       });
 
