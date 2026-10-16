@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import {
+  accountFitsGoal,
   createGoal,
   updateGoal,
   type CreateGoalBody,
@@ -9,6 +10,7 @@ import {
 } from '@/lib/goals';
 import { dollarsToCents } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
+import { useAccounts } from '@/lib/accounts-context';
 import type { BudgetCategory, Goal, GoalType } from '@/lib/types';
 
 interface Props {
@@ -34,12 +36,15 @@ export default function GoalForm({
   // The date input wants YYYY-MM-DD; the API may echo a full ISO timestamp.
   const initialDate = goal?.targetDate ? goal.targetDate.slice(0, 10) : '';
   const initialCategory = goal?.categoryId ?? '';
+  const initialAccount = goal?.linkedAccount?.accountId ?? '';
 
   const [name, setName] = useState(goal?.name ?? '');
   const [type, setType] = useState<GoalType>(goal?.type ?? 'savings');
   const [target, setTarget] = useState(goal ? String(goal.targetCents / 100) : '');
   const [targetDate, setTargetDate] = useState(initialDate);
   const [categoryId, setCategoryId] = useState(initialCategory);
+  const [accountId, setAccountId] = useState(initialAccount);
+  const { accounts, loading: accountsLoading, error: accountsError } = useAccounts();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -52,6 +57,38 @@ export default function GoalForm({
   // holds the id, and picking "None" would never fire onChange.
   const currentCategoryMissing =
     !!initialCategory && !categories.some((c) => c._id === initialCategory);
+
+  const accountOptions = accounts.filter(
+    (a) => !a.isArchived && accountFitsGoal(type, a.type),
+  );
+  // The shown and saved account derives from type, so switching the type away
+  // and back restores the pick. A known account must fit the current type. An
+  // account missing from the list has no known type: it may be archived, or
+  // the list may still be loading or have failed. It survives only while the
+  // type is unchanged, because the savings and debt account types are
+  // disjoint and a changed type always rules it out.
+  const selectedAccount = accounts.find((a) => a._id === accountId);
+  const linkFits =
+    !accountId ||
+    (selectedAccount
+      ? accountFitsGoal(type, selectedAccount.type)
+      : type === goal?.type);
+  const effectiveAccountId = linkFits ? accountId : '';
+  // Without a placeholder the select would show "None" for a stored id with no
+  // option, and picking "None" would never fire onChange. Same reasoning as the
+  // category select.
+  const linkedAccountMissing =
+    !!initialAccount && !accountOptions.some((a) => a._id === initialAccount);
+  // A linked account that is listed and unarchived is known, so it is missing
+  // from the options only because it doesn't fit the current type.
+  const linkedAccountUnfit = accounts.some(
+    (a) => a._id === initialAccount && !a.isArchived,
+  );
+  const linkedAccountReason = linkedAccountUnfit
+    ? "(doesn't fit this goal type)"
+    : accountsError
+      ? '(could not load accounts)'
+      : '(archived or unavailable)';
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -77,12 +114,16 @@ export default function GoalForm({
         if (targetCents !== goal.targetCents) body.targetCents = targetCents;
         if (targetDate !== initialDate) body.targetDate = targetDate || null;
         if (categoryId !== initialCategory) body.categoryId = categoryId || null;
+        if (effectiveAccountId !== initialAccount) {
+          body.accountId = effectiveAccountId || null;
+        }
         saved = await updateGoal(goal._id, body);
         showSuccessToast('Goal updated');
       } else {
         const body: CreateGoalBody = { name, type, targetCents };
         if (targetDate) body.targetDate = targetDate;
         if (categoryId) body.categoryId = categoryId;
+        if (effectiveAccountId) body.accountId = effectiveAccountId;
         saved = await createGoal(body);
         showSuccessToast('Goal created');
       }
@@ -191,6 +232,42 @@ export default function GoalForm({
         {categoriesUnavailable && (
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Couldn&apos;t load categories. You can set one later.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="goal-account" className="block text-sm font-medium mb-1">
+          Account
+        </label>
+        <select
+          id="goal-account"
+          value={effectiveAccountId}
+          onChange={(e) => setAccountId(e.target.value)}
+          disabled={accountsLoading}
+          className={`${inputClass} disabled:opacity-50`}
+        >
+          {accountsLoading ? (
+            <option value={effectiveAccountId}>Loading accounts...</option>
+          ) : (
+            <>
+              <option value="">None (manual)</option>
+              {linkedAccountMissing && (
+                <option value={initialAccount} disabled>
+                  {goal?.linkedAccount?.name} {linkedAccountReason}
+                </option>
+              )}
+              {accountOptions.map((a) => (
+                <option key={a._id} value={a._id}>
+                  {a.name}
+                </option>
+              ))}
+            </>
+          )}
+        </select>
+        {accountsError && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Couldn&apos;t load accounts. You can link one later.
           </p>
         )}
       </div>

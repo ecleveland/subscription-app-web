@@ -1,6 +1,6 @@
 import { apiFetch } from './api';
 import { daysUntil } from './utils';
-import type { Goal, GoalType } from './types';
+import type { AccountType, Goal, GoalType } from './types';
 
 // Mirrors backend/src/goals/dto. All money is integer cents.
 
@@ -10,17 +10,35 @@ export interface CreateGoalBody {
   targetCents: number;
   targetDate?: string;
   categoryId?: string;
+  accountId?: string;
 }
 
-// currentCents is not patchable; it only moves through contributeToGoal.
-// Send null for targetDate or categoryId to clear it.
+// currentCents is not patchable; it only moves through contributeToGoal, or
+// follows the linked account. Send null for targetDate, categoryId or
+// accountId to clear it.
 export interface UpdateGoalBody {
   name?: string;
   type?: GoalType;
   targetCents?: number;
   targetDate?: string | null;
   categoryId?: string | null;
+  accountId?: string | null;
   isArchived?: boolean;
+}
+
+const SAVINGS_ACCOUNT_TYPES: readonly AccountType[] = [
+  'checking',
+  'savings',
+  'cash',
+  'investment',
+];
+const DEBT_ACCOUNT_TYPES: readonly AccountType[] = ['credit', 'loan'];
+
+/** Mirrors the backend pairing rule. Savings goals track asset accounts, and debt
+ *  goals track credit and loan accounts. */
+export function accountFitsGoal(goalType: GoalType, accountType: AccountType): boolean {
+  const allowed = goalType === 'debt' ? DEBT_ACCOUNT_TYPES : SAVINGS_ACCOUNT_TYPES;
+  return allowed.includes(accountType);
 }
 
 export function listGoals(includeArchived = false): Promise<Goal[]> {

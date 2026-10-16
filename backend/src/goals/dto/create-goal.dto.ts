@@ -16,7 +16,7 @@ import {
 } from '../../common/validation/transform-raw-value';
 
 // currentCents is deliberately absent. It starts at 0 and only moves through
-// POST /goals/:id/contributions.
+// POST /goals/:id/contributions, or follows the account when accountId is set.
 export class CreateGoalDto {
   @ApiProperty({ description: 'Goal name', example: 'Emergency fund' })
   // Trimmed first so a whitespace-only name is a 400, not a save-time 500.
@@ -61,4 +61,16 @@ export class CreateGoalDto {
   @IsOptional()
   @IsMongoId()
   categoryId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Account in the same household whose balance drives progress. A ' +
+      'savings goal tracks a checking, savings, cash or investment account. ' +
+      'A debt goal tracks a credit or loan account. Progress starts at 0 and ' +
+      'manual contributions are disabled while linked.',
+    example: '665f1c2e9b3a4d5e6f708193',
+  })
+  @IsOptional()
+  @IsMongoId()
+  accountId?: string;
 }

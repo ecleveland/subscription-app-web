@@ -40,7 +40,9 @@ export class GoalsController {
   @ApiResponse({ status: 201, description: 'Goal created' })
   @ApiResponse({
     status: 400,
-    description: 'Validation error or foreign category',
+    description:
+      'Validation error, foreign category, or an account that is foreign, ' +
+      'archived or the wrong type for the goal',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   create(@Req() req: HouseholdRequest, @Body() dto: CreateGoalDto) {
@@ -75,15 +77,24 @@ export class GoalsController {
     summary: 'Update a goal',
     description:
       'currentCents cannot be set here. Use the contributions endpoint. ' +
-      'Send null for targetDate or categoryId to clear it.',
+      'Send null for targetDate or categoryId to clear it. Send null for ' +
+      'accountId to unlink, which freezes the tracked progress into ' +
+      'currentCents.',
   })
   @ApiResponse({ status: 200, description: 'Goal updated' })
   @ApiResponse({
     status: 400,
-    description: 'Validation error or foreign category',
+    description:
+      'Validation error, foreign category, or an account that is foreign, ' +
+      'archived or the wrong type for the goal',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Goal not found' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'The goal changed while its account link was being updated. Retry.',
+  })
   update(
     @Req() req: HouseholdRequest,
     @Param('id', ParseObjectIdPipe) id: string,
@@ -97,10 +108,14 @@ export class GoalsController {
     summary: 'Add a contribution to a goal',
     description:
       'Atomically adds amountCents to currentCents and returns the updated ' +
-      'goal. A negative amount corrects an earlier contribution.',
+      'goal. A negative amount corrects an earlier contribution. A goal ' +
+      'that tracks an account takes no contributions.',
   })
   @ApiResponse({ status: 201, description: 'Contribution applied' })
-  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation error or goal tracks an account',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Goal not found' })
   contribute(

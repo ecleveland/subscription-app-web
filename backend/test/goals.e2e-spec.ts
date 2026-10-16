@@ -434,6 +434,211 @@ describe('Goals (e2e)', () => {
     });
   });
 
+  describe('account link', () => {
+    let incomeCategoryA: string;
+    let savingsAccount: string;
+    let loanAccount: string;
+    let linkedSavings: string;
+    let linkedDebt: string;
+
+    const auth = () => ({ Authorization: `Bearer ${tokenA}` });
+
+    async function createAccount(
+      token: string,
+      body: Record<string, unknown>,
+    ): Promise<string> {
+      const res = await api()
+        .post('/api/accounts')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body)
+        .expect(201);
+      return res.body._id;
+    }
+
+    async function postIncome(accountId: string, amountCents: number) {
+      await api()
+        .post('/api/transactions')
+        .set(auth())
+        .send({
+          accountId,
+          type: 'income',
+          amountCents,
+          date: '2026-06-10',
+          categoryId: incomeCategoryA,
+        })
+        .expect(201);
+    }
+
+    async function getGoal(id: string) {
+      const res = await api().get('/api/goals').set(auth()).expect(200);
+      return res.body.find((g: { _id: string }) => g._id === id);
+    }
+
+    beforeAll(async () => {
+      const cats = await api().get('/api/categories').set(auth()).expect(200);
+      incomeCategoryA = cats.body.find(
+        (c: { isIncome: boolean; isArchived: boolean }) =>
+          c.isIncome && !c.isArchived,
+      )._id;
+      savingsAccount = await createAccount(tokenA, {
+        name: 'Rainy day savings',
+        type: 'savings',
+        balanceCents: 50000,
+      });
+      loanAccount = await createAccount(tokenA, {
+        name: 'Car loan',
+        type: 'loan',
+        balanceCents: -15000,
+      });
+    });
+
+    it('starts a linked savings goal at 0 and follows deposits', async () => {
+      const created = await api()
+        .post('/api/goals')
+        .set(auth())
+        .send({
+          name: 'Tracked fund',
+          type: 'savings',
+          targetCents: 100000,
+          accountId: savingsAccount,
+        })
+        .expect(201);
+      expect(created.body).toMatchObject({
+        currentCents: 0,
+        accountId: savingsAccount,
+        linkedAccount: { accountId: savingsAccount, name: 'Rainy day savings' },
+      });
+      expect(created.body).not.toHaveProperty('baselineCents');
+      linkedSavings = created.body._id;
+
+      await postIncome(savingsAccount, 12000);
+
+      const goal = await getGoal(linkedSavings);
+      expect(goal).toMatchObject({
+        currentCents: 12000,
+        linkedAccount: { accountId: savingsAccount, name: 'Rainy day savings' },
+      });
+      expect(goal).not.toHaveProperty('baselineCents');
+
+      const single = await api()
+        .get(`/api/goals/${linkedSavings}`)
+        .set(auth())
+        .expect(200);
+      expect(single.body.currentCents).toBe(12000);
+    });
+
+    it('shows a loan payment as positive progress on a debt goal', async () => {
+      const created = await api()
+        .post('/api/goals')
+        .set(auth())
+        .send({
+          name: 'Pay off car',
+          type: 'debt',
+          targetCents: 15000,
+          accountId: loanAccount,
+        })
+        .expect(201);
+      linkedDebt = created.body._id;
+
+      // An income transaction on a loan raises its negative balance toward 0.
+      await postIncome(loanAccount, 5000);
+
+      expect(await getGoal(linkedDebt)).toMatchObject({
+        currentCents: 5000,
+        linkedAccount: { accountId: loanAccount, name: 'Car loan' },
+      });
+    });
+
+    it('rejects a debt goal on a savings account', async () => {
+      await api()
+        .post('/api/goals')
+        .set(auth())
+        .send({
+          name: 'Mismatch',
+          type: 'debt',
+          targetCents: 100,
+          accountId: savingsAccount,
+        })
+        .expect(400);
+    });
+
+    it('rejects a manual contribution while linked', async () => {
+      const res = await api()
+        .post(`/api/goals/${linkedSavings}/contributions`)
+        .set(auth())
+        .send({ amountCents: 100 })
+        .expect(400);
+      expect(res.body.message).toBe(
+        'Contributions are disabled while a goal tracks an account',
+      );
+      expect((await getGoal(linkedSavings)).currentCents).toBe(12000);
+    });
+
+    it("rejects linking household B's account", async () => {
+      const accountB = await createAccount(tokenB, {
+        name: 'B savings',
+        type: 'savings',
+      });
+      const res = await api()
+        .patch(`/api/goals/${linkedSavings}`)
+        .set(auth())
+        .send({ accountId: accountB })
+        .expect(400);
+      expect(res.body.message).toBe(
+        `accountId "${accountB}" does not reference an account in this household`,
+      );
+    });
+
+    it('freezes progress on unlink and stops following the account', async () => {
+      const res = await api()
+        .patch(`/api/goals/${linkedSavings}`)
+        .set(auth())
+        .send({ accountId: null })
+        .expect(200);
+      expect(res.body).toMatchObject({
+        currentCents: 12000,
+        linkedAccount: null,
+      });
+      expect(res.body).not.toHaveProperty('accountId');
+      expect(res.body).not.toHaveProperty('baselineCents');
+
+      await postIncome(savingsAccount, 3000);
+      expect(await getGoal(linkedSavings)).toMatchObject({
+        currentCents: 12000,
+        linkedAccount: null,
+      });
+
+      // Contributions work again once unlinked.
+      const contributed = await api()
+        .post(`/api/goals/${linkedSavings}/contributions`)
+        .set(auth())
+        .send({ amountCents: 1000 })
+        .expect(201);
+      expect(contributed.body.currentCents).toBe(13000);
+    });
+
+    it('relinks without moving the bar', async () => {
+      const res = await api()
+        .patch(`/api/goals/${linkedSavings}`)
+        .set(auth())
+        .send({ accountId: savingsAccount })
+        .expect(200);
+      expect(res.body.currentCents).toBe(13000);
+
+      await postIncome(savingsAccount, 2000);
+      expect((await getGoal(linkedSavings)).currentCents).toBe(15000);
+    });
+
+    it('returns linkedAccount null on unlinked goals', async () => {
+      const res = await api()
+        .post('/api/goals')
+        .set(auth())
+        .send({ name: 'Plain', type: 'savings', targetCents: 100 })
+        .expect(201);
+      expect(res.body.linkedAccount).toBeNull();
+    });
+  });
+
   describe('auth', () => {
     it('401s without a token', async () => {
       await api().get('/api/goals').expect(401);

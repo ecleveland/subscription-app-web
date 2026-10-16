@@ -5,14 +5,17 @@ import { GoalsService } from './goals.service';
 import { Goal, GoalSchema } from './schemas/goal.schema';
 import { CategoriesModule } from '../categories/categories.module';
 import { HouseholdsModule } from '../households/households.module';
+import { AccountsModule } from '../accounts/accounts.module';
 
 // Phase 5 savings and debt goals (VEG-585). CategoriesModule validates that a
-// goal's category belongs to the household. HouseholdsModule provides the
-// HouseholdGuard.
+// goal's category belongs to the household. AccountsModule validates a linked
+// account and supplies the balance that drives a linked goal's progress.
+// HouseholdsModule provides the HouseholdGuard.
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Goal.name, schema: GoalSchema }]),
     CategoriesModule,
+    AccountsModule,
     HouseholdsModule,
   ],
   controllers: [GoalsController],

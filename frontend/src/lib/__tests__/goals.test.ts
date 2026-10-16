@@ -10,8 +10,9 @@ import {
   goalProgress,
   daysUntilTarget,
   formatDateOnly,
+  accountFitsGoal,
 } from '../goals';
-import type { Goal } from '../types';
+import type { AccountType, Goal } from '../types';
 
 function goal(over: Partial<Goal> = {}): Goal {
   return {
@@ -23,6 +24,7 @@ function goal(over: Partial<Goal> = {}): Goal {
     currentCents: 0,
     targetDate: null,
     categoryId: null,
+    linkedAccount: null,
     isArchived: false,
     createdAt: '',
     updatedAt: '',
@@ -142,5 +144,19 @@ describe('formatDateOnly', () => {
     expect(formatDateOnly(target.targetDate!)).toBe('Oct 9, 2026');
     expect(daysUntilTarget(target)).toBe(1);
     vi.useRealTimers();
+  });
+});
+
+describe('accountFitsGoal', () => {
+  it.each<[AccountType, boolean, boolean]>([
+    ['checking', true, false],
+    ['savings', true, false],
+    ['cash', true, false],
+    ['investment', true, false],
+    ['credit', false, true],
+    ['loan', false, true],
+  ])('%s account fits savings=%s debt=%s', (accountType, savings, debt) => {
+    expect(accountFitsGoal('savings', accountType)).toBe(savings);
+    expect(accountFitsGoal('debt', accountType)).toBe(debt);
   });
 });
