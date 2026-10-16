@@ -7,9 +7,11 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AccountType } from '../schemas/account.schema';
+import { TrimString } from '../../common/validation/transform-raw-value';
 
 export class CreateAccountDto {
   @ApiProperty({ description: 'Account name', example: 'Everyday Checking' })
+  @TrimString
   @IsString()
   @IsNotEmpty()
   name: string;

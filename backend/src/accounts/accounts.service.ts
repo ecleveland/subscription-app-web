@@ -144,23 +144,24 @@ export class AccountsService {
     dto: UpdateAccountDto,
   ): Promise<AccountDocument> {
     const existing = await this.findOne(householdId, id);
-    if (
-      dto.type !== undefined &&
-      dto.type !== existing.type &&
-      crossesTypeClass(existing.type, dto.type)
-    ) {
+    if (dto.type !== undefined && crossesTypeClass(existing.type, dto.type)) {
       throw new BadRequestException(
         'Cannot change an account between asset and liability types. Archive it and create a new account.',
       );
     }
-    // Assign only the fields actually provided. A PartialType DTO instance can
-    // carry unset optional fields as `undefined` own-properties (TS class
-    // fields); assigning those would clobber required schema fields like
-    // `isArchived`/`balanceCents` and fail validation on save.
-    for (const [key, value] of Object.entries(dto)) {
-      if (value !== undefined) {
-        (existing as unknown as Record<string, unknown>)[key] = value;
-      }
+    // Copy only the fields an update may change, and only when provided. A
+    // PartialType DTO instance can carry unset optional fields as `undefined`
+    // own-properties, and assigning those would clobber required schema paths.
+    // Reading an allowlist also keeps any field the DTO does not declare off
+    // the document, whatever the pipe lets through.
+    if (dto.name !== undefined) {
+      existing.name = dto.name;
+    }
+    if (dto.type !== undefined) {
+      existing.type = dto.type;
+    }
+    if (dto.isArchived !== undefined) {
+      existing.isArchived = dto.isArchived;
     }
     const saved = await existing.save();
     this.logger.log({ householdId, accountId: id }, 'Account updated');

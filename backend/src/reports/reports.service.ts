@@ -34,10 +34,6 @@ import type {
   NetWorthReport,
 } from './interfaces/net-worth.interface';
 
-// ASSET_TYPES and LIABILITY_TYPES decide which net worth total an account's
-// balance counts toward. A type in neither set counts in neither total and is
-// logged.
-
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
@@ -367,6 +363,9 @@ export class ReportsService {
             continue;
           }
           const balanceCents = balances[m];
+          // ASSET_TYPES and LIABILITY_TYPES decide which total a balance
+          // counts toward. A type in neither set counts in neither total and
+          // was logged above.
           if (ASSET_TYPES.has(account.type)) {
             assetsCents += balanceCents;
           } else if (LIABILITY_TYPES.has(account.type)) {

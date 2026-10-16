@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/accounts', () => ({
@@ -86,6 +86,52 @@ describe('AccountForm', () => {
         type: 'checking',
       }),
     );
+  });
+
+  it('offers only asset types when editing a checking account', () => {
+    render(<AccountForm account={account} onSaved={vi.fn()} onCancel={vi.fn()} />);
+    const options = within(screen.getByLabelText('Type')).getAllByRole('option');
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual([
+      'checking',
+      'savings',
+      'cash',
+      'investment',
+    ]);
+    expect(
+      screen.getByText('An account cannot move between asset and liability types.'),
+    ).toBeInTheDocument();
+  });
+
+  it('offers only credit and loan when editing a credit account', () => {
+    render(
+      <AccountForm
+        account={{ ...account, type: 'credit', balanceCents: -5000 }}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const options = within(screen.getByLabelText('Type')).getAllByRole('option');
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual([
+      'credit',
+      'loan',
+    ]);
+    expect(screen.getByLabelText('Type')).toHaveValue('credit');
+  });
+
+  it('offers all six types and no class hint when creating', () => {
+    render(<AccountForm onSaved={vi.fn()} onCancel={vi.fn()} />);
+    const options = within(screen.getByLabelText('Type')).getAllByRole('option');
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual([
+      'checking',
+      'savings',
+      'credit',
+      'cash',
+      'investment',
+      'loan',
+    ]);
+    expect(
+      screen.queryByText('An account cannot move between asset and liability types.'),
+    ).toBeNull();
   });
 
   it('rejects an invalid opening balance without calling the API', async () => {

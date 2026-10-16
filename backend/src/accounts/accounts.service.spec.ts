@@ -204,13 +204,34 @@ describe('AccountsService', () => {
       // as undefined own-properties.
       await service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
         name: 'New',
+        type: undefined,
         isArchived: undefined,
-        balanceCents: undefined,
-      } as any);
+      });
 
       expect(doc.name).toBe('New');
       expect(doc.isArchived).toBe(false);
-      expect(doc.balanceCents).toBe(5000);
+    });
+
+    it('leaves balanceCents untouched when a patch carries it past the pipe', async () => {
+      const doc: any = {
+        _id: new Types.ObjectId(ACCOUNT_ID),
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        name: 'Old',
+        isArchived: false,
+        balanceCents: 5000,
+        save: jest.fn().mockImplementation(function (this: any) {
+          return Promise.resolve(this);
+        }),
+      };
+      mockAccountModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
+        name: 'New',
+        balanceCents: 999999,
+      } as any);
+
+      expect(saved.name).toBe('New');
+      expect(saved.balanceCents).toBe(5000);
     });
 
     it('throws NotFound (via findOne) for an account in another household', async () => {
@@ -256,6 +277,17 @@ describe('AccountsService', () => {
         await expect(attempt).rejects.toThrow(
           'Cannot change an account between asset and liability types. Archive it and create a new account.',
         );
+        expect(save).not.toHaveBeenCalled();
+      });
+
+      it('rejects a change from a liability type to an asset type without saving', async () => {
+        stubAccount(AccountType.CREDIT);
+
+        await expect(
+          service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
+            type: AccountType.SAVINGS,
+          }),
+        ).rejects.toThrow(BadRequestException);
         expect(save).not.toHaveBeenCalled();
       });
 

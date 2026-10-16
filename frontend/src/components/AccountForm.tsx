@@ -4,7 +4,12 @@ import { useState, type FormEvent } from 'react';
 import { createAccount, updateAccount } from '@/lib/accounts';
 import { dollarsToCents, formatCents } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
-import { ACCOUNT_TYPES, type Account, type AccountType } from '@/lib/types';
+import {
+  ACCOUNT_TYPES,
+  accountTypesInSameClass,
+  type Account,
+  type AccountType,
+} from '@/lib/types';
 
 interface Props {
   account?: Account;
@@ -20,6 +25,8 @@ export default function AccountForm({ account, onSaved, onCancel }: Props) {
   const [openingBalance, setOpeningBalance] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // The backend rejects a type change across asset and liability classes.
+  const typeOptions = account ? accountTypesInSameClass(account.type) : ACCOUNT_TYPES;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -87,12 +94,17 @@ export default function AccountForm({ account, onSaved, onCancel }: Props) {
           onChange={(e) => setType(e.target.value as AccountType)}
           className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
         >
-          {ACCOUNT_TYPES.map((t) => (
+          {typeOptions.map((t) => (
             <option key={t} value={t}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </option>
           ))}
         </select>
+        {isEditing && (
+          <p className="text-xs text-gray-500 mt-1">
+            An account cannot move between asset and liability types.
+          </p>
+        )}
       </div>
 
       {!isEditing && (
