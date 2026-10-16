@@ -354,8 +354,9 @@ export class GoalsService {
   }
 
   // Unlink as one atomic write. The filter pins the link that was read, so a
-  // concurrent unlink or relink makes it match nothing instead of overwriting
-  // the newer state with a value frozen from the old account.
+  // concurrent unlink or relink makes it match nothing and the request is a
+  // 409, as in link(). Applying the other edits to the newer state instead
+  // could save a type change the new account cannot back.
   private async unlink(
     householdId: string,
     goal: GoalDocument,
@@ -381,18 +382,13 @@ export class GoalsService {
         { new: true, runValidators: true },
       )
       .exec();
-    if (unlinked) {
-      this.logger.log({ householdId, goalId: id }, 'Goal unlinked');
-      return this.toView(unlinked);
+    if (!unlinked) {
+      throw new ConflictException(
+        'Goal was modified concurrently; retry the request',
+      );
     }
-
-    // Another request unlinked or relinked it first. Its state stands. Apply
-    // the remaining edits to whatever is there now.
-    const current = await this.findDoc(householdId, id);
-    this.applyWrites(current, writes);
-    const saved = await current.save();
-    this.logger.log({ householdId, goalId: id }, 'Goal updated');
-    return this.toView(saved, await this.findLinkedAccount(householdId, saved));
+    this.logger.log({ householdId, goalId: id }, 'Goal unlinked');
+    return this.toView(unlinked);
   }
 
   // The non-link edits from the allowlist. null clears targetDate and

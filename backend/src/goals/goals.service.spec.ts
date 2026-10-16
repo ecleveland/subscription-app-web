@@ -791,67 +791,53 @@ describe('GoalsService', () => {
         ).rejects.toThrow(ConflictException);
       });
 
-      it('applies the other edits by save when a concurrent unlink won', async () => {
-        const unlinked = goalDoc({ currentCents: 3000 });
-        goalModel.findById
-          .mockReturnValueOnce(createChainable(linkedGoalDoc()))
-          .mockReturnValueOnce(createChainable(unlinked));
+      it('returns 409 and saves nothing when a concurrent unlink won', async () => {
+        const doc = linkedGoalDoc();
+        goalModel.findById.mockReturnValue(createChainable(doc));
         accountsService.findOne.mockResolvedValue(
           accountDoc({ balanceCents: 13000 }),
         );
         goalModel.findOneAndUpdate.mockReturnValue(createChainable(null));
 
-        const view = await service.update(HH, GOAL_ID, {
-          accountId: null,
-          name: 'Renamed',
-        });
-
-        expect(unlinked.name).toBe('Renamed');
-        expect(unlinked.save).toHaveBeenCalled();
-        expect(view).toMatchObject({
-          name: 'Renamed',
-          currentCents: 3000,
-          linkedAccount: null,
-        });
+        await expect(
+          service.update(HH, GOAL_ID, { accountId: null, name: 'Renamed' }),
+        ).rejects.toThrow(
+          new ConflictException(
+            'Goal was modified concurrently; retry the request',
+          ),
+        );
+        expect(goalModel.findById).toHaveBeenCalledTimes(1);
+        expect(doc.save).not.toHaveBeenCalled();
       });
 
-      it('leaves a concurrent relink in place and applies the other edits by save', async () => {
+      // Saving the type change after a relink would skip the pairing check
+      // against the new account.
+      it('returns 409 and saves nothing when a concurrent relink won', async () => {
+        const doc = linkedGoalDoc();
         const relinked = linkedGoalDoc({
           accountId: new Types.ObjectId(ACC2_ID),
-          currentCents: 6000,
           baselineCents: 44000,
         });
         goalModel.findById
-          .mockReturnValueOnce(createChainable(linkedGoalDoc()))
+          .mockReturnValueOnce(createChainable(doc))
           .mockReturnValueOnce(createChainable(relinked));
-        accountsService.findOne.mockImplementation((_hh: string, id: string) =>
-          Promise.resolve(
-            id === ACC_ID
-              ? accountDoc({ balanceCents: 13000 })
-              : accountDoc({
-                  _id: new Types.ObjectId(ACC2_ID),
-                  name: 'Brokerage',
-                  type: AccountType.INVESTMENT,
-                  balanceCents: 45000,
-                }),
-          ),
+        accountsService.findOne.mockResolvedValue(
+          accountDoc({ balanceCents: 13000 }),
         );
         goalModel.findOneAndUpdate.mockReturnValue(createChainable(null));
 
-        const view = await service.update(HH, GOAL_ID, {
-          accountId: null,
-          name: 'Renamed',
-        });
-
-        expect(relinked.name).toBe('Renamed');
-        expect(relinked.currentCents).toBe(6000);
-        expect(relinked.accountId).toEqual(new Types.ObjectId(ACC2_ID));
-        expect(relinked.save).toHaveBeenCalled();
-        expect(view).toMatchObject({
-          name: 'Renamed',
-          currentCents: 1000,
-          linkedAccount: { accountId: ACC2_ID, name: 'Brokerage' },
-        });
+        await expect(
+          service.update(HH, GOAL_ID, {
+            accountId: null,
+            type: GoalType.DEBT,
+          }),
+        ).rejects.toThrow(
+          new ConflictException(
+            'Goal was modified concurrently; retry the request',
+          ),
+        );
+        expect(doc.save).not.toHaveBeenCalled();
+        expect(relinked.save).not.toHaveBeenCalled();
       });
 
       it('ignores a null accountId on an unlinked goal', async () => {

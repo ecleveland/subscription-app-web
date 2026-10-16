@@ -90,6 +90,11 @@ export class GoalsController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Goal not found' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'The goal changed while its account link was being updated. Retry.',
+  })
   update(
     @Req() req: HouseholdRequest,
     @Param('id', ParseObjectIdPipe) id: string,
