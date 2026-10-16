@@ -10,7 +10,10 @@ import { TransactionsService } from '../transactions/transactions.service';
 import { BudgetsService } from '../budgets/budgets.service';
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
-import { AccountType } from '../accounts/schemas/account.schema';
+import {
+  ASSET_TYPES,
+  LIABILITY_TYPES,
+} from '../accounts/schemas/account.schema';
 import { monthToUtcRange } from '../budgets/budget-month.util';
 import {
   monthIndex,
@@ -31,19 +34,9 @@ import type {
   NetWorthReport,
 } from './interfaces/net-worth.interface';
 
-// Account types whose balances count toward each net worth total. Liability
-// balances are negative when money is owed. A type in neither set counts in
-// neither total and is logged.
-const ASSET_TYPES: ReadonlySet<AccountType> = new Set([
-  AccountType.CHECKING,
-  AccountType.SAVINGS,
-  AccountType.CASH,
-  AccountType.INVESTMENT,
-]);
-const LIABILITY_TYPES: ReadonlySet<AccountType> = new Set([
-  AccountType.CREDIT,
-  AccountType.LOAN,
-]);
+// ASSET_TYPES and LIABILITY_TYPES decide which net worth total an account's
+// balance counts toward. A type in neither set counts in neither total and is
+// logged.
 
 @Injectable()
 export class ReportsService {

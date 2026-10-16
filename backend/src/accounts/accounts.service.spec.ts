@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ConflictException, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { AccountsService } from './accounts.service';
@@ -220,6 +225,82 @@ describe('AccountsService', () => {
       await expect(
         service.update(HOUSEHOLD_ID, ACCOUNT_ID, { name: 'Renamed' }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    describe('type changes', () => {
+      let save: jest.Mock;
+
+      function stubAccount(type: AccountType) {
+        save = jest.fn().mockImplementation(function (this: any) {
+          return Promise.resolve(this);
+        });
+        mockAccountModel.findById.mockReturnValue(
+          createChainable({
+            _id: new Types.ObjectId(ACCOUNT_ID),
+            householdId: new Types.ObjectId(HOUSEHOLD_ID),
+            name: 'Main',
+            type,
+            save,
+          }),
+        );
+      }
+
+      it('rejects a change from an asset type to a liability type without saving', async () => {
+        stubAccount(AccountType.CHECKING);
+
+        const attempt = service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
+          type: AccountType.LOAN,
+        });
+
+        await expect(attempt).rejects.toThrow(BadRequestException);
+        await expect(attempt).rejects.toThrow(
+          'Cannot change an account between asset and liability types. Archive it and create a new account.',
+        );
+        expect(save).not.toHaveBeenCalled();
+      });
+
+      it('saves a change between two asset types', async () => {
+        stubAccount(AccountType.CHECKING);
+
+        const saved = await service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
+          type: AccountType.SAVINGS,
+        });
+
+        expect(save).toHaveBeenCalledTimes(1);
+        expect(saved.type).toBe(AccountType.SAVINGS);
+      });
+
+      it('saves a change between two liability types', async () => {
+        stubAccount(AccountType.CREDIT);
+
+        const saved = await service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
+          type: AccountType.LOAN,
+        });
+
+        expect(save).toHaveBeenCalledTimes(1);
+        expect(saved.type).toBe(AccountType.LOAN);
+      });
+
+      it('saves a patch that repeats the stored type', async () => {
+        stubAccount(AccountType.CREDIT);
+
+        await service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
+          type: AccountType.CREDIT,
+        });
+
+        expect(save).toHaveBeenCalledTimes(1);
+      });
+
+      it('saves a name-only patch', async () => {
+        stubAccount(AccountType.LOAN);
+
+        const saved = await service.update(HOUSEHOLD_ID, ACCOUNT_ID, {
+          name: 'Renamed',
+        });
+
+        expect(save).toHaveBeenCalledTimes(1);
+        expect(saved.name).toBe('Renamed');
+      });
     });
   });
 
