@@ -39,27 +39,27 @@ export default function AccountsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-8">
-        <p className="text-gray-500">Loading accounts…</p>
+      <div className="max-w-3xl mx-auto px-4 py-8 md:px-8 md:py-10">
+        <p className="text-muted">Loading accounts…</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-3xl mx-auto px-4 py-8 md:px-8 md:py-10">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Accounts</h1>
+        <h1 className="page-title">Accounts</h1>
         {!showCreate && !editing && (
           <button
             onClick={() => setShowCreate(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="btn-primary"
           >
             + Add account
           </button>
         )}
       </div>
 
-      {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+      {error && <p className="text-danger text-sm mb-4">{error}</p>}
 
       {showCreate && (
         <div className="mb-6">
@@ -78,7 +78,7 @@ export default function AccountsPage() {
       )}
 
       {accounts.length === 0 && !showCreate ? (
-        <p className="text-gray-500 text-center py-8">
+        <p className="text-muted text-center py-8">
           No accounts yet. Add one to start tracking your balances.
         </p>
       ) : (
@@ -86,17 +86,17 @@ export default function AccountsPage() {
           {accounts.map((account) => (
             <li
               key={account._id}
-              className="flex items-center justify-between border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 bg-white dark:bg-gray-800"
+              className="flex items-center justify-between border border-line rounded-md px-4 py-3 bg-surface"
             >
               <div>
                 <p className="font-medium">{account.name}</p>
-                <p className="text-xs text-gray-500 capitalize">{account.type}</p>
+                <p className="text-xs text-muted capitalize">{account.type}</p>
               </div>
               <div className="flex items-center gap-4">
                 <span
                   className={
                     account.balanceCents < 0
-                      ? 'font-semibold text-red-600'
+                      ? 'font-semibold text-danger'
                       : 'font-semibold'
                   }
                 >
@@ -107,13 +107,13 @@ export default function AccountsPage() {
                     setShowCreate(false);
                     setEditing(account);
                   }}
-                  className="text-sm text-gray-600 dark:text-gray-300 hover:underline"
+                  className="text-sm text-ink-2 hover:underline"
                 >
                   Edit
                 </button>
                 <button
                   onClick={() => setArchiving(account)}
-                  className="text-sm text-red-600 hover:underline"
+                  className="text-sm text-danger hover:underline"
                 >
                   Archive
                 </button>

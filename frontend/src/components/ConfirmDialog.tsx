@@ -40,29 +40,25 @@ export default function ConfirmDialog({
     <dialog
       ref={dialogRef}
       onClose={onCancel}
-      className="rounded-lg p-0 backdrop:bg-black/50 max-w-sm w-full bg-white dark:bg-gray-800"
+      className="w-full max-w-sm rounded-md border border-line bg-surface p-0 text-ink shadow-xl backdrop:bg-ink/40 backdrop:backdrop-blur-[2px]"
     >
       <div className="p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+        <h2 className="section-title mb-2">
           {title}
         </h2>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+        <p className="text-sm text-ink-2 mb-6">
           {message}
         </p>
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
-            className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            className="btn-secondary"
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`px-4 py-2 text-sm rounded-lg text-white ${
-              destructive
-                ? 'bg-red-600 hover:bg-red-700'
-                : 'bg-blue-600 hover:bg-blue-700'
-            }`}
+            className={destructive ? 'btn-danger' : 'btn-primary'}
           >
             {confirmLabel}
           </button>

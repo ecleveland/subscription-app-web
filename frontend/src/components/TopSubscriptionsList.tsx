@@ -17,7 +17,7 @@ export default function TopSubscriptionsList({ subscriptions }: { subscriptions:
 
   if (top5.length === 0) {
     return (
-      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+      <div className="text-center py-8 text-muted">
         No active subscriptions to display.
       </div>
     );
@@ -28,16 +28,16 @@ export default function TopSubscriptionsList({ subscriptions }: { subscriptions:
       {top5.map((sub, index) => (
         <li
           key={sub._id}
-          className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3"
+          className="flex items-center gap-3 bg-surface border border-line rounded-md px-4 py-3"
         >
-          <span className="text-lg font-bold text-gray-400 dark:text-gray-500 w-6 text-center">
+          <span className="text-lg font-bold text-muted w-6 text-center">
             {index + 1}
           </span>
-          <span className="flex-1 font-medium text-gray-900 dark:text-gray-100">
+          <span className="flex-1 font-medium text-ink">
             {sub.name}
           </span>
           <CategoryBadge category={sub.category} />
-          <span className="font-semibold text-gray-900 dark:text-gray-100">
+          <span className="font-semibold text-ink">
             {formatCurrency(sub.monthlyCost)}/mo
           </span>
         </li>

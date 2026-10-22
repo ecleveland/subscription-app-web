@@ -32,15 +32,15 @@ export default function CalendarPage() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <p className="text-gray-500 dark:text-gray-400">Loading...</p>
+      <div className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
+        <p className="text-muted">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-8">
+    <div className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
+      <h1 className="page-title mb-8">
         Billing Calendar
       </h1>
       <CalendarView subscriptions={subscriptions} />

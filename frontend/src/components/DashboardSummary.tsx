@@ -43,65 +43,64 @@ export default function DashboardSummary({
     (sub) => daysUntil(sub.trialEndDate!) <= 3,
   );
 
-  const tileClass =
-    'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4';
-
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
-      <div className={tileClass}>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Daily</p>
-        <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {formatCurrency(totalDaily)}
-        </p>
-      </div>
-      <div className={tileClass}>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Weekly</p>
-        <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {formatCurrency(totalWeekly)}
-        </p>
-      </div>
-      <div className={tileClass}>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Monthly</p>
-        <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
+    <section className="card mb-8 grid overflow-hidden lg:grid-cols-[1.4fr_1fr]">
+      <div className="border-b border-line p-5 sm:p-6 lg:border-b-0 lg:border-r">
+        <p className="eyebrow">Monthly</p>
+        <p className="num mt-1 font-display text-5xl font-medium tracking-tight text-ink sm:text-6xl">
           {formatCurrency(totalMonthly)}
         </p>
+        <dl className="mt-5 grid grid-cols-3 gap-4 border-t border-line pt-4">
+          <div>
+            <dt className="eyebrow">Daily</dt>
+            <dd className="num mt-0.5 text-base text-ink">{formatCurrency(totalDaily)}</dd>
+          </div>
+          <div>
+            <dt className="eyebrow">Weekly</dt>
+            <dd className="num mt-0.5 text-base text-ink">{formatCurrency(totalWeekly)}</dd>
+          </div>
+          <div>
+            <dt className="eyebrow">Yearly</dt>
+            <dd className="num mt-0.5 text-base text-ink">{formatCurrency(totalYearly)}</dd>
+          </div>
+        </dl>
       </div>
-      <div className={tileClass}>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Yearly</p>
-        <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {formatCurrency(totalYearly)}
-        </p>
-      </div>
-      <div className={`${tileClass} col-span-2 sm:col-span-1`}>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Subscriptions
-        </p>
-        <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {activeSubscriptions.length}{' '}
-          <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-            active
-          </span>
-        </p>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {inactiveCount} inactive
-        </p>
-      </div>
-      {activeTrials.length > 0 && (
-        <div className={tileClass}>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Trials</p>
-          <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {activeTrials.length}{' '}
-            <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+      <div className="grid grid-cols-2 divide-x divide-line lg:grid-cols-1 lg:divide-x-0 lg:divide-y">
+        <div className="p-5 sm:p-6">
+          <p className="eyebrow">Subscriptions</p>
+          <p className="num mt-1 text-3xl font-medium text-ink">
+            {activeSubscriptions.length}{' '}
+            <span className="font-sans text-sm font-normal text-muted">
               active
             </span>
           </p>
-          {expiringSoonTrials.length > 0 && (
-            <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">
-              {expiringSoonTrials.length} expiring soon
-            </p>
+          <p className="mt-1 text-sm text-muted">
+            {inactiveCount} inactive
+          </p>
+        </div>
+        <div className="p-5 sm:p-6">
+          <p className="eyebrow">Trials</p>
+          {activeTrials.length > 0 ? (
+            <>
+              <p className="num mt-1 text-3xl font-medium text-ink">
+                {activeTrials.length}{' '}
+                <span className="font-sans text-sm font-normal text-muted">
+                  active
+                </span>
+              </p>
+              {expiringSoonTrials.length > 0 ? (
+                <p className="mt-1 text-sm font-medium text-warn">
+                  {expiringSoonTrials.length} expiring soon
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-muted">none ending this week</p>
+              )}
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-muted">No trials running</p>
           )}
         </div>
-      )}
-    </div>
+      </div>
+    </section>
   );
 }

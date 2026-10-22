@@ -55,14 +55,14 @@ export default function CategoryForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 max-w-md border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+      className="space-y-4 max-w-md border border-line rounded-md p-4 bg-surface"
     >
-      <h2 className="text-lg font-semibold">
+      <h2 className="section-title">
         {isEditing ? 'Edit category' : 'New category'}
       </h2>
 
       <div>
-        <label htmlFor="category-name" className="block text-sm font-medium mb-1">
+        <label htmlFor="category-name" className="label">
           Name
         </label>
         <input
@@ -70,19 +70,19 @@ export default function CategoryForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
-          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
+          className="input"
         />
       </div>
 
       <div>
-        <label htmlFor="category-group" className="block text-sm font-medium mb-1">
+        <label htmlFor="category-group" className="label">
           Group
         </label>
         <select
           id="category-group"
           value={groupId}
           onChange={(e) => setGroupId(e.target.value)}
-          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
+          className="input"
         >
           {groups.map((g) => (
             <option key={g._id} value={g._id}>
@@ -107,20 +107,20 @@ export default function CategoryForm({
         </div>
       )}
 
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
 
       <div className="flex gap-3">
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          className="btn-primary"
         >
           {loading ? 'Saving...' : isEditing ? 'Update' : 'Create'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+          className="btn-secondary"
         >
           Cancel
         </button>

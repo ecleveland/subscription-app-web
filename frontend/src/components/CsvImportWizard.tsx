@@ -50,7 +50,7 @@ function readFileText(file: File): Promise<string> {
 }
 
 const selectClass =
-  'w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700';
+  'w-full border border-line-strong rounded-md px-3 py-2 bg-surface';
 
 export default function CsvImportWizard({ accounts, onImported, onCancel }: Props) {
   const [step, setStep] = useState<Step>('upload');
@@ -170,17 +170,17 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
   }
 
   const wrapperClass =
-    'space-y-4 max-w-2xl border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800';
+    'space-y-4 max-w-2xl border border-line rounded-md p-4 bg-surface';
 
   if (accounts.length === 0) {
     return (
       <div className={wrapperClass}>
-        <h2 className="text-lg font-semibold">Import transactions from CSV</h2>
-        <p className="text-sm text-gray-500">Create an account before importing.</p>
+        <h2 className="section-title">Import transactions from CSV</h2>
+        <p className="text-sm text-muted">Create an account before importing.</p>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+          className="btn-secondary"
         >
           Close
         </button>
@@ -190,12 +190,12 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
 
   return (
     <div className={wrapperClass}>
-      <h2 className="text-lg font-semibold">Import transactions from CSV</h2>
+      <h2 className="section-title">Import transactions from CSV</h2>
 
       {step === 'upload' && (
         <div className="space-y-4">
           <div>
-            <label htmlFor="import-account" className="block text-sm font-medium mb-1">
+            <label htmlFor="import-account" className="label">
               Target account
             </label>
             <select
@@ -212,7 +212,7 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
             </select>
           </div>
           <div>
-            <label htmlFor="import-file" className="block text-sm font-medium mb-1">
+            <label htmlFor="import-file" className="label">
               CSV file
             </label>
             <input
@@ -229,12 +229,12 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
               className="block text-sm"
             />
           </div>
-          {fileError && <p className="text-red-500 text-sm">{fileError}</p>}
+          {fileError && <p className="text-danger text-sm">{fileError}</p>}
           <div className="flex gap-3">
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+              className="btn-secondary"
             >
               Cancel
             </button>
@@ -244,7 +244,7 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
 
       {step === 'map' && (
         <div className="space-y-4">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted">
             Mapping columns from <span className="font-medium">{fileName}</span> (
             {rows.length} rows).
           </p>
@@ -257,7 +257,7 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
             ] as const
           ).map(([field, label, required]) => (
             <div key={field}>
-              <label htmlFor={`map-${field}`} className="block text-sm font-medium mb-1">
+              <label htmlFor={`map-${field}`} className="label">
                 {label}
               </label>
               <select
@@ -283,14 +283,14 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
               type="button"
               disabled={!canProceedFromMap}
               onClick={() => setStep('preview')}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="btn-primary"
             >
               Preview
             </button>
             <button
               type="button"
               onClick={() => setStep('upload')}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+              className="btn-secondary"
             >
               Back
             </button>
@@ -301,19 +301,19 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
       {step === 'preview' && (
         <div className="space-y-4">
           <p className="text-sm">
-            <span className="font-medium text-green-600">{summary.ok} to import</span>
+            <span className="font-medium text-accent">{summary.ok} to import</span>
             {' · '}
-            <span className="text-gray-500">{summary.duplicate} duplicate</span>
+            <span className="text-muted">{summary.duplicate} duplicate</span>
             {' · '}
-            <span className="text-red-600">{summary.error} error{summary.error === 1 ? '' : 's'}</span>
+            <span className="text-danger">{summary.error} error{summary.error === 1 ? '' : 's'}</span>
           </p>
-          <ul className="max-h-72 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg">
+          <ul className="max-h-72 overflow-y-auto divide-y divide-line border border-line rounded-md">
             {derived.map((d) => (
               <li
                 key={d.index}
                 className={`flex items-center justify-between px-3 py-2 text-sm ${
                   d.status === 'error'
-                    ? 'bg-red-50 dark:bg-red-950/30'
+                    ? 'bg-danger-soft'
                     : d.status === 'duplicate'
                       ? 'opacity-60'
                       : ''
@@ -326,18 +326,18 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
                       : `${formatDate(new Date(d.dateMs ?? 0))}${d.payee ? ` · ${d.payee}` : ''}`}
                   </p>
                   {d.status === 'error' && (
-                    <p className="text-xs text-red-600">{d.error}</p>
+                    <p className="text-xs text-danger">{d.error}</p>
                   )}
                   {d.status === 'duplicate' && (
-                    <p className="text-xs text-gray-500">Duplicate — will be skipped</p>
+                    <p className="text-xs text-muted">Duplicate — will be skipped</p>
                   )}
                 </div>
                 {d.status !== 'error' && (
                   <span
                     className={
                       d.type === 'expense'
-                        ? 'font-semibold text-red-600'
-                        : 'font-semibold text-green-600'
+                        ? 'font-semibold text-danger'
+                        : 'font-semibold text-accent'
                     }
                   >
                     {signedAmount(d)}
@@ -351,14 +351,14 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
               type="button"
               disabled={!canCommit}
               onClick={handleCommit}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="btn-primary"
             >
               {submitting ? 'Importing…' : `Import ${summary.ok} row${summary.ok === 1 ? '' : 's'}`}
             </button>
             <button
               type="button"
               onClick={() => setStep('map')}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+              className="btn-secondary"
             >
               Back
             </button>
@@ -372,23 +372,23 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
             <span
               className={
                 result.imported > 0
-                  ? 'font-medium text-green-600'
-                  : 'font-medium text-gray-500'
+                  ? 'font-medium text-accent'
+                  : 'font-medium text-muted'
               }
             >
               Imported {result.imported}
             </span>
             {' · '}
-            <span className="text-gray-500">Skipped {result.skipped}</span>
+            <span className="text-muted">Skipped {result.skipped}</span>
             {result.errors.length > 0 && (
               <>
                 {' · '}
-                <span className="text-red-600">{result.errors.length} error{result.errors.length === 1 ? '' : 's'}</span>
+                <span className="text-danger">{result.errors.length} error{result.errors.length === 1 ? '' : 's'}</span>
               </>
             )}
           </p>
           {result.errors.length > 0 && (
-            <ul className="max-h-48 overflow-y-auto text-sm text-red-600 list-disc pl-5">
+            <ul className="max-h-48 overflow-y-auto text-sm text-danger list-disc pl-5">
               {result.errors.map((e, i) => (
                 <li key={i}>
                   {e.row >= 0 ? `Row ${e.row + 1}: ` : ''}
@@ -400,7 +400,7 @@ export default function CsvImportWizard({ accounts, onImported, onCancel }: Prop
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="btn-primary"
           >
             Done
           </button>

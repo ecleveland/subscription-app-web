@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { HouseholdProvider } from "@/lib/household-context";
@@ -16,6 +16,13 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -38,14 +45,16 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 dark:bg-gray-900`}
+        className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable} antialiased bg-paper text-ink`}
       >
         <ThemeProvider>
           <AuthProvider>
             <HouseholdProvider>
               <AccountsProvider>
-                <Header />
-                {children}
+                <div className="min-h-screen md:flex">
+                  <Header />
+                  <main className="min-w-0 flex-1">{children}</main>
+                </div>
               </AccountsProvider>
             </HouseholdProvider>
           </AuthProvider>

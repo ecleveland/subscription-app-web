@@ -137,15 +137,15 @@ export default function RecurringForm({
   }
 
   const inputClass =
-    'w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700';
+    'w-full border border-line-strong rounded-md px-3 py-2 bg-surface';
   const labelClass = 'block text-sm font-medium mb-1';
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 max-w-md border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+      className="space-y-4 max-w-md border border-line rounded-md p-4 bg-surface"
     >
-      <h2 className="text-lg font-semibold">
+      <h2 className="section-title">
         {isEditing ? 'Edit schedule' : 'New schedule'}
       </h2>
 
@@ -286,7 +286,7 @@ export default function RecurringForm({
           onChange={(e) => setReminderDaysBefore(e.target.value)}
           className={inputClass}
         />
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-xs text-muted mt-1">
           Set to 0 to disable reminders for this schedule.
         </p>
       </div>
@@ -353,20 +353,20 @@ export default function RecurringForm({
         <TagInput tags={tags} onChange={setTags} />
       </div>
 
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
 
       <div className="flex gap-3">
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          className="btn-primary"
         >
           {loading ? 'Saving...' : isEditing ? 'Update' : 'Add'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+          className="btn-secondary"
         >
           Cancel
         </button>

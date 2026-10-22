@@ -145,7 +145,7 @@ export default function NotificationBell() {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={handleToggle}
-        className="relative p-1 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+        className="relative p-1 text-ink-2 hover:text-ink transition-colors"
         aria-label="Notifications"
       >
         <svg
@@ -162,22 +162,22 @@ export default function NotificationBell() {
           />
         </svg>
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 inline-flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-red-500 rounded-full">
+          <span className="absolute -top-1 -right-1 inline-flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-danger rounded-full">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
-          <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+        <div className="absolute right-0 mt-2 w-80 bg-surface border border-line rounded-md shadow-lg z-50 max-h-96 overflow-y-auto">
+          <div className="p-3 border-b border-line flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-ink">
               Notifications
             </h3>
             {unreadCount > 0 && (
               <button
                 onClick={handleMarkAllRead}
-                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                className="text-xs text-accent hover:underline"
               >
                 Mark all as read
               </button>
@@ -185,11 +185,11 @@ export default function NotificationBell() {
           </div>
 
           {loading ? (
-            <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
+            <div className="p-4 text-center text-sm text-muted">
               Loading...
             </div>
           ) : notifications.length === 0 ? (
-            <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
+            <div className="p-4 text-center text-sm text-muted">
               No notifications
             </div>
           ) : (
@@ -198,27 +198,27 @@ export default function NotificationBell() {
                 <li
                   key={n._id}
                   onClick={() => handleClickNotification(n)}
-                  className={`flex items-start gap-2 p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-b-0 ${
-                    !n.read ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                  className={`flex items-start gap-2 p-3 cursor-pointer hover:bg-surface-2 border-b border-line last:border-b-0 ${
+                    !n.read ? 'bg-accent-soft' : ''
                   }`}
                 >
                   {!n.read && (
-                    <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                    <span className="mt-1.5 w-2 h-2 rounded-full bg-info flex-shrink-0" />
                   )}
                   <div className={`flex-1 min-w-0 ${n.read ? 'ml-4' : ''}`}>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                    <p className="text-sm font-medium text-ink truncate">
                       {n.title}
                     </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    <p className="text-xs text-muted mt-0.5">
                       {n.message}
                     </p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    <p className="text-xs text-muted mt-1">
                       {timeAgo(n.createdAt)}
                     </p>
                   </div>
                   <button
                     onClick={(e) => handleDismiss(e, n._id)}
-                    className="flex-shrink-0 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    className="flex-shrink-0 p-1 text-muted hover:text-ink"
                     aria-label="Dismiss notification"
                   >
                     <svg

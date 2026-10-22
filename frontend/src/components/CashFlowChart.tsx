@@ -32,23 +32,23 @@ export default function CashFlowChart({ months }: { months: CashFlowMonth[] }) {
             dataKey="month"
             tickFormatter={formatShortMonth}
             tick={{ fill: 'currentColor', fontSize: 12 }}
-            className="text-gray-500 dark:text-gray-400"
+            className="text-muted"
           />
           <YAxis
             tickFormatter={formatAxisDollars}
             width={80}
             tick={{ fill: 'currentColor', fontSize: 12 }}
-            className="text-gray-500 dark:text-gray-400"
+            className="text-muted"
           />
           <Tooltip content={<ReportTooltip formatLabel={formatShortMonth} />} />
           <Legend />
-          <Bar dataKey="incomeCents" name="Income" fill="#22c55e" radius={[4, 4, 0, 0]} />
-          <Bar dataKey="expenseCents" name="Expenses" fill="#ef4444" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="incomeCents" name="Income" fill="#1f6b47" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="expenseCents" name="Expenses" fill="#b2433a" radius={[4, 4, 0, 0]} />
           <Line
             type="monotone"
             dataKey="netCents"
             name="Net"
-            stroke="#3b82f6"
+            stroke="#2e5f8a"
             strokeWidth={2}
             dot={{ r: 3 }}
           />

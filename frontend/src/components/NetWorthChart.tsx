@@ -26,20 +26,20 @@ export default function NetWorthChart({ months }: { months: NetWorthMonth[] }) {
     <div>
       {latest && (
         <div className="mb-4">
-          <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          <p className="text-xs uppercase tracking-wide text-muted">
             Net worth
           </p>
           <p
             data-testid="net-worth-headline"
             className={`text-2xl font-semibold ${
               latest.netWorthCents < 0
-                ? 'text-red-600 dark:text-red-400'
-                : 'text-gray-900 dark:text-gray-100'
+                ? 'text-danger'
+                : 'text-ink'
             }`}
           >
             {formatCents(latest.netWorthCents)}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-muted">
             as of {formatShortMonth(latest.month)}
           </p>
         </div>
@@ -57,13 +57,13 @@ export default function NetWorthChart({ months }: { months: NetWorthMonth[] }) {
             dataKey="month"
             tickFormatter={formatShortMonth}
             tick={{ fill: 'currentColor', fontSize: 12 }}
-            className="text-gray-500 dark:text-gray-400"
+            className="text-muted"
           />
           <YAxis
             tickFormatter={formatAxisDollars}
             width={80}
             tick={{ fill: 'currentColor', fontSize: 12 }}
-            className="text-gray-500 dark:text-gray-400"
+            className="text-muted"
           />
           <Tooltip content={<ReportTooltip formatLabel={formatShortMonth} />} />
           <Legend />
@@ -71,23 +71,23 @@ export default function NetWorthChart({ months }: { months: NetWorthMonth[] }) {
             type="monotone"
             dataKey="assetsCents"
             name="Assets"
-            stroke="#22c55e"
-            fill="#22c55e"
+            stroke="#1f6b47"
+            fill="#1f6b47"
             fillOpacity={0.2}
           />
           <Area
             type="monotone"
             dataKey="liabilitiesCents"
             name="Liabilities"
-            stroke="#ef4444"
-            fill="#ef4444"
+            stroke="#b2433a"
+            fill="#b2433a"
             fillOpacity={0.2}
           />
           <Line
             type="monotone"
             dataKey="netWorthCents"
             name="Net worth"
-            stroke="#3b82f6"
+            stroke="#2e5f8a"
             strokeWidth={2}
             dot={{ r: 3 }}
           />

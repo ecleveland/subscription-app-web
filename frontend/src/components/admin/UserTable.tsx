@@ -42,42 +42,42 @@ export default function UserTable({ users, onUserDeleted }: UserTableProps) {
 
   return (
     <div>
-      {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+      {error && <p className="text-danger text-sm mb-4">{error}</p>}
       {/* Mobile card view */}
       <div className="md:hidden space-y-3">
         {users.map((user) => (
           <div
             key={user._id}
-            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+            className="card p-4"
           >
             <div className="flex items-center justify-between mb-2">
-              <span className="font-medium text-gray-900 dark:text-gray-100">
+              <span className="font-medium text-ink">
                 {user.username}
               </span>
               <span
                 className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
                   user.role === 'admin'
-                    ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
-                    : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                    ? 'bg-info-soft text-info'
+                    : 'bg-surface-2 text-ink-2'
                 }`}
               >
                 {user.role}
               </span>
             </div>
             {user.displayName && (
-              <p className="text-sm text-gray-600 dark:text-gray-300">{user.displayName}</p>
+              <p className="text-sm text-ink-2">{user.displayName}</p>
             )}
             {user.email && (
-              <p className="text-sm text-gray-600 dark:text-gray-300">{user.email}</p>
+              <p className="text-sm text-ink-2">{user.email}</p>
             )}
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-line">
+              <span className="text-xs text-muted">
                 Created {formatDate(user.createdAt)}
               </span>
               <button
                 onClick={() => handleDelete(user)}
                 disabled={deleting === user._id}
-                className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-sm disabled:opacity-50"
+                className="text-danger hover:text-danger-strong text-sm disabled:opacity-50"
               >
                 {deleting === user._id ? 'Deleting...' : 'Delete'}
               </button>
@@ -88,7 +88,7 @@ export default function UserTable({ users, onUserDeleted }: UserTableProps) {
       {/* Desktop table view */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm text-left">
-          <thead className="text-xs uppercase bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+          <thead className="text-xs uppercase bg-surface-2 text-ink-2">
             <tr>
               <th className="px-4 py-3">Username</th>
               <th className="px-4 py-3">Display Name</th>
@@ -98,40 +98,40 @@ export default function UserTable({ users, onUserDeleted }: UserTableProps) {
               <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+          <tbody className="divide-y divide-line">
             {users.map((user) => (
               <tr
                 key={user._id}
-                className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750"
+                className="bg-surface hover:bg-surface-2"
               >
-                <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
+                <td className="px-4 py-3 font-medium text-ink">
                   {user.username}
                 </td>
-                <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                <td className="px-4 py-3 text-ink-2">
                   {user.displayName || '-'}
                 </td>
-                <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                <td className="px-4 py-3 text-ink-2">
                   {user.email || '-'}
                 </td>
                 <td className="px-4 py-3">
                   <span
                     className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
                       user.role === 'admin'
-                        ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
-                        : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                        ? 'bg-info-soft text-info'
+                        : 'bg-surface-2 text-ink-2'
                     }`}
                   >
                     {user.role}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                <td className="px-4 py-3 text-ink-2">
                   {formatDate(user.createdAt)}
                 </td>
                 <td className="px-4 py-3">
                   <button
                     onClick={() => handleDelete(user)}
                     disabled={deleting === user._id}
-                    className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-sm disabled:opacity-50"
+                    className="text-danger hover:text-danger-strong text-sm disabled:opacity-50"
                   >
                     {deleting === user._id ? 'Deleting...' : 'Delete'}
                   </button>

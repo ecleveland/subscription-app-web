@@ -46,18 +46,18 @@ export default function ChangePasswordForm() {
   }
 
   const inputClasses =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+    'input';
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+      <h2 className="section-title mb-4">
         Change Password
       </h2>
       <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
         <div>
           <label
             htmlFor="currentPassword"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             Current Password
           </label>
@@ -73,7 +73,7 @@ export default function ChangePasswordForm() {
         <div>
           <label
             htmlFor="newPassword"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             New Password
           </label>
@@ -90,7 +90,7 @@ export default function ChangePasswordForm() {
         <div>
           <label
             htmlFor="confirmNewPassword"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             Confirm New Password
           </label>
@@ -104,11 +104,11 @@ export default function ChangePasswordForm() {
             className={inputClasses}
           />
         </div>
-        {error && <p className="text-red-500 text-sm">{error}</p>}
+        {error && <p className="text-danger text-sm">{error}</p>}
         <button
           type="submit"
           disabled={loading}
-          className="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+          className="btn-primary"
         >
           {loading ? 'Changing...' : 'Change Password'}
         </button>

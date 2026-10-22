@@ -26,8 +26,8 @@ const UPCOMING_DAYS = 30;
 
 function amountClass(type: RecurringType): string {
   return type === 'income'
-    ? 'font-semibold text-green-600'
-    : 'font-semibold text-red-600';
+    ? 'font-semibold text-accent'
+    : 'font-semibold text-danger';
 }
 
 export default function RecurringPage() {
@@ -140,15 +140,15 @@ export default function RecurringPage() {
   const canAdd = accounts.length > 0;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-8 md:px-8 md:py-10">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Bills &amp; recurring</h1>
+        <h1 className="page-title">Bills &amp; recurring</h1>
         {!showCreate && !editing && (
           <button
             onClick={() => setShowCreate(true)}
             disabled={!canAdd}
             title={canAdd ? '' : 'Create an account first'}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="btn-primary"
           >
             + Add bill
           </button>
@@ -156,13 +156,13 @@ export default function RecurringPage() {
       </div>
 
       {accountsError && (
-        <p className="text-red-500 text-sm mb-4">
+        <p className="text-danger text-sm mb-4">
           Couldn’t load accounts: {accountsError}. Schedules may be incomplete.
         </p>
       )}
 
       {!canAdd && !accountsError && (
-        <p className="text-sm text-gray-500 mb-4">
+        <p className="text-sm text-muted mb-4">
           Create an account before adding recurring schedules.
         </p>
       )}
@@ -188,13 +188,13 @@ export default function RecurringPage() {
       {/* Upcoming — what's due in the next 30 days (bills + paychecks). */}
       <section
         aria-label={`Upcoming (next ${UPCOMING_DAYS} days)`}
-        className="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+        className="mb-6 border border-line rounded-md p-4 bg-surface"
       >
-        <h2 className="text-lg font-semibold mb-3">
+        <h2 className="section-title mb-3">
           Upcoming (next {UPCOMING_DAYS} days)
         </h2>
         {upcoming.length === 0 ? (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted">
             Nothing due in the next {UPCOMING_DAYS} days.
           </p>
         ) : (
@@ -222,7 +222,7 @@ export default function RecurringPage() {
           aria-label="Filter by account"
           value={accountId}
           onChange={(e) => setAccountId(e.target.value)}
-          className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-sm"
+          className="input w-auto"
         >
           <option value="">All accounts</option>
           {accounts.map((a) => (
@@ -235,7 +235,7 @@ export default function RecurringPage() {
           aria-label="Filter by category"
           value={categoryId}
           onChange={(e) => setCategoryId(e.target.value)}
-          className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-sm"
+          className="input w-auto"
         >
           <option value="">All categories</option>
           {categories.map((c) => (
@@ -248,7 +248,7 @@ export default function RecurringPage() {
           aria-label="Filter by type"
           value={type}
           onChange={(e) => setType(e.target.value as '' | RecurringType)}
-          className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-sm"
+          className="input w-auto"
         >
           <option value="">All types</option>
           <option value="expense">Bills</option>
@@ -257,28 +257,28 @@ export default function RecurringPage() {
       </div>
 
       {loading ? (
-        <p className="text-gray-500">Loading schedules…</p>
+        <p className="text-muted">Loading schedules…</p>
       ) : listError ? (
-        <p className="text-red-500 text-center py-8">
+        <p className="text-danger text-center py-8">
           Couldn’t load schedules: {listError}
         </p>
       ) : recurring.length === 0 ? (
-        <p className="text-gray-500 text-center py-8">No schedules found.</p>
+        <p className="text-muted text-center py-8">No schedules found.</p>
       ) : (
         <ul className="space-y-2">
           {recurring.map((r) => (
             <li
               key={r._id}
-              className="flex items-center justify-between border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 bg-white dark:bg-gray-800"
+              className="flex items-center justify-between border border-line rounded-md px-4 py-3 bg-surface"
             >
               <div className="min-w-0">
                 <p className="font-medium truncate">
                   {r.payee}
-                  <span className="ml-2 text-xs font-normal text-gray-500">
+                  <span className="ml-2 text-xs font-normal text-muted">
                     {r.type === 'income' ? 'Income' : 'Bill'}
                   </span>
                 </p>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted">
                   {cadenceLabel(r.cadence)} · next {formatDate(r.nextDate)}
                   {r.categoryId &&
                     ` · ${categoryName.get(r.categoryId) ?? ''}`}
@@ -291,7 +291,7 @@ export default function RecurringPage() {
                 </span>
                 <Link
                   href={`/transactions?recurringId=${r._id}`}
-                  className="text-sm text-gray-600 dark:text-gray-300 hover:underline"
+                  className="text-sm text-ink-2 hover:underline"
                 >
                   History
                 </Link>
@@ -300,13 +300,13 @@ export default function RecurringPage() {
                     setShowCreate(false);
                     setEditing(r);
                   }}
-                  className="text-sm text-gray-600 dark:text-gray-300 hover:underline"
+                  className="text-sm text-ink-2 hover:underline"
                 >
                   Edit
                 </button>
                 <button
                   onClick={() => setDeleting(r)}
-                  className="text-sm text-red-600 hover:underline"
+                  className="text-sm text-danger hover:underline"
                 >
                   Delete
                 </button>

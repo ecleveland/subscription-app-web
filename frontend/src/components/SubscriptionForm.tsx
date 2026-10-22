@@ -137,8 +137,8 @@ export default function SubscriptionForm({ subscription }: Props) {
   }
 
   const inputClasses =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
-  const labelClasses = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1';
+    'input';
+  const labelClasses = 'block text-sm font-medium text-ink-2 mb-1';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-lg">
@@ -265,11 +265,11 @@ export default function SubscriptionForm({ subscription }: Props) {
           )}
         </select>
         {accountsError && (
-          <p className="text-red-500 text-sm mt-1">
+          <p className="text-danger text-sm mt-1">
             Couldn’t load accounts: {accountsError}
           </p>
         )}
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-xs text-muted mt-1">
           Posts each renewal to this account as an expense. Requires a cost above $0.
         </p>
       </div>
@@ -280,7 +280,7 @@ export default function SubscriptionForm({ subscription }: Props) {
           type="checkbox"
           checked={isActive}
           onChange={(e) => setIsActive(e.target.checked)}
-          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          className="h-4 w-4 text-accent border-line-strong rounded focus:ring-accent/30"
         />
         <label htmlFor="isActive" className={labelClasses}>
           Active subscription
@@ -301,7 +301,7 @@ export default function SubscriptionForm({ subscription }: Props) {
           onChange={(e) => setReminderDaysBefore(e.target.value)}
           className={inputClasses}
         />
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-xs text-muted mt-1">
           Set to 0 to disable reminders for this subscription.
         </p>
       </div>
@@ -312,7 +312,7 @@ export default function SubscriptionForm({ subscription }: Props) {
           type="checkbox"
           checked={hasTrial}
           onChange={(e) => setHasTrial(e.target.checked)}
-          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          className="h-4 w-4 text-accent border-line-strong rounded focus:ring-accent/30"
         />
         <label htmlFor="hasTrial" className={labelClasses}>
           Has free trial
@@ -340,7 +340,7 @@ export default function SubscriptionForm({ subscription }: Props) {
           type="checkbox"
           checked={isShared}
           onChange={(e) => setIsShared(e.target.checked)}
-          className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          className="h-4 w-4 text-accent border-line-strong rounded focus:ring-accent/30"
         />
         <label htmlFor="isShared" className={labelClasses}>
           Shared subscription
@@ -381,25 +381,25 @@ export default function SubscriptionForm({ subscription }: Props) {
       <div>
         <label className={labelClasses}>Tags</label>
         <TagInput tags={tags} onChange={setTags} />
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-xs text-muted mt-1">
           Press Enter or comma to add a tag.
         </p>
       </div>
 
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
 
       <div className="flex gap-3">
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+          className="btn-primary"
         >
           {loading ? 'Saving...' : isEditing ? 'Update' : 'Create'}
         </button>
         <button
           type="button"
           onClick={() => router.push('/')}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300"
+          className="btn-secondary"
         >
           Cancel
         </button>
@@ -407,7 +407,7 @@ export default function SubscriptionForm({ subscription }: Props) {
           <button
             type="button"
             onClick={handleDelete}
-            className="ml-auto px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+            className="ml-auto px-4 py-2 text-danger hover:bg-danger-soft rounded-md transition-colors"
           >
             Delete
           </button>

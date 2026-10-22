@@ -23,7 +23,7 @@ interface Props {
 }
 
 const inputClass =
-  'w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700';
+  'w-full border border-line-strong rounded-md px-3 py-2 bg-surface';
 
 export default function GoalForm({
   goal,
@@ -140,12 +140,12 @@ export default function GoalForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 max-w-md border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+      className="space-y-4 max-w-md border border-line rounded-md p-4 bg-surface"
     >
-      <h2 className="text-lg font-semibold">{isEditing ? 'Edit goal' : 'New goal'}</h2>
+      <h2 className="section-title">{isEditing ? 'Edit goal' : 'New goal'}</h2>
 
       <div>
-        <label htmlFor="goal-name" className="block text-sm font-medium mb-1">
+        <label htmlFor="goal-name" className="label">
           Name
         </label>
         <input
@@ -158,7 +158,7 @@ export default function GoalForm({
       </div>
 
       <div>
-        <label htmlFor="goal-type" className="block text-sm font-medium mb-1">
+        <label htmlFor="goal-type" className="label">
           Type
         </label>
         <select
@@ -171,14 +171,14 @@ export default function GoalForm({
           <option value="debt">Debt</option>
         </select>
         {type === 'debt' && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-xs text-muted mt-1">
             Set the target to the balance owed. Payments count up toward it.
           </p>
         )}
       </div>
 
       <div>
-        <label htmlFor="goal-target" className="block text-sm font-medium mb-1">
+        <label htmlFor="goal-target" className="label">
           Target ($)
         </label>
         <input
@@ -195,7 +195,7 @@ export default function GoalForm({
       </div>
 
       <div>
-        <label htmlFor="goal-date" className="block text-sm font-medium mb-1">
+        <label htmlFor="goal-date" className="label">
           Target date
         </label>
         <input
@@ -208,7 +208,7 @@ export default function GoalForm({
       </div>
 
       <div>
-        <label htmlFor="goal-category" className="block text-sm font-medium mb-1">
+        <label htmlFor="goal-category" className="label">
           Category
         </label>
         <select
@@ -230,14 +230,14 @@ export default function GoalForm({
           ))}
         </select>
         {categoriesUnavailable && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-xs text-muted mt-1">
             Couldn&apos;t load categories. You can set one later.
           </p>
         )}
       </div>
 
       <div>
-        <label htmlFor="goal-account" className="block text-sm font-medium mb-1">
+        <label htmlFor="goal-account" className="label">
           Account
         </label>
         <select
@@ -266,26 +266,26 @@ export default function GoalForm({
           )}
         </select>
         {accountsError && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-xs text-muted mt-1">
             Couldn&apos;t load accounts. You can link one later.
           </p>
         )}
       </div>
 
-      {error && <p className="text-red-500 dark:text-red-400 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
 
       <div className="flex gap-3">
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          className="btn-primary"
         >
           {loading ? 'Saving...' : isEditing ? 'Update' : 'Create'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+          className="btn-secondary"
         >
           Cancel
         </button>

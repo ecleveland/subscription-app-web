@@ -8,7 +8,7 @@ export default function UserTableSkeleton() {
         {Array.from({ length: 3 }).map((_, i) => (
           <div
             key={i}
-            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+            className="card p-4"
           >
             <div className="flex items-center justify-between mb-2">
               <Skeleton className="h-5 w-24" />
@@ -16,7 +16,7 @@ export default function UserTableSkeleton() {
             </div>
             <Skeleton className="h-4 w-32 mb-1" />
             <Skeleton className="h-4 w-40" />
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-line">
               <Skeleton className="h-3 w-28" />
               <Skeleton className="h-4 w-12" />
             </div>
@@ -27,7 +27,7 @@ export default function UserTableSkeleton() {
       {/* Desktop table view */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm text-left">
-          <thead className="text-xs uppercase bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+          <thead className="text-xs uppercase bg-surface-2 text-ink-2">
             <tr>
               <th className="px-4 py-3">Username</th>
               <th className="px-4 py-3">Display Name</th>
@@ -37,9 +37,9 @@ export default function UserTableSkeleton() {
               <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+          <tbody className="divide-y divide-line">
             {Array.from({ length: 5 }).map((_, i) => (
-              <tr key={i} className="bg-white dark:bg-gray-800">
+              <tr key={i} className="bg-surface">
                 <td className="px-4 py-3">
                   <Skeleton className="h-4 w-20" />
                 </td>
