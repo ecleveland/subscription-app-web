@@ -32,8 +32,8 @@ export default function EditSubscriptionPage() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+      <div className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
+        <h1 className="page-title mb-6">
           Edit Subscription
         </h1>
         <SubscriptionFormSkeleton />
@@ -43,15 +43,15 @@ export default function EditSubscriptionPage() {
 
   if (error || !subscription) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <p className="text-red-500">{error || 'Subscription not found'}</p>
+      <div className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
+        <p className="text-danger">{error || 'Subscription not found'}</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+    <div className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
+      <h1 className="page-title mb-6">
         Edit Subscription
       </h1>
       <SubscriptionForm subscription={subscription} />

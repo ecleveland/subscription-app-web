@@ -44,17 +44,17 @@ export default function ResetPasswordForm() {
   }
 
   const inputClasses =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+    'input';
 
   if (!token) {
     return (
       <div className="w-full max-w-sm space-y-4">
-        <p className="text-red-500">
+        <p className="text-danger">
           No reset token found. Please use the link from your email.
         </p>
         <Link
           href="/forgot-password"
-          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 text-sm"
+          className="text-accent hover:text-accent-strong text-sm"
         >
           Request a new reset link
         </Link>
@@ -65,12 +65,12 @@ export default function ResetPasswordForm() {
   if (success) {
     return (
       <div className="w-full max-w-sm space-y-4">
-        <p className="text-gray-700 dark:text-gray-300">
+        <p className="text-ink-2">
           Your password has been successfully reset.
         </p>
         <Link
           href="/login"
-          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 text-sm"
+          className="text-accent hover:text-accent-strong text-sm"
         >
           Go to login
         </Link>
@@ -81,7 +81,7 @@ export default function ResetPasswordForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4 w-full max-w-sm">
       <div>
-        <label htmlFor="password" className="block text-sm font-medium mb-1">
+        <label htmlFor="password" className="label">
           New Password
         </label>
         <input
@@ -97,7 +97,7 @@ export default function ResetPasswordForm() {
       <div>
         <label
           htmlFor="confirmPassword"
-          className="block text-sm font-medium mb-1"
+          className="label"
         >
           Confirm Password
         </label>
@@ -111,11 +111,11 @@ export default function ResetPasswordForm() {
           className={inputClasses}
         />
       </div>
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
       <button
         type="submit"
         disabled={loading}
-        className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+        className="w-full btn-primary"
       >
         {loading ? 'Resetting...' : 'Reset Password'}
       </button>

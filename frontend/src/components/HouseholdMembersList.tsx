@@ -36,27 +36,27 @@ export default function HouseholdMembersList() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+      <h2 className="section-title mb-4">
         Members
       </h2>
-      <ul className="divide-y divide-gray-200 dark:divide-gray-700 max-w-md">
+      <ul className="divide-y divide-line max-w-md">
         {members.map((member) => (
           <li
             key={member._id}
             className="flex items-center justify-between py-3"
           >
             <div>
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+              <p className="text-sm font-medium text-ink">
                 {memberLabel(member)}
               </p>
               {member.userId?.email && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
+                <p className="text-xs text-muted">
                   {member.userId.email}
                 </p>
               )}
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <span className="text-xs uppercase tracking-wide text-muted">
                 {member.role}
               </span>
               {isOwner && member.role !== 'owner' && (
@@ -64,7 +64,7 @@ export default function HouseholdMembersList() {
                   type="button"
                   onClick={() => handleRemove(member)}
                   disabled={removingId === member._id}
-                  className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50 transition-colors"
+                  className="text-sm text-danger hover:text-danger-strong disabled:opacity-50 transition-colors"
                   aria-label={`Remove ${memberLabel(member)}`}
                 >
                   {removingId === member._id ? 'Removing...' : 'Remove'}

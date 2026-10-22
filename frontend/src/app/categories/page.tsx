@@ -50,18 +50,18 @@ function GroupNameForm({
         onChange={(e) => onChange(e.target.value)}
         required
         placeholder="Group name"
-        className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
+        className="input flex-1"
       />
       <button
         type="submit"
-        className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        className="btn-primary"
       >
         {submitLabel}
       </button>
       <button
         type="button"
         onClick={onCancel}
-        className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg"
+        className="btn-secondary"
       >
         Cancel
       </button>
@@ -282,27 +282,27 @@ export default function CategoriesPage() {
 
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-8">
-        <p className="text-gray-500">Loading categories…</p>
+      <div className="max-w-3xl mx-auto px-4 py-8 md:px-8 md:py-10">
+        <p className="text-muted">Loading categories…</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-3xl mx-auto px-4 py-8 md:px-8 md:py-10">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Categories</h1>
+        <h1 className="page-title">Categories</h1>
         {!creatingGroup && (
           <button
             onClick={() => setCreatingGroup(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="btn-primary"
           >
             + Add group
           </button>
         )}
       </div>
 
-      {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+      {error && <p className="text-danger text-sm mb-4">{error}</p>}
 
       {creatingGroup && (
         <GroupNameForm
@@ -320,7 +320,7 @@ export default function CategoriesPage() {
       )}
 
       {sortedGroups.length === 0 && !error && (
-        <p className="text-gray-500 text-center py-8">
+        <p className="text-muted text-center py-8">
           No category groups yet. Add one to start organizing your budget.
         </p>
       )}
@@ -343,13 +343,13 @@ export default function CategoriesPage() {
                   />
                 ) : (
                   <>
-                    <h2 className="text-lg font-semibold">{group.name}</h2>
+                    <h2 className="section-title">{group.name}</h2>
                     <div className="flex items-center gap-2">
                       <button
                         aria-label={`Move group ${group.name} up`}
                         disabled={groupIndex === 0 || reordering}
                         onClick={() => handleMoveGroup(group, 'up')}
-                        className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40"
+                        className="btn-secondary px-2 py-1"
                       >
                         ↑
                       </button>
@@ -359,7 +359,7 @@ export default function CategoriesPage() {
                           groupIndex === sortedGroups.length - 1 || reordering
                         }
                         onClick={() => handleMoveGroup(group, 'down')}
-                        className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40"
+                        className="btn-secondary px-2 py-1"
                       >
                         ↓
                       </button>
@@ -368,7 +368,7 @@ export default function CategoriesPage() {
                           setEditingGroupId(group._id);
                           setGroupName(group.name);
                         }}
-                        className="text-sm text-gray-600 dark:text-gray-300 hover:underline"
+                        className="text-sm text-ink-2 hover:underline"
                       >
                         Rename
                       </button>
@@ -377,7 +377,7 @@ export default function CategoriesPage() {
                           setEditing(null);
                           setCreatingInGroup(group._id);
                         }}
-                        className="text-sm text-blue-600 hover:underline"
+                        className="text-sm text-accent hover:underline"
                       >
                         + Add category
                       </button>
@@ -413,18 +413,18 @@ export default function CategoriesPage() {
               )}
 
               {active.length === 0 ? (
-                <p className="text-sm text-gray-500 py-2">No categories yet.</p>
+                <p className="text-sm text-muted py-2">No categories yet.</p>
               ) : (
                 <ul className="space-y-2">
                   {active.map((category, index) => (
                     <li
                       key={category._id}
-                      className="flex items-center justify-between border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2 bg-white dark:bg-gray-800"
+                      className="flex items-center justify-between border border-line rounded-md px-4 py-2 bg-surface"
                     >
                       <div className="flex items-center gap-2">
                         <span className="font-medium">{category.name}</span>
                         {category.isIncome && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-accent-soft text-accent">
                             Income
                           </span>
                         )}
@@ -434,7 +434,7 @@ export default function CategoriesPage() {
                           aria-label={`Move ${category.name} up`}
                           disabled={index === 0 || reordering}
                           onClick={() => handleMoveCategory(category, 'up')}
-                          className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40"
+                          className="btn-secondary px-2 py-1"
                         >
                           ↑
                         </button>
@@ -442,7 +442,7 @@ export default function CategoriesPage() {
                           aria-label={`Move ${category.name} down`}
                           disabled={index === active.length - 1 || reordering}
                           onClick={() => handleMoveCategory(category, 'down')}
-                          className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-40"
+                          className="btn-secondary px-2 py-1"
                         >
                           ↓
                         </button>
@@ -451,13 +451,13 @@ export default function CategoriesPage() {
                             setCreatingInGroup(null);
                             setEditing(category);
                           }}
-                          className="text-sm text-gray-600 dark:text-gray-300 hover:underline"
+                          className="text-sm text-ink-2 hover:underline"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => setArchiving(category)}
-                          className="text-sm text-red-600 hover:underline"
+                          className="text-sm text-danger hover:underline"
                         >
                           Archive
                         </button>
@@ -475,7 +475,7 @@ export default function CategoriesPage() {
         <div className="mt-10">
           <button
             onClick={() => setShowArchived((v) => !v)}
-            className="text-sm text-gray-500 hover:underline"
+            className="text-sm text-muted hover:underline"
           >
             {`Archived categories (${archived.length})`}
           </button>
@@ -484,7 +484,7 @@ export default function CategoriesPage() {
               {archived.map((category) => (
                 <li
                   key={category._id}
-                  className="flex items-center justify-between border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2 bg-gray-50 dark:bg-gray-900 text-gray-500"
+                  className="flex items-center justify-between border border-line rounded-md px-4 py-2 bg-paper text-muted"
                 >
                   <div className="flex items-center gap-2">
                     <span>{category.name}</span>
@@ -494,7 +494,7 @@ export default function CategoriesPage() {
                   </div>
                   <button
                     onClick={() => handleUnarchive(category)}
-                    className="text-sm text-blue-600 hover:underline"
+                    className="text-sm text-accent hover:underline"
                   >
                     Unarchive
                   </button>

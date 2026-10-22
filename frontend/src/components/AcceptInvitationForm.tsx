@@ -38,12 +38,12 @@ export default function AcceptInvitationForm() {
   if (!token) {
     return (
       <div className="w-full max-w-sm space-y-4">
-        <p className="text-red-500">
+        <p className="text-danger">
           No invitation token found. Please use the link from your email.
         </p>
         <Link
           href="/household"
-          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 text-sm"
+          className="text-accent hover:text-accent-strong text-sm"
         >
           Go to your household
         </Link>
@@ -53,16 +53,16 @@ export default function AcceptInvitationForm() {
 
   return (
     <div className="w-full max-w-sm space-y-4">
-      <p className="text-gray-700 dark:text-gray-300 text-sm">
+      <p className="text-ink-2 text-sm">
         You&apos;ve been invited to join a household. Accepting will switch your
         active household to the shared one.
       </p>
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
       <button
         type="button"
         onClick={handleAccept}
         disabled={loading}
-        className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+        className="w-full btn-primary"
       >
         {loading ? 'Accepting...' : 'Accept Invitation'}
       </button>

@@ -46,14 +46,14 @@ export default function AdminUsersPage() {
   if (!isAdmin) return null;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+        <h1 className="page-title">
           User Management
         </h1>
         <Link
           href="/admin/users/new"
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+          className="btn-primary"
         >
           + New User
         </Link>
@@ -61,7 +61,7 @@ export default function AdminUsersPage() {
       {loading ? (
         <UserTableSkeleton />
       ) : users.length === 0 ? (
-        <p className="text-gray-500 dark:text-gray-400">No users found.</p>
+        <p className="text-muted">No users found.</p>
       ) : (
         <UserTable users={users} onUserDeleted={handleUserDeleted} />
       )}

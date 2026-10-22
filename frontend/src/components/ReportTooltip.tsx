@@ -28,9 +28,9 @@ export default function ReportTooltip({
         ? formatLabel(String(label))
         : String(label);
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 shadow-md">
+    <div className="bg-surface border border-line rounded-md px-3 py-2 shadow-md">
       {title && (
-        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+        <p className="text-sm font-medium text-ink">
           {title}
         </p>
       )}
@@ -39,7 +39,7 @@ export default function ReportTooltip({
         .map((p) => (
           <p
             key={String(p.name)}
-            className="text-sm text-gray-600 dark:text-gray-400"
+            className="text-sm text-ink-2"
           >
             <span style={{ color: p.color }}>{p.name}</span>:{' '}
             {formatCents(p.value as number)}

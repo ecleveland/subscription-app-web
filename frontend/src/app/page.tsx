@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
@@ -213,14 +214,21 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
         <DashboardSkeleton />
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
+      <div className="mb-6 flex items-end justify-between gap-4">
+        <div>
+          <p className="eyebrow">Overview</p>
+          <h1 className="page-title">Dashboard</h1>
+        </div>
+        <Link href="/subscriptions/new" className="btn-primary">+ Add subscription</Link>
+      </div>
       <DashboardSummary subscriptions={allSubscriptions} />
       <SearchInput value={searchTerm} onChange={handleSearchChange} />
       {allTags.length > 0 && (
@@ -229,11 +237,7 @@ export default function DashboardPage() {
             <button
               key={tag}
               onClick={() => toggleTag(tag)}
-              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                selectedTags.has(tag)
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
+              className={selectedTags.has(tag) ? 'chip-active' : 'chip'}
             >
               {tag}
             </button>
@@ -245,11 +249,7 @@ export default function DashboardPage() {
           <button
             key={value}
             onClick={() => { setSharedFilter(value); setPage(1); }}
-            className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-              sharedFilter === value
-                ? 'bg-purple-600 text-white'
-                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-            }`}
+            className={sharedFilter === value ? 'chip-active' : 'chip'}
           >
             {value === 'all' ? 'All' : value === 'shared' ? 'Shared' : 'Individual'}
           </button>
@@ -259,7 +259,7 @@ export default function DashboardPage() {
         <div className="mb-3">
           <button
             onClick={() => setSelectionMode(true)}
-            className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400"
+            className="flex items-center gap-1.5 text-sm text-ink-2 hover:text-accent"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
@@ -268,23 +268,23 @@ export default function DashboardPage() {
           </button>
         </div>
       ) : (
-        <div className="flex items-center justify-between p-3 mb-4 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800">
-          <span className="text-sm text-blue-700 dark:text-blue-300">Select cards to edit them in bulk</span>
+        <div className="flex items-center justify-between p-3 mb-4 rounded-md bg-accent-soft border border-accent/40">
+          <span className="text-sm text-accent">Select cards to edit them in bulk</span>
           <button
             onClick={exitSelectionMode}
-            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 font-medium"
+            className="text-sm text-accent hover:text-accent-strong font-medium"
           >
             Cancel
           </button>
         </div>
       )}
       <div className="flex items-center gap-2 mb-4">
-        <label htmlFor="sort" className="text-sm text-gray-500 dark:text-gray-400">Sort by</label>
+        <label htmlFor="sort" className="text-sm text-muted">Sort by</label>
         <select
           id="sort"
           value={sortKey}
           onChange={(e) => handleSortChange(e.target.value)}
-          className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          className="input flex-1 sm:w-auto sm:flex-initial"
         >
           {SORT_OPTIONS.map((opt) => (
             <option key={opt.key} value={opt.key}>{opt.label}</option>
@@ -293,7 +293,7 @@ export default function DashboardPage() {
         <button
           onClick={handleExportCsv}
           disabled={allSubscriptions.length === 0 || exportLoading}
-          className="ml-auto px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-secondary ml-auto"
         >
           {exportLoading ? 'Exporting…' : 'Export CSV'}
         </button>
@@ -312,7 +312,7 @@ export default function DashboardPage() {
         />
       )}
       {isSearching && subscriptions.length === 0 ? (
-        <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+        <p className="text-muted text-center py-8">
           No subscriptions match &ldquo;{debouncedSearch.trim()}&rdquo;
         </p>
       ) : (

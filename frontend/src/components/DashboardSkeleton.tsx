@@ -1,31 +1,38 @@
 import Skeleton from './Skeleton';
 
 export default function DashboardSkeleton() {
-  const tileClass =
-    'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4';
-
   return (
     <>
-      {/* Summary tiles */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className={tileClass}>
-            <Skeleton className="h-4 w-12 mb-2" />
-            <Skeleton className="h-7 w-20" />
+      {/* Summary */}
+      <div className="card mb-8 grid overflow-hidden lg:grid-cols-[1.4fr_1fr]">
+        <div className="border-b border-line p-5 sm:p-6 lg:border-b-0 lg:border-r">
+          <Skeleton className="h-3 w-14" />
+          <Skeleton className="mt-3 h-12 w-48" />
+          <div className="mt-5 grid grid-cols-3 gap-4 border-t border-line pt-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i}>
+                <Skeleton className="h-3 w-10" />
+                <Skeleton className="mt-2 h-5 w-16" />
+              </div>
+            ))}
           </div>
-        ))}
-        <div className={`${tileClass} col-span-2 sm:col-span-1`}>
-          <Skeleton className="h-4 w-24 mb-2" />
-          <Skeleton className="h-7 w-16 mb-1" />
-          <Skeleton className="h-4 w-20" />
+        </div>
+        <div className="grid grid-cols-2 divide-x divide-line lg:grid-cols-1 lg:divide-x-0 lg:divide-y">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="p-5 sm:p-6">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="mt-3 h-8 w-12" />
+              <Skeleton className="mt-2 h-4 w-20" />
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Search input */}
-      <Skeleton className="h-10 w-full mb-4" />
+      <Skeleton className="mb-4 h-10 w-full" />
 
       {/* Sort bar */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="mb-4 flex items-center gap-2">
         <Skeleton className="h-4 w-12" />
         <Skeleton className="h-9 w-48" />
       </div>
@@ -33,15 +40,12 @@ export default function DashboardSkeleton() {
       {/* Subscription cards */}
       <div className="grid gap-3 sm:grid-cols-2">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div
-            key={i}
-            className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
-          >
-            <div className="flex items-start justify-between mb-2">
+          <div key={i} className="card p-4">
+            <div className="mb-3 flex items-start justify-between">
               <Skeleton className="h-5 w-32" />
-              <Skeleton className="h-6 w-16" />
+              <Skeleton className="h-5 w-20" />
             </div>
-            <Skeleton className="h-5 w-20 mb-2" />
+            <Skeleton className="mb-2 h-5 w-20 rounded-full" />
             <Skeleton className="h-4 w-40" />
           </div>
         ))}

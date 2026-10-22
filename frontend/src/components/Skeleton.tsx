@@ -6,7 +6,7 @@ interface SkeletonProps {
 export default function Skeleton({ variant = 'rectangle', className = '' }: SkeletonProps) {
   return (
     <div
-      className={`animate-pulse bg-gray-200 dark:bg-gray-700 ${
+      className={`animate-pulse bg-surface-2 ${
         variant === 'circle' ? 'rounded-full' : 'rounded'
       } ${className}`}
     />

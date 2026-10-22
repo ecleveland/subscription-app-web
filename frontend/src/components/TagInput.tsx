@@ -32,17 +32,17 @@ export default function TagInput({ tags, onChange }: Props) {
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5 p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus-within:ring-2 focus-within:ring-blue-500">
+    <div className="flex flex-wrap gap-1.5 p-2 border border-line-strong rounded-md bg-surface focus-within:ring-2 focus-within:ring-accent">
       {tags.map((tag, i) => (
         <span
           key={tag}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-accent-soft text-accent"
         >
           {tag}
           <button
             type="button"
             onClick={() => removeTag(i)}
-            className="hover:text-blue-900 dark:hover:text-blue-100"
+            className="hover:text-accent-strong"
             aria-label={`Remove ${tag}`}
           >
             x
@@ -56,7 +56,7 @@ export default function TagInput({ tags, onChange }: Props) {
         onKeyDown={handleKeyDown}
         onBlur={() => { if (input.trim()) addTag(input); }}
         placeholder={tags.length === 0 ? 'Add tags...' : ''}
-        className="flex-1 min-w-[80px] bg-transparent outline-none text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400"
+        className="flex-1 min-w-[80px] bg-transparent outline-none text-sm text-ink placeholder:text-muted"
         aria-label="Add tag"
       />
     </div>

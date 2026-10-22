@@ -112,19 +112,19 @@ export default function TransactionForm({
   }
 
   const inputClass =
-    'w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700';
+    'w-full border border-line-strong rounded-md px-3 py-2 bg-surface';
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 max-w-md border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+      className="space-y-4 max-w-md border border-line rounded-md p-4 bg-surface"
     >
-      <h2 className="text-lg font-semibold">
+      <h2 className="section-title">
         {isEditing ? 'Edit transaction' : 'New transaction'}
       </h2>
 
       <div>
-        <label htmlFor="txn-type" className="block text-sm font-medium mb-1">
+        <label htmlFor="txn-type" className="label">
           Type
         </label>
         <select
@@ -142,7 +142,7 @@ export default function TransactionForm({
       </div>
 
       <div>
-        <label htmlFor="txn-account" className="block text-sm font-medium mb-1">
+        <label htmlFor="txn-account" className="label">
           {isTransfer ? 'From account' : 'Account'}
         </label>
         <select
@@ -162,7 +162,7 @@ export default function TransactionForm({
 
       {isTransfer ? (
         <div>
-          <label htmlFor="txn-to" className="block text-sm font-medium mb-1">
+          <label htmlFor="txn-to" className="label">
             To account
           </label>
           <select
@@ -184,7 +184,7 @@ export default function TransactionForm({
         </div>
       ) : (
         <div>
-          <label htmlFor="txn-category" className="block text-sm font-medium mb-1">
+          <label htmlFor="txn-category" className="label">
             Category
           </label>
           <select
@@ -204,7 +204,7 @@ export default function TransactionForm({
       )}
 
       <div>
-        <label htmlFor="txn-amount" className="block text-sm font-medium mb-1">
+        <label htmlFor="txn-amount" className="label">
           Amount ($)
         </label>
         <input
@@ -219,7 +219,7 @@ export default function TransactionForm({
       </div>
 
       <div>
-        <label htmlFor="txn-date" className="block text-sm font-medium mb-1">
+        <label htmlFor="txn-date" className="label">
           Date
         </label>
         <input
@@ -234,7 +234,7 @@ export default function TransactionForm({
 
       {!isTransfer && (
         <div>
-          <label htmlFor="txn-payee" className="block text-sm font-medium mb-1">
+          <label htmlFor="txn-payee" className="label">
             Payee
           </label>
           <input
@@ -247,7 +247,7 @@ export default function TransactionForm({
       )}
 
       <div>
-        <label htmlFor="txn-notes" className="block text-sm font-medium mb-1">
+        <label htmlFor="txn-notes" className="label">
           Notes
         </label>
         <textarea
@@ -268,20 +268,20 @@ export default function TransactionForm({
         Cleared
       </label>
 
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
 
       <div className="flex gap-3">
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          className="btn-primary"
         >
           {loading ? 'Saving...' : isEditing ? 'Update' : 'Add'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+          className="btn-secondary"
         >
           Cancel
         </button>

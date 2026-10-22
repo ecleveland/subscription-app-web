@@ -30,15 +30,15 @@ export default function BulkActionToolbar({
   const allSelected = selectedCount === totalCount;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 p-3 mb-4 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800">
-      <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+    <div className="flex flex-wrap items-center gap-2 p-3 mb-4 rounded-md bg-accent-soft border border-accent/40">
+      <span className="text-sm font-medium text-accent">
         {selectedCount} selected
       </span>
 
       <button
         onClick={allSelected ? onDeselectAll : onSelectAll}
         disabled={loading}
-        className="text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+        className="text-sm text-accent hover:underline disabled:opacity-50"
       >
         {allSelected ? 'Deselect all' : 'Select all'}
       </button>
@@ -48,7 +48,7 @@ export default function BulkActionToolbar({
       <button
         onClick={onBulkActivate}
         disabled={loading}
-        className="px-3 py-1.5 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+        className="btn-primary"
       >
         Activate
       </button>
@@ -56,7 +56,7 @@ export default function BulkActionToolbar({
       <button
         onClick={onBulkDeactivate}
         disabled={loading}
-        className="px-3 py-1.5 text-sm rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 disabled:opacity-50"
+        className="px-3 py-1.5 text-sm rounded-md bg-warn text-white hover:bg-warn/90 disabled:opacity-50"
       >
         Deactivate
       </button>
@@ -66,7 +66,7 @@ export default function BulkActionToolbar({
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           disabled={loading}
-          className="px-2 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+          className="btn-secondary px-2 py-1.5"
         >
           <option value="">Category...</option>
           {CATEGORIES.map((cat) => (
@@ -78,7 +78,7 @@ export default function BulkActionToolbar({
             if (category) onBulkChangeCategory(category);
           }}
           disabled={loading || !category}
-          className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+          className="btn-primary"
         >
           Apply
         </button>
@@ -87,7 +87,7 @@ export default function BulkActionToolbar({
       <button
         onClick={onBulkDelete}
         disabled={loading}
-        className="px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+        className="px-3 py-1.5 text-sm rounded-md bg-danger text-white hover:bg-danger-strong disabled:opacity-50"
       >
         Delete
       </button>

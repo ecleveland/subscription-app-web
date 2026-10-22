@@ -65,14 +65,14 @@ export default function AccountForm({ account, onSaved, onCancel }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 max-w-md border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+      className="space-y-4 max-w-md border border-line rounded-md p-4 bg-surface"
     >
-      <h2 className="text-lg font-semibold">
+      <h2 className="section-title">
         {isEditing ? 'Edit account' : 'New account'}
       </h2>
 
       <div>
-        <label htmlFor="account-name" className="block text-sm font-medium mb-1">
+        <label htmlFor="account-name" className="label">
           Name
         </label>
         <input
@@ -80,19 +80,19 @@ export default function AccountForm({ account, onSaved, onCancel }: Props) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
-          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
+          className="input"
         />
       </div>
 
       <div>
-        <label htmlFor="account-type" className="block text-sm font-medium mb-1">
+        <label htmlFor="account-type" className="label">
           Type
         </label>
         <select
           id="account-type"
           value={type}
           onChange={(e) => setType(e.target.value as AccountType)}
-          className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
+          className="input"
         >
           {typeOptions.map((t) => (
             <option key={t} value={t}>
@@ -101,7 +101,7 @@ export default function AccountForm({ account, onSaved, onCancel }: Props) {
           ))}
         </select>
         {isEditing && (
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-muted mt-1">
             An account cannot move between asset and liability types.
           </p>
         )}
@@ -111,7 +111,7 @@ export default function AccountForm({ account, onSaved, onCancel }: Props) {
         <div>
           <label
             htmlFor="account-opening"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             Opening balance ($)
           </label>
@@ -121,11 +121,11 @@ export default function AccountForm({ account, onSaved, onCancel }: Props) {
             value={openingBalance}
             onChange={(e) => setOpeningBalance(e.target.value)}
             placeholder="0.00"
-            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700"
+            className="input"
           />
           {(type === 'credit' || type === 'loan') &&
             dollarsToCents(openingBalance) ? (
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-muted mt-1">
               Stored as {formatCents(-(dollarsToCents(openingBalance) as number))}{' '}
               (amount owed).
             </p>
@@ -133,20 +133,20 @@ export default function AccountForm({ account, onSaved, onCancel }: Props) {
         </div>
       )}
 
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
 
       <div className="flex gap-3">
         <button
           type="submit"
           disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          className="btn-primary"
         >
           {loading ? 'Saving...' : isEditing ? 'Update' : 'Create'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg"
+          className="btn-secondary"
         >
           Cancel
         </button>

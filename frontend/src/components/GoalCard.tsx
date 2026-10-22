@@ -62,33 +62,33 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
   return (
     <article
       aria-label={goal.name}
-      className={`border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 bg-white dark:bg-gray-800 ${
+      className={`border border-line rounded-md px-4 py-3 bg-surface ${
         goal.isArchived ? 'opacity-60' : ''
       }`}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="font-medium text-gray-900 dark:text-gray-100">{goal.name}</h2>
+            <h2 className="font-medium text-ink">{goal.name}</h2>
             <span
               className={`text-xs px-1.5 py-0.5 rounded ${
                 goal.type === 'debt'
-                  ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                  : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                  ? 'bg-danger-soft text-danger'
+                  : 'bg-accent-soft text-accent'
               }`}
             >
               {goal.type === 'debt' ? 'Debt' : 'Savings'}
             </span>
           </div>
           {goal.linkedAccount && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-xs text-muted mt-1">
               Tracks {goal.linkedAccount.name}
             </p>
           )}
           {goal.targetDate && days !== null && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-xs text-muted mt-1">
               {formatDateOnly(goal.targetDate)} ·{' '}
-              <span className={days < 0 ? 'text-red-600 dark:text-red-400' : ''}>
+              <span className={days < 0 ? 'text-danger' : ''}>
                 {daysLabel(days)}
               </span>
             </p>
@@ -97,13 +97,13 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
         <div className="flex items-center gap-4">
           <button
             onClick={() => onEdit(goal)}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:underline"
+            className="text-sm text-ink-2 hover:underline"
           >
             Edit
           </button>
           <button
             onClick={() => onArchiveToggle(goal)}
-            className="text-sm text-red-600 dark:text-red-400 hover:underline"
+            className="text-sm text-danger hover:underline"
           >
             {goal.isArchived ? 'Unarchive' : 'Archive'}
           </button>
@@ -111,13 +111,13 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
       </div>
 
       <div className="mt-3 flex items-center justify-between text-sm">
-        <span className="text-gray-700 dark:text-gray-300">
+        <span className="text-ink-2">
           {formatCents(goal.currentCents)} of {formatCents(goal.targetCents)}
         </span>
-        <span className="font-semibold text-gray-900 dark:text-gray-100">{percent}%</span>
+        <span className="font-semibold text-ink">{percent}%</span>
       </div>
       <div
-        className="mt-1 h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"
+        className="mt-1 h-2 rounded-full bg-surface-2 overflow-hidden"
         role="progressbar"
         aria-label={`${goal.name} progress`}
         aria-valuenow={barWidth}
@@ -128,7 +128,7 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
         <div
           aria-hidden="true"
           className={`h-full rounded-full ${
-            percent >= 100 ? 'bg-green-500' : 'bg-blue-500'
+            percent >= 100 ? 'bg-accent' : 'bg-info'
           }`}
           style={{ width: `${barWidth}%` }}
         />
@@ -141,7 +141,7 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
           <div>
             <label
               htmlFor={inputId}
-              className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"
+              className="block text-xs font-medium text-ink-2 mb-1"
             >
               Contribution ($)
             </label>
@@ -152,17 +152,17 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
-              className="w-32 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700"
+              className="input w-32 py-1.5"
             />
           </div>
           <button
             type="submit"
             disabled={saving}
-            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="btn-primary"
           >
             Add
           </button>
-          {error && <p className="w-full text-red-500 dark:text-red-400 text-sm">{error}</p>}
+          {error && <p className="w-full text-danger text-sm">{error}</p>}
         </form>
       )}
     </article>

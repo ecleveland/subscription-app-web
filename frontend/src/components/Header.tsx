@@ -2,14 +2,58 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useHousehold } from '@/lib/household-context';
 import ThemeToggle from '@/components/ThemeToggle';
 import NotificationBell from '@/components/NotificationBell';
 
+type NavItem = { href: string; label: string; adminOnly?: boolean };
+type NavGroup = { title: string; items: NavItem[] };
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    title: 'Overview',
+    items: [{ href: '/', label: 'Dashboard' }],
+  },
+  {
+    title: 'Money',
+    items: [
+      { href: '/accounts', label: 'Accounts' },
+      { href: '/transactions', label: 'Transactions' },
+      { href: '/recurring', label: 'Bills' },
+      { href: '/budget', label: 'Budget' },
+      { href: '/goals', label: 'Goals' },
+    ],
+  },
+  {
+    title: 'Insight',
+    items: [
+      { href: '/reports', label: 'Reports' },
+      { href: '/calendar', label: 'Calendar' },
+    ],
+  },
+  {
+    title: 'Manage',
+    items: [
+      { href: '/categories', label: 'Categories' },
+      { href: '/household', label: 'Household' },
+      { href: '/profile', label: 'Profile' },
+      { href: '/admin/users', label: 'Admin', adminOnly: true },
+    ],
+  },
+];
+
+function isActive(pathname: string | null, href: string): boolean {
+  if (!pathname) return false;
+  if (href === '/') return pathname === '/';
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export default function Header() {
   const { isAuthenticated, isAdmin, logout } = useAuth();
   const { household } = useHousehold();
+  const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   if (!isAuthenticated) return null;
@@ -17,16 +61,21 @@ export default function Header() {
   const closeMenu = () => setMobileMenuOpen(false);
 
   return (
-    <header className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-      <div className="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between">
-        <div className="flex flex-col">
-          <Link href="/" className="text-xl font-bold text-gray-900 dark:text-gray-100">
+    <header className="sticky top-0 z-30 shrink-0 border-b border-line bg-surface md:sticky md:h-screen md:w-60 md:border-b-0 md:border-r">
+      <div className="flex h-14 items-center justify-between px-4 md:h-auto md:flex-col md:items-stretch md:px-0">
+        <div className="flex min-w-0 flex-col md:border-b md:border-line md:px-5 md:py-5">
+          <Link
+            href="/"
+            onClick={closeMenu}
+            className="font-display text-xl font-medium tracking-tight text-ink"
+          >
             Subscriptions
           </Link>
           {household && (
             <Link
               href="/household"
-              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+              onClick={closeMenu}
+              className="truncate text-xs text-muted transition-colors hover:text-ink"
             >
               {household.name}
             </Link>
@@ -34,120 +83,68 @@ export default function Header() {
         </div>
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="md:hidden p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100"
+          className="-mr-2 p-2 text-ink-2 hover:text-ink md:hidden"
           aria-label="Toggle navigation menu"
           aria-expanded={mobileMenuOpen}
         >
           {mobileMenuOpen ? (
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           ) : (
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h16M4 17h16" />
             </svg>
           )}
         </button>
-        <nav
-          className={`${mobileMenuOpen ? 'flex' : 'hidden'} md:flex w-full md:w-auto flex-col md:flex-row items-stretch md:items-center gap-3 md:gap-4 pt-3 md:pt-0 mt-3 md:mt-0 border-t md:border-t-0 border-gray-200 dark:border-gray-700`}
-        >
-          <Link
-            href="/subscriptions/new"
-            onClick={closeMenu}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium text-center"
-          >
+      </div>
+
+      <div
+        className={`${mobileMenuOpen ? 'flex' : 'hidden'} max-h-[calc(100vh-3.5rem)] flex-col overflow-y-auto border-t border-line md:flex md:h-[calc(100vh-4.75rem)] md:max-h-none md:border-t-0`}
+      >
+        <div className="px-4 pt-4 md:px-5">
+          <Link href="/subscriptions/new" onClick={closeMenu} className="btn-primary w-full">
             + Add
           </Link>
-          <Link
-            href="/accounts"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Accounts
-          </Link>
-          <Link
-            href="/transactions"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Transactions
-          </Link>
-          <Link
-            href="/recurring"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Bills
-          </Link>
-          <Link
-            href="/budget"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Budget
-          </Link>
-          <Link
-            href="/goals"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Goals
-          </Link>
-          <Link
-            href="/categories"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Categories
-          </Link>
-          <Link
-            href="/reports"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Reports
-          </Link>
-          <Link
-            href="/calendar"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Calendar
-          </Link>
-          {isAdmin && (
-            <Link
-              href="/admin/users"
-              onClick={closeMenu}
-              className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-            >
-              Admin
-            </Link>
-          )}
-          <Link
-            href="/household"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Household
-          </Link>
-          <Link
-            href="/profile"
-            onClick={closeMenu}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1 md:py-0"
-          >
-            Profile
-          </Link>
-          <div className="flex items-center gap-3 md:gap-4 py-1 md:py-0">
+        </div>
+
+        <nav className="flex-1 space-y-5 px-3 py-4 md:px-3">
+          {NAV_GROUPS.map((group) => {
+            const items = group.items.filter((item) => !item.adminOnly || isAdmin);
+            return (
+              <div key={group.title}>
+                <p className="eyebrow mb-1.5 px-2.5">{group.title}</p>
+                <ul className="space-y-0.5">
+                  {items.map((item) => (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        onClick={closeMenu}
+                        aria-current={isActive(pathname, item.href) ? 'page' : undefined}
+                        className={`nav-link ${isActive(pathname, item.href) ? 'nav-link-active' : ''}`}
+                      >
+                        {item.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </nav>
+
+        <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-3 md:px-5">
+          <div className="flex items-center gap-1">
             <NotificationBell />
             <ThemeToggle />
-            <button
-              onClick={() => { closeMenu(); logout(); }}
-              className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
-            >
-              Logout
-            </button>
           </div>
-        </nav>
+          <button
+            onClick={() => { closeMenu(); logout(); }}
+            className="text-sm text-muted transition-colors hover:text-ink"
+          >
+            Logout
+          </button>
+        </div>
       </div>
     </header>
   );

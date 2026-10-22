@@ -48,23 +48,23 @@ function SummaryCell({
 }) {
   return (
     <div className="flex-1 min-w-32">
-      <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <p className="text-xs uppercase tracking-wide text-muted">
         {label}
       </p>
       <p
         className={`text-lg font-semibold ${
           negative
-            ? 'text-red-600 dark:text-red-400'
-            : 'text-gray-900 dark:text-gray-100'
+            ? 'text-danger'
+            : 'text-ink'
         }`}
       >
         {formatCents(value)}
       </p>
       {caption && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">{caption}</p>
+        <p className="text-xs text-muted">{caption}</p>
       )}
       {negative && negativeBadge && (
-        <p className="text-xs font-medium text-red-600 dark:text-red-400">
+        <p className="text-xs font-medium text-danger">
           {negativeBadge}
         </p>
       )}
@@ -262,24 +262,24 @@ export default function BudgetPage() {
   return (
     <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+        <h1 className="page-title">
           Budget
         </h1>
         <div className="flex items-center gap-2">
           <button
             onClick={() => switchMonth(-1)}
             aria-label="Previous month"
-            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+            className="btn-secondary px-3 py-1.5"
           >
             ‹
           </button>
-          <span className="text-sm font-medium text-gray-900 dark:text-gray-100 min-w-32 text-center">
+          <span className="text-sm font-medium text-ink min-w-32 text-center">
             {formatMonth(month)}
           </span>
           <button
             onClick={() => switchMonth(1)}
             aria-label="Next month"
-            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+            className="btn-secondary px-3 py-1.5"
           >
             ›
           </button>
@@ -289,7 +289,7 @@ export default function BudgetPage() {
       {!ready ? (
         error ? (
           <div>
-            <p className="text-red-600 dark:text-red-400">{error}</p>
+            <p className="text-danger">{error}</p>
             <button
               onClick={() => {
                 // Refetch only what failed: a healthy catalog doesn't need
@@ -300,23 +300,23 @@ export default function BudgetPage() {
                 }
                 setBudgetReloadKey((k) => k + 1);
               }}
-              className="mt-3 px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg"
+              className="btn-secondary mt-3"
             >
               Retry
             </button>
           </div>
         ) : (
-          <p className="text-gray-500 dark:text-gray-400">Loading budget…</p>
+          <p className="text-muted">Loading budget…</p>
         )
       ) : (
         <>
           {error && (
-            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            <p className="text-sm text-danger">{error}</p>
           )}
 
           <section
             aria-label="Budget summary"
-            className="flex flex-wrap gap-6 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 p-4"
+            className="flex flex-wrap gap-6 border border-line rounded-md bg-surface p-4"
           >
             <SummaryCell label="Planned" value={currentView.totalPlannedCents} />
             <SummaryCell label="Spent" value={currentView.totalActualCents} />
@@ -330,13 +330,13 @@ export default function BudgetPage() {
           </section>
 
           {grouped.length === 0 ? (
-        <div className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 p-8 text-center">
-          <p className="text-gray-500 dark:text-gray-400">
+        <div className="border border-line rounded-md bg-surface p-8 text-center">
+          <p className="text-muted">
             Set up your categories to start budgeting.
           </p>
           <Link
             href="/categories"
-            className="mt-3 inline-block px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="mt-3 inline-block btn-primary"
           >
             Manage categories
           </Link>
@@ -346,37 +346,37 @@ export default function BudgetPage() {
           <section
             key={g.groupId}
             aria-label={g.name}
-            className="border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800"
+            className="border border-line rounded-md bg-surface"
           >
-            <h2 className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="px-4 py-3 text-sm font-semibold text-ink border-b border-line">
               {g.name}
             </h2>
-            <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+            <ul className="divide-y divide-line">
               {g.rows.map((row) => {
                 const overBudget = !row.isIncome && row.remainingCents < 0;
                 const pct = progressPercent(row);
                 return (
                   <li key={row.categoryId} className="px-4 py-3 space-y-2">
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                      <span className="flex-1 min-w-40 font-medium text-gray-900 dark:text-gray-100">
+                      <span className="flex-1 min-w-40 font-medium text-ink">
                         {row.name}
                         {row.isIncome && (
-                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-accent-soft text-accent">
                             Income
                           </span>
                         )}
                         {row.isArchived && (
-                          <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
+                          <span className="ml-2 text-xs text-muted">
                             (archived)
                           </span>
                         )}
                         {overBudget && (
-                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-danger-soft text-danger">
                             Over budget
                           </span>
                         )}
                       </span>
-                      <span className="text-sm text-gray-600 dark:text-gray-300 w-24 text-right">
+                      <span className="text-sm text-ink-2 w-24 text-right">
                         {editingId === row.categoryId ? null : row.isIncome &&
                           row.plannedCents === 0 ? (
                           '—'
@@ -384,14 +384,14 @@ export default function BudgetPage() {
                           <>{formatCents(row.plannedCents)}</>
                         )}
                       </span>
-                      <span className="text-sm text-gray-600 dark:text-gray-300 w-24 text-right">
+                      <span className="text-sm text-ink-2 w-24 text-right">
                         {formatCents(row.actualCents)}
                       </span>
                       <span
                         className={`text-sm w-24 text-right ${
                           overBudget
-                            ? 'text-red-600 dark:text-red-400 font-medium'
-                            : 'text-gray-600 dark:text-gray-300'
+                            ? 'text-danger font-medium'
+                            : 'text-ink-2'
                         }`}
                       >
                         {/* Income "remaining" is informational noise — the
@@ -409,7 +409,7 @@ export default function BudgetPage() {
                           <button
                             onClick={() => startEditing(row)}
                             aria-label={`Edit limit for ${row.name}`}
-                            className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                            className="text-sm text-accent hover:underline"
                           >
                             Edit
                           </button>
@@ -422,7 +422,7 @@ export default function BudgetPage() {
                           onClick={() => clearLimit(row.categoryId)}
                           disabled={saving}
                           aria-label={`Clear limit for ${row.name}`}
-                          className="text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                          className="text-sm text-accent hover:underline disabled:opacity-50"
                         >
                           Clear
                         </button>
@@ -440,26 +440,26 @@ export default function BudgetPage() {
                           inputMode="decimal"
                           placeholder="0.00"
                           autoFocus
-                          className="w-32 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700"
+                          className="input w-32 py-1.5"
                         />
                         <button
                           type="submit"
                           disabled={saving}
-                          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                          className="btn-primary"
                         >
                           Save
                         </button>
                         <button
                           type="button"
                           onClick={() => setEditingId(null)}
-                          className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg"
+                          className="btn-secondary px-3 py-1.5"
                         >
                           Cancel
                         </button>
                       </form>
                     )}
                     <div
-                      className="h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden"
+                      className="h-2 rounded-full bg-surface-2 overflow-hidden"
                       role="progressbar"
                       aria-label={`${row.name} spending progress`}
                       aria-valuenow={pct}
@@ -470,10 +470,10 @@ export default function BudgetPage() {
                         aria-hidden="true"
                         className={`h-full rounded-full ${
                           overBudget
-                            ? 'bg-red-500'
+                            ? 'bg-danger'
                             : row.isIncome
-                              ? 'bg-green-500'
-                              : 'bg-blue-500'
+                              ? 'bg-accent'
+                              : 'bg-info'
                         }`}
                         style={{ width: `${pct}%` }}
                       />

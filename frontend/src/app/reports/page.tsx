@@ -44,11 +44,11 @@ function validateRange(from: string, to: string): string | null {
 }
 
 const cardClass =
-  'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4';
+  'bg-surface border border-line rounded-md p-4';
 const monthInputClass =
-  'border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+  'border border-line-strong rounded-md px-3 py-1.5 text-sm bg-surface text-ink';
 const linkButtonClass =
-  'mt-3 inline-block px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700';
+  'mt-3 inline-block btn-primary';
 
 function ReportSection({
   id,
@@ -66,7 +66,7 @@ function ReportSection({
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h2
           id={id}
-          className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+          className="section-title"
         >
           {title}
         </h2>
@@ -92,10 +92,10 @@ function ReportBody<T>({
   children: (data: T) => ReactNode;
 }) {
   if (state.error) {
-    return <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>;
+    return <p className="text-sm text-danger">{state.error}</p>;
   }
   if (state.loading || state.data === null) {
-    return <p className="text-gray-500 dark:text-gray-400">{loadingText}</p>;
+    return <p className="text-muted">{loadingText}</p>;
   }
   if (isEmpty(state.data)) {
     return (
@@ -160,8 +160,8 @@ export default function ReportsPage() {
   );
 
   return (
-    <main className="max-w-5xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+    <main className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
+      <h1 className="page-title mb-6">
         Reports
       </h1>
 
@@ -171,12 +171,12 @@ export default function ReportsPage() {
       >
         <h2
           id="report-range"
-          className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3"
+          className="text-sm font-semibold text-ink mb-3"
         >
           Date range
         </h2>
         <div className="flex flex-wrap items-end gap-4">
-          <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+          <label className="flex flex-col gap-1 text-sm text-ink-2">
             From
             <input
               type="month"
@@ -186,7 +186,7 @@ export default function ReportsPage() {
               className={monthInputClass}
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-gray-700 dark:text-gray-300">
+          <label className="flex flex-col gap-1 text-sm text-ink-2">
             To
             <input
               type="month"
@@ -198,11 +198,11 @@ export default function ReportsPage() {
           </label>
         </div>
         {rangeError && (
-          <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="mt-2 text-sm text-danger">
             {rangeError}
           </p>
         )}
-        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-2 text-xs text-muted">
           Cash flow and net worth use this range.
         </p>
       </section>
@@ -216,7 +216,7 @@ export default function ReportsPage() {
           }
           empty={
             <>
-              <p className="text-gray-500 dark:text-gray-400">
+              <p className="text-muted">
                 No transactions in this range
               </p>
               <Link href="/transactions" className={linkButtonClass}>
@@ -233,7 +233,7 @@ export default function ReportsPage() {
         id="report-spending"
         title="Spending by category"
         controls={
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <label className="flex items-center gap-2 text-sm text-ink-2">
             Month
             <input
               type="month"
@@ -254,7 +254,7 @@ export default function ReportsPage() {
               r.categories.length === 0 && r.uncategorizedCents <= 0
             }
             empty={
-              <p className="text-gray-500 dark:text-gray-400">
+              <p className="text-muted">
                 No spending this month
               </p>
             }
@@ -264,7 +264,7 @@ export default function ReportsPage() {
         ) : (
           // An empty or partial month skips the fetch, so hide the old
           // month's chart.
-          <p className="text-sm text-red-600 dark:text-red-400">
+          <p className="text-sm text-danger">
             Choose a month
           </p>
         )}
@@ -284,16 +284,16 @@ export default function ReportsPage() {
             // The accounts list holds active accounts only. A household whose
             // accounts are all archived gets the "No accounts yet" prompt.
             accountsError ? (
-              <p className="text-sm text-red-600 dark:text-red-400">
+              <p className="text-sm text-danger">
                 Couldn&apos;t load accounts
               </p>
             ) : accounts.length > 0 ? (
-              <p className="text-gray-500 dark:text-gray-400">
+              <p className="text-muted">
                 No account history in this range
               </p>
             ) : (
               <>
-                <p className="text-gray-500 dark:text-gray-400">No accounts yet</p>
+                <p className="text-muted">No accounts yet</p>
                 <Link href="/accounts" className={linkButtonClass}>
                   Add an account
                 </Link>
@@ -307,17 +307,17 @@ export default function ReportsPage() {
 
       <ReportSection id="report-subscriptions" title="Subscriptions">
         {subscriptions.error ? (
-          <p className="text-sm text-red-600 dark:text-red-400">
+          <p className="text-sm text-danger">
             {subscriptions.error}
           </p>
         ) : subscriptions.loading || subscriptions.data === null ? (
-          <p className="text-gray-500 dark:text-gray-400">
+          <p className="text-muted">
             Loading subscriptions…
           </p>
         ) : (
           <div className="space-y-6">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
+              <h3 className="text-sm font-semibold text-ink mb-2">
                 Category breakdown
               </h3>
               <div className={cardClass}>
@@ -325,13 +325,13 @@ export default function ReportsPage() {
               </div>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
+              <h3 className="text-sm font-semibold text-ink mb-2">
                 Top 5 most expensive
               </h3>
               <TopSubscriptionsList subscriptions={subscriptions.data} />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
+              <h3 className="text-sm font-semibold text-ink mb-2">
                 Monthly cost by category
               </h3>
               <div className={cardClass}>

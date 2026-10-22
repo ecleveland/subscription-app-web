@@ -2,25 +2,154 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * Ledger theme. Warm paper in the light scheme, ink in the dark one.
+ * Components reach for these semantic names, never a raw Tailwind hue,
+ * so a scheme is one block of variables.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --paper: #f5f2ea;
+  --surface: #fffdf7;
+  --surface-2: #ece8dd;
+  --ink: #1d1b17;
+  --ink-2: #4b473f;
+  --muted: #7c766a;
+  --line: #e1dbcc;
+  --line-strong: #c6bfab;
+  --accent: #1f6b47;
+  --accent-strong: #164f34;
+  --accent-soft: #dfeee4;
+  --on-accent: #ffffff;
+  --danger: #b2433a;
+  --danger-strong: #8f332c;
+  --danger-soft: #f5e1de;
+  --warn: #a4601a;
+  --warn-soft: #f6e6cf;
+  --info: #2e5f8a;
+  --info-soft: #dde8f1;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
 }
 
 .dark {
-  --background: #111827;
-  --foreground: #f3f4f6;
+  --paper: #131412;
+  --surface: #1b1d1a;
+  --surface-2: #252824;
+  --ink: #ece9dd;
+  --ink-2: #c4bfb2;
+  --muted: #8c877a;
+  --line: #2c2f2a;
+  --line-strong: #3f433c;
+  --accent: #6cc896;
+  --accent-strong: #8fd8b0;
+  --accent-soft: #1c3127;
+  --on-accent: #0f1a14;
+  --danger: #e27d72;
+  --danger-strong: #ec9a91;
+  --danger-soft: #3a2220;
+  --warn: #dfa05c;
+  --warn-soft: #3a2b17;
+  --info: #82b2dd;
+  --info-soft: #1d2b39;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --color-danger-strong: var(--danger-strong);
+  --color-danger-soft: var(--danger-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+@utility page-title {
+  @apply font-display text-3xl font-medium tracking-tight text-ink;
+}
+
+@utility section-title {
+  @apply font-display text-xl font-medium tracking-tight text-ink;
+}
+
+@utility eyebrow {
+  @apply text-[11px] font-medium uppercase tracking-[0.14em] text-muted;
+}
+
+@utility num {
+  @apply font-mono tabular-nums;
+}
+
+@utility card {
+  @apply rounded-md border border-line bg-surface;
+}
+
+@utility btn-primary {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility btn-secondary {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-line-strong bg-surface px-3.5 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility btn-danger {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md bg-danger px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-danger-strong disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility btn-ghost {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+@utility input {
+  @apply w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30;
+}
+
+@utility label {
+  @apply mb-1 block text-sm font-medium text-ink-2;
+}
+
+@utility chip {
+  @apply rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink-2 transition-colors hover:border-line-strong;
+}
+
+@utility chip-active {
+  @apply rounded-full border border-ink bg-ink px-2.5 py-1 text-xs font-medium text-paper transition-colors;
+}
+
+@utility nav-link {
+  @apply flex items-center rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-surface-2;
 }

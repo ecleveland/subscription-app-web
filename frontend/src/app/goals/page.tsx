@@ -118,20 +118,20 @@ export default function GoalsPage() {
         setEditing(null);
         setShowCreate(true);
       }}
-      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+      className="btn-primary"
     >
       + Add goal
     </button>
   );
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-3xl mx-auto px-4 py-8 md:px-8 md:py-10">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Goals</h1>
+        <h1 className="page-title">Goals</h1>
         {!showCreate && !editing && (goals.length > 0 || error) && addButton}
       </div>
 
-      <label className="inline-flex items-center gap-2 mb-4 text-sm text-gray-700 dark:text-gray-300">
+      <label className="inline-flex items-center gap-2 mb-4 text-sm text-ink-2">
         <input
           type="checkbox"
           checked={showArchived}
@@ -145,13 +145,13 @@ export default function GoalsPage() {
 
       {error && (
         <div className="flex items-center gap-3 mb-4">
-          <p className="text-red-500 dark:text-red-400 text-sm">{error}</p>
+          <p className="text-danger text-sm">{error}</p>
           <button
             onClick={() => {
               setLoading(true);
               setReloadKey((k) => k + 1);
             }}
-            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+            className="btn-secondary px-3 py-1.5"
           >
             Try again
           </button>
@@ -183,12 +183,12 @@ export default function GoalsPage() {
       )}
 
       {loading ? (
-        <p className="text-gray-500 dark:text-gray-400">Loading goals…</p>
+        <p className="text-muted">Loading goals…</p>
       ) : goals.length === 0 ? (
         !showCreate &&
         !error && (
           <div className="text-center py-8">
-            <p className="text-gray-500 dark:text-gray-400 mb-3">
+            <p className="text-muted mb-3">
               No goals yet. Add a savings target or a debt to pay down.
             </p>
             {addButton}

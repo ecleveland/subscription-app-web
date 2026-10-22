@@ -49,14 +49,14 @@ export default function AdminUserForm() {
   }
 
   const inputClasses =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+    'input';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
       <div>
         <label
           htmlFor="admin-username"
-          className="block text-sm font-medium mb-1"
+          className="label"
         >
           Username
         </label>
@@ -72,7 +72,7 @@ export default function AdminUserForm() {
       <div>
         <label
           htmlFor="admin-password"
-          className="block text-sm font-medium mb-1"
+          className="label"
         >
           Password
         </label>
@@ -89,10 +89,10 @@ export default function AdminUserForm() {
       <div>
         <label
           htmlFor="admin-displayName"
-          className="block text-sm font-medium mb-1"
+          className="label"
         >
           Display Name{' '}
-          <span className="text-gray-400 font-normal">(optional)</span>
+          <span className="text-muted font-normal">(optional)</span>
         </label>
         <input
           id="admin-displayName"
@@ -105,9 +105,9 @@ export default function AdminUserForm() {
       <div>
         <label
           htmlFor="admin-email"
-          className="block text-sm font-medium mb-1"
+          className="label"
         >
-          Email <span className="text-gray-400 font-normal">(optional)</span>
+          Email <span className="text-muted font-normal">(optional)</span>
         </label>
         <input
           id="admin-email"
@@ -118,7 +118,7 @@ export default function AdminUserForm() {
         />
       </div>
       <div>
-        <label htmlFor="admin-role" className="block text-sm font-medium mb-1">
+        <label htmlFor="admin-role" className="label">
           Role
         </label>
         <select
@@ -131,11 +131,11 @@ export default function AdminUserForm() {
           <option value="admin">Admin</option>
         </select>
       </div>
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {error && <p className="text-danger text-sm">{error}</p>}
       <button
         type="submit"
         disabled={loading}
-        className="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+        className="btn-primary"
       >
         {loading ? 'Creating...' : 'Create User'}
       </button>

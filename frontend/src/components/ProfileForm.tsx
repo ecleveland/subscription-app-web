@@ -48,11 +48,11 @@ export default function ProfileForm() {
   }
 
   const inputClasses =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+    'input';
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+      <h2 className="section-title mb-4">
         Profile Information
       </h2>
       {avatarUrl && (
@@ -62,7 +62,7 @@ export default function ProfileForm() {
             alt="Avatar"
             width={80}
             height={80}
-            className="rounded-full object-cover border-2 border-gray-200 dark:border-gray-600"
+            className="rounded-full object-cover border-2 border-line"
             unoptimized
           />
         </div>
@@ -71,7 +71,7 @@ export default function ProfileForm() {
         <div>
           <label
             htmlFor="profile-username"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             Username
           </label>
@@ -86,7 +86,7 @@ export default function ProfileForm() {
         <div>
           <label
             htmlFor="profile-displayName"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             Display Name
           </label>
@@ -101,7 +101,7 @@ export default function ProfileForm() {
         <div>
           <label
             htmlFor="profile-email"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             Email
           </label>
@@ -116,7 +116,7 @@ export default function ProfileForm() {
         <div>
           <label
             htmlFor="profile-avatarUrl"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             Avatar URL
           </label>
@@ -129,11 +129,11 @@ export default function ProfileForm() {
             placeholder="https://example.com/avatar.jpg"
           />
         </div>
-        {error && <p className="text-red-500 text-sm">{error}</p>}
+        {error && <p className="text-danger text-sm">{error}</p>}
         <button
           type="submit"
           disabled={loading}
-          className="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+          className="btn-primary"
         >
           {loading ? 'Saving...' : 'Save Changes'}
         </button>

@@ -33,17 +33,17 @@ export default function ForgotPasswordForm() {
   }
 
   const inputClasses =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+    'input';
 
   if (submitted) {
     return (
       <div className="w-full max-w-sm space-y-4">
-        <p className="text-gray-700 dark:text-gray-300">
+        <p className="text-ink-2">
           If an account with that email exists, a reset link has been sent.
         </p>
         <Link
           href={withRedirect('/login', redirectTo)}
-          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 text-sm"
+          className="text-accent hover:text-accent-strong text-sm"
         >
           Back to login
         </Link>
@@ -53,11 +53,11 @@ export default function ForgotPasswordForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 w-full max-w-sm">
-      <p className="text-sm text-gray-500 dark:text-gray-400">
+      <p className="text-sm text-muted">
         Enter your email and we&apos;ll send you a link to reset your password.
       </p>
       <div>
-        <label htmlFor="email" className="block text-sm font-medium mb-1">
+        <label htmlFor="email" className="label">
           Email
         </label>
         <input
@@ -73,14 +73,14 @@ export default function ForgotPasswordForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+        className="w-full btn-primary"
       >
         {loading ? 'Sending...' : 'Send Reset Link'}
       </button>
-      <p className="text-sm text-gray-500 dark:text-gray-400">
+      <p className="text-sm text-muted">
         <Link
           href={withRedirect('/login', redirectTo)}
-          className="text-blue-600 hover:text-blue-700 dark:text-blue-400"
+          className="text-accent hover:text-accent-strong"
         >
           Back to login
         </Link>

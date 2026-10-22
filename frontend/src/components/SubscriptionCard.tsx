@@ -9,6 +9,8 @@ import { showErrorToast } from '@/lib/toast';
 import CategoryBadge from './CategoryBadge';
 import TagBadge from './TagBadge';
 
+const CYCLE_SUFFIX: Record<string, string> = { monthly: 'mo', yearly: 'yr', weekly: 'wk' };
+
 export default function SubscriptionCard({
   subscription,
   onToggleActive,
@@ -28,6 +30,7 @@ export default function SubscriptionCard({
   const personalCost = getPersonalShare(subscription.cost, subscription.sharedWith);
   const monthly = getMonthlyCost(personalCost, subscription.billingCycle);
   const isShared = subscription.sharedWith != null && subscription.sharedWith >= 2;
+  const suffix = CYCLE_SUFFIX[subscription.billingCycle] ?? 'wk';
 
   const trialDays = subscription.trialEndDate ? daysUntil(subscription.trialEndDate) : -1;
   const isTrialActive = trialDays > 0;
@@ -56,77 +59,75 @@ export default function SubscriptionCard({
     }
   }
 
+  const frame = selectionMode && isSelected
+    ? 'border-accent bg-accent-soft'
+    : isTrialExpiringSoon
+      ? 'border-warn bg-warn-soft'
+      : isActive
+        ? 'border-line bg-surface hover:border-line-strong'
+        : 'border-line bg-surface-2 opacity-60';
+
   return (
     <Link
       href={`/subscriptions/${subscription._id}/edit`}
       onClick={selectionMode ? (e) => { e.preventDefault(); onSelect?.(subscription._id); } : undefined}
-      className={`block border rounded-lg p-4 hover:shadow-sm transition-all ${
-        selectionMode && isSelected
-          ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
-          : isTrialExpiringSoon
-            ? 'border-orange-400 dark:border-orange-500 bg-orange-50 dark:bg-orange-900/20'
-            : isActive
-              ? 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500 bg-white dark:bg-gray-800'
-              : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
-      }`}
+      className={`block rounded-md border p-4 transition-colors ${frame}`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-1 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {selectionMode && (
             <input
               type="checkbox"
               checked={!!isSelected}
               onChange={(e) => { e.stopPropagation(); onSelect?.(subscription._id); }}
               onClick={(e) => e.stopPropagation()}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-line-strong text-accent focus:ring-accent/30"
             />
           )}
-          <h3 className={`font-semibold truncate ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
+          <h3 className={`truncate text-base font-semibold ${isActive ? 'text-ink' : 'text-muted'}`}>
             {subscription.name}
           </h3>
           {!isActive && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-500 dark:text-gray-400">
+            <span className="rounded-sm bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted">
               Inactive
             </span>
           )}
           {isTrialActive && (
-            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-              isTrialExpiringSoon
-                ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
-                : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+            <span className={`rounded-sm px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide ${
+              isTrialExpiringSoon ? 'bg-warn-soft text-warn' : 'bg-accent-soft text-accent'
             }`}>
               Trial
             </span>
           )}
           {isShared && (
-            <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+            <span className="rounded-sm bg-info-soft px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-info">
               Split {subscription.sharedWith} ways
             </span>
           )}
           {subscription.accountId && (
-            <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
+            <span className="rounded-sm bg-accent-soft px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-accent">
               In ledger
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={`text-lg font-bold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className={`num text-lg font-medium ${isActive ? 'text-ink' : 'text-muted'}`}>
             {formatCurrency(subscription.cost)}
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-normal">
-              /{subscription.billingCycle === 'monthly' ? 'mo' : subscription.billingCycle === 'yearly' ? 'yr' : 'wk'}
+            <span className="font-sans text-xs font-normal text-muted">
+              /{suffix}
             </span>
           </span>
           <button
             onClick={handleToggle}
             disabled={toggling}
             className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-              isActive ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+              isActive ? 'bg-accent' : 'bg-line-strong'
             }`}
             aria-label={isActive ? 'Deactivate subscription' : 'Activate subscription'}
             title={isActive ? 'Deactivate' : 'Activate'}
           >
             <span
-              className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+              className={`inline-block h-3.5 w-3.5 rounded-full bg-surface transition-transform ${
                 isActive ? 'translate-x-4.5' : 'translate-x-0.5'
               }`}
             />
@@ -134,36 +135,34 @@ export default function SubscriptionCard({
         </div>
       </div>
       {isShared && (
-        <div className="text-sm text-purple-600 dark:text-purple-400 mb-1">
-          Your share: {formatCurrency(personalCost)}/{subscription.billingCycle === 'monthly' ? 'mo' : subscription.billingCycle === 'yearly' ? 'yr' : 'wk'}
+        <div className="num mb-1 text-sm text-info">
+          Your share: {formatCurrency(personalCost)}/{suffix}
         </div>
       )}
-      <div className="flex items-center gap-2 mb-2">
+      <div className="mb-2 flex items-center gap-2">
         <CategoryBadge category={subscription.category} />
         {subscription.billingCycle !== 'monthly' && (
-          <span className="text-xs text-gray-500 dark:text-gray-400">
+          <span className="num text-xs text-muted">
             ({formatCurrency(monthly)}/mo)
           </span>
         )}
       </div>
       {subscription.tags && subscription.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
+        <div className="mb-2 flex flex-wrap gap-1">
           {subscription.tags.map((tag) => (
             <TagBadge key={tag} tag={tag} />
           ))}
         </div>
       )}
       {isTrialActive && (
-        <div className={`text-sm font-medium mb-1 ${
-          isTrialExpiringSoon ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'
-        }`}>
+        <div className={`mb-1 text-sm font-medium ${isTrialExpiringSoon ? 'text-warn' : 'text-accent'}`}>
           Trial ends in {trialDays} day{trialDays === 1 ? '' : 's'}
         </div>
       )}
-      <div className="text-sm text-gray-500 dark:text-gray-400">
+      <div className="text-sm text-muted">
         Next billing: {formatDate(subscription.nextBillingDate)}
         {isActive && days >= 0 && (
-          <span className={days <= 3 ? ' text-red-500 font-medium' : ''}>
+          <span className={days <= 3 ? ' font-medium text-danger' : ''}>
             {' '}
             ({days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`})
           </span>

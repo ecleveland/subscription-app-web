@@ -10,7 +10,7 @@ export default function SearchInput({ value, onChange, placeholder = 'Search sub
   return (
     <div className="relative mb-4">
       <svg
-        className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none"
+        className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted pointer-events-none"
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
         viewBox="0 0 24 24"
@@ -26,14 +26,14 @@ export default function SearchInput({ value, onChange, placeholder = 'Search sub
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label="Search subscriptions"
-        className="w-full pl-9 pr-9 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+        className="input pl-9 pr-9"
       />
       {value && (
         <button
           type="button"
           onClick={() => onChange('')}
           aria-label="Clear search"
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-ink"
         >
           <svg
             className="h-4 w-4"

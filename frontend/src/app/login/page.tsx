@@ -1,21 +1,13 @@
 import { Suspense } from 'react';
 import LoginForm from '@/components/LoginForm';
-import ThemeToggle from '@/components/ThemeToggle';
+import AuthShell from '@/components/AuthShell';
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 relative">
-      <div className="absolute top-4 right-4">
-        <ThemeToggle />
-      </div>
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
-          Subscription Tracker
-        </h1>
-        <Suspense fallback={<p className="text-gray-500 dark:text-gray-400">Loading…</p>}>
-          <LoginForm />
-        </Suspense>
-      </div>
-    </div>
+    <AuthShell title="Welcome back" lede="Sign in to see what is due next.">
+      <Suspense fallback={<p className="text-muted">Loading…</p>}>
+        <LoginForm />
+      </Suspense>
+    </AuthShell>
   );
 }

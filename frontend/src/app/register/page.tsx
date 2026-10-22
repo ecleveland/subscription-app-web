@@ -1,21 +1,13 @@
 import { Suspense } from 'react';
 import RegisterForm from '@/components/RegisterForm';
-import ThemeToggle from '@/components/ThemeToggle';
+import AuthShell from '@/components/AuthShell';
 
 export default function RegisterPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 relative">
-      <div className="absolute top-4 right-4">
-        <ThemeToggle />
-      </div>
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">
-          Create Account
-        </h1>
-        <Suspense fallback={<p className="text-gray-500 dark:text-gray-400">Loading…</p>}>
-          <RegisterForm />
-        </Suspense>
-      </div>
-    </div>
+    <AuthShell title="Create your account" lede="A few seconds, then the ledger is yours.">
+      <Suspense fallback={<p className="text-muted">Loading…</p>}>
+        <RegisterForm />
+      </Suspense>
+    </AuthShell>
   );
 }

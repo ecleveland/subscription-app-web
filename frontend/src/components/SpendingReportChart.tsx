@@ -59,27 +59,27 @@ export default function SpendingReportChart({
             type="number"
             tickFormatter={formatAxisDollars}
             tick={{ fill: 'currentColor', fontSize: 12 }}
-            className="text-gray-500 dark:text-gray-400"
+            className="text-muted"
           />
           <YAxis
             type="category"
             dataKey="name"
             width={120}
             tick={{ fill: 'currentColor', fontSize: 12 }}
-            className="text-gray-500 dark:text-gray-400"
+            className="text-muted"
           />
           <Tooltip content={<ReportTooltip />} />
           <Legend />
-          <Bar dataKey="actualCents" name="Spent" fill="#3b82f6" barSize={18} radius={[0, 4, 4, 0]} />
+          <Bar dataKey="actualCents" name="Spent" fill="#2e5f8a" barSize={18} radius={[0, 4, 4, 0]} />
           {/* Planned is a second thin bar under the actual one, not a
               reference marker. Recharts has no per-row marker for a
               categorical axis, and a thin bar still reads as "how far
               spend got against plan" at a glance. Rows with no budget
               (plannedCents null) get no planned bar. */}
-          <Bar dataKey="plannedCents" name="Planned" fill="#9ca3af" barSize={6} radius={[0, 3, 3, 0]} />
+          <Bar dataKey="plannedCents" name="Planned" fill="#7c766a" barSize={6} radius={[0, 3, 3, 0]} />
         </BarChart>
       </ResponsiveContainer>
-      <p className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+      <p className="mt-2 text-sm font-medium text-ink">
         Total spent: {formatCents(report.totalCents)}
       </p>
       {/* The SVG chart is not readable by screen readers; this table is. */}

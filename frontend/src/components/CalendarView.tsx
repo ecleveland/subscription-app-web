@@ -76,19 +76,19 @@ export default function CalendarView({ subscriptions }: Props) {
       <div className="flex items-center justify-between mb-6">
         <button
           onClick={goToPrevMonth}
-          className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+          className="p-2 text-ink-2 hover:text-ink transition-colors"
           aria-label="Previous month"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+        <h2 className="section-title">
           {MONTH_NAMES[currentMonth]} {currentYear}
         </h2>
         <button
           onClick={goToNextMonth}
-          className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+          className="p-2 text-ink-2 hover:text-ink transition-colors"
           aria-label="Next month"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -102,7 +102,7 @@ export default function CalendarView({ subscriptions }: Props) {
         {DAY_HEADERS.map((day) => (
           <div
             key={day}
-            className="py-2 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase"
+            className="py-2 text-center text-xs font-medium text-muted uppercase"
           >
             {day}
           </div>
@@ -110,7 +110,7 @@ export default function CalendarView({ subscriptions }: Props) {
       </div>
 
       {/* Calendar grid */}
-      <div className="grid grid-cols-7 gap-px bg-gray-200 dark:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+      <div className="grid grid-cols-7 gap-px bg-surface-2 border border-line rounded-md overflow-hidden">
         {days.map((day, idx) => {
           const key = `${day.year}-${day.month}-${day.date}`;
           const events = day.isCurrentMonth ? (billingMap.get(key) || []) : [];
@@ -118,15 +118,15 @@ export default function CalendarView({ subscriptions }: Props) {
           return (
             <div
               key={idx}
-              className={`min-h-[80px] md:min-h-[100px] p-1.5 bg-white dark:bg-gray-800 ${
+              className={`min-h-[80px] md:min-h-[100px] p-1.5 bg-surface ${
                 !day.isCurrentMonth ? 'opacity-40' : ''
               }`}
             >
               <div
                 className={`text-sm font-medium mb-1 w-7 h-7 flex items-center justify-center rounded-full ${
                   isToday(day)
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-700 dark:text-gray-300'
+                    ? 'bg-accent text-on-accent'
+                    : 'text-ink-2'
                 }`}
               >
                 {day.date}
@@ -136,7 +136,7 @@ export default function CalendarView({ subscriptions }: Props) {
                   <Link
                     key={event.subscription._id}
                     href={`/subscriptions/${event.subscription._id}/edit`}
-                    className="block text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors truncate"
+                    className="block text-xs px-1.5 py-0.5 rounded bg-accent-soft text-accent hover:bg-accent/20 transition-colors truncate"
                   >
                     {event.subscription.name} · ${event.subscription.cost}
                   </Link>

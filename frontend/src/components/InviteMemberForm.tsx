@@ -6,7 +6,7 @@ import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import { INVITE_ROLES, type InviteRole } from '@/lib/types';
 
 const inputClasses =
-  'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100';
+  'input';
 
 export default function InviteMemberForm() {
   const [email, setEmail] = useState('');
@@ -54,12 +54,12 @@ export default function InviteMemberForm() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+      <h2 className="section-title mb-4">
         Invite a Member
       </h2>
       <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
         <div>
-          <label htmlFor="invite-email" className="block text-sm font-medium mb-1">
+          <label htmlFor="invite-email" className="label">
             Email
           </label>
           <input
@@ -72,7 +72,7 @@ export default function InviteMemberForm() {
           />
         </div>
         <div>
-          <label htmlFor="invite-role" className="block text-sm font-medium mb-1">
+          <label htmlFor="invite-role" className="label">
             Role
           </label>
           <select
@@ -88,11 +88,11 @@ export default function InviteMemberForm() {
             ))}
           </select>
         </div>
-        {error && <p className="text-red-500 text-sm">{error}</p>}
+        {error && <p className="text-danger text-sm">{error}</p>}
         <button
           type="submit"
           disabled={loading}
-          className="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+          className="btn-primary"
         >
           {loading ? 'Sending...' : 'Send Invitation'}
         </button>
@@ -102,7 +102,7 @@ export default function InviteMemberForm() {
         <div className="mt-4 max-w-md">
           <label
             htmlFor="invite-link"
-            className="block text-sm font-medium mb-1"
+            className="label"
           >
             Invite link
           </label>
@@ -117,12 +117,12 @@ export default function InviteMemberForm() {
             <button
               type="button"
               onClick={handleCopy}
-              className="py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
+              className="btn-secondary whitespace-nowrap"
             >
               Copy
             </button>
           </div>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+          <p className="text-xs text-muted mt-1">
             We&apos;ve emailed this link to the invitee — you can also share it
             directly.
           </p>

@@ -265,7 +265,7 @@ describe('SubscriptionCard', () => {
         <SubscriptionCard subscription={makeSub({ trialEndDate: '2025-06-17T00:00:00' })} />,
       );
       const badge = screen.getByText('Trial');
-      expect(badge.className).toContain('orange');
+      expect(badge.className).toContain('warn');
       expect(screen.getByText(/Trial ends in 2 days/)).toBeInTheDocument();
     });
 
