@@ -24,6 +24,7 @@ import {
   BudgetCategory,
   BudgetCategoryDocument,
 } from '../budgets/schemas/budget-category.schema';
+import { Goal, GoalDocument } from '../goals/schemas/goal.schema';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CreateCategoryGroupDto } from './dto/create-category-group.dto';
@@ -57,11 +58,12 @@ export class CategoriesService {
     @InjectModel(Household.name)
     private readonly householdModel: Model<HouseholdDocument>,
     // Read-only here: consulted to decide archive-vs-hard-delete (a category
-    // referenced by ledger or budget data must survive as archived).
+    // referenced by ledger, budget or goal data must survive as archived).
     @InjectModel(Transaction.name)
     private readonly transactionModel: Model<TransactionDocument>,
     @InjectModel(BudgetCategory.name)
     private readonly budgetCategoryModel: Model<BudgetCategoryDocument>,
+    @InjectModel(Goal.name) private readonly goalModel: Model<GoalDocument>,
   ) {}
 
   /**
@@ -388,8 +390,9 @@ export class CategoriesService {
 
   /**
    * Delete a category, archiving instead when it is referenced by any
-   * transaction or budget row (hard-deleting would orphan ledger history and
-   * silently drop planned limits from the budget view). The outcome tells the
+   * transaction, budget row or goal (hard-deleting would orphan ledger history,
+   * silently drop planned limits from the budget view, and leave a goal with a
+   * categoryId that no longer resolves). The outcome tells the
    * client which happened. Idempotent for already-archived categories. The
    * reference check and the delete are not atomic (no multi-doc transactions
    * in this codebase): a transaction created in the window can end up with a
@@ -408,7 +411,7 @@ export class CategoriesService {
 
     // BudgetCategory carries no householdId; the globally-unique category id
     // makes the unscoped filter exact.
-    const [transactionRef, budgetRef] = await Promise.all([
+    const [transactionRef, budgetRef, goalRef] = await Promise.all([
       this.transactionModel
         .exists({
           householdId: householdObjectId,
@@ -418,9 +421,15 @@ export class CategoriesService {
       this.budgetCategoryModel
         .exists({ categoryId: category._id } as Record<string, unknown>)
         .exec(),
+      this.goalModel
+        .exists({
+          householdId: householdObjectId,
+          categoryId: category._id,
+        } as Record<string, unknown>)
+        .exec(),
     ]);
 
-    if (transactionRef || budgetRef) {
+    if (transactionRef || budgetRef || goalRef) {
       if (!category.isArchived) {
         category.isArchived = true;
         await category.save();

@@ -13,6 +13,7 @@ import { Category } from './schemas/category.schema';
 import { Household } from '../households/schemas/household.schema';
 import { Transaction } from '../transactions/schemas/transaction.schema';
 import { BudgetCategory } from '../budgets/schemas/budget-category.schema';
+import { Goal } from '../goals/schemas/goal.schema';
 import { DEFAULT_CATEGORY_GROUPS } from './default-categories';
 
 const HOUSEHOLD_ID = '507f191e810c19729de860ea';
@@ -54,6 +55,7 @@ describe('CategoriesService', () => {
   let mockHouseholdModel: any;
   let mockTransactionModel: any;
   let mockBudgetCategoryModel: any;
+  let mockGoalModel: any;
   // save() mocks for documents built via `new this.model({...})` (the create
   // paths); constructed docs echo their fields plus a fresh _id.
   let categorySave: jest.Mock;
@@ -114,6 +116,10 @@ describe('CategoriesService', () => {
       exists: jest.fn().mockReturnValue(createChainable(null)),
     };
 
+    mockGoalModel = {
+      exists: jest.fn().mockReturnValue(createChainable(null)),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CategoriesService,
@@ -134,6 +140,7 @@ describe('CategoriesService', () => {
           provide: getModelToken(BudgetCategory.name),
           useValue: mockBudgetCategoryModel,
         },
+        { provide: getModelToken(Goal.name), useValue: mockGoalModel },
       ],
     }).compile();
 
@@ -712,6 +719,27 @@ describe('CategoriesService', () => {
       expect(doc.deleteOne).not.toHaveBeenCalled();
       const filter = mockBudgetCategoryModel.exists.mock.calls[0][0];
       expect(filter.categoryId.toString()).toBe(doc._id.toString());
+    });
+
+    it('archives a category referenced only by a goal', async () => {
+      const doc = mockCategoryDoc();
+      mockCategoryModel.findOne.mockReturnValue(createChainable(doc));
+      mockGoalModel.exists.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId() }),
+      );
+
+      const result = await service.removeCategory(
+        HOUSEHOLD_ID,
+        doc._id.toString(),
+      );
+
+      expect(result).toEqual({ outcome: 'archived' });
+      expect(doc.isArchived).toBe(true);
+      expect(doc.save).toHaveBeenCalledTimes(1);
+      expect(doc.deleteOne).not.toHaveBeenCalled();
+      const goalFilter = mockGoalModel.exists.mock.calls[0][0];
+      expect(goalFilter.householdId.toString()).toBe(HOUSEHOLD_ID);
+      expect(goalFilter.categoryId.toString()).toBe(doc._id.toString());
     });
 
     it('hard-deletes an unreferenced category', async () => {

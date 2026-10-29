@@ -639,6 +639,49 @@ describe('Goals (e2e)', () => {
     });
   });
 
+  describe('category deletion', () => {
+    it('archives, not deletes, a category a goal points at, and the goal still resolves', async () => {
+      const groups = await api()
+        .get('/api/categories/groups')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const groupId: string = groups.body[0]._id;
+
+      const category = await api()
+        .post('/api/categories')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Goal Only', groupId })
+        .expect(201);
+      const categoryId: string = category.body._id;
+
+      const goal = await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Fund', type: 'savings', targetCents: 5000, categoryId })
+        .expect(201);
+      const goalId: string = goal.body._id;
+
+      const removed = await api()
+        .delete(`/api/categories/${categoryId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(removed.body).toEqual({ outcome: 'archived' });
+
+      const fetched = await api()
+        .get(`/api/goals/${goalId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(fetched.body.categoryId).toBe(categoryId);
+
+      const all = await api()
+        .get('/api/categories?includeArchived=true')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const kept = all.body.find((c: { _id: string }) => c._id === categoryId);
+      expect(kept).toMatchObject({ _id: categoryId, isArchived: true });
+    });
+  });
+
   describe('auth', () => {
     it('401s without a token', async () => {
       await api().get('/api/goals').expect(401);
