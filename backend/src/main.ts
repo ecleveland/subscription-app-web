@@ -144,7 +144,7 @@ async function bootstrap() {
   // SIGTERM/SIGINT (e.g. Railway redeploys) instead of dropping live requests.
   app.enableShutdownHooks();
 
-  const port = configService.get<number>('port') ?? 3001;
+  const port = configService.get<number>('port') ?? 3011;
   await app.listen(port);
 }
 // Explicit exit rather than relying on Node's default unhandled-rejection

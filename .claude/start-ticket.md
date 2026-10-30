@@ -22,8 +22,8 @@ mandatory docs in `.claude/architecture/` (`testing.md`, `backend-patterns.md`,
 
 - Working tree must be clean (skill handles). Architecture docs (`.claude/architecture/`)
   not yet in the tree are fine to carry onto the branch.
-- Stale dev servers: ports **3000** (frontend) and **3001** (backend). The
-  `/stop-dev` skill stops both, or `lsof -ti:3000,3001 | xargs kill -9 2>/dev/null`.
+- Stale dev servers: ports **3010** (frontend) and **3011** (backend). The
+  `/stop-dev` skill stops both, or `lsof -ti:3010,3011 | xargs kill -9 2>/dev/null`.
 - MongoDB (Docker): `docker compose up -d mongo` from the repo root. Needed for
   the dev stack and the **frontend** Playwright E2E. The **backend** E2E uses an
   in-memory Mongo (`mongodb-memory-server`) and needs no container.
@@ -86,7 +86,7 @@ Rules for the gate:
 - Only `./verify.sh all` unlocks push and PR creation; stage first, since the marker records the staged tree.
    - **Stop the frontend dev server first.** Playwright's `webServer` runs
      `npm run dev` in the same `frontend/` dir on port 3100; Next 16's
-     per-directory `.next/dev` lock conflicts with a dev server on 3000, and the
+     per-directory `.next/dev` lock conflicts with a dev server on 3010, and the
      webServer step times out after 120s. Use `/stop-dev`, run E2E, restart.
    - It boots a dedicated backend (`:3101`) + frontend (`:3100`) against the
      throwaway `subscriptions_e2e` DB and drops it on teardown — never touches dev data.

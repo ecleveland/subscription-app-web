@@ -105,7 +105,7 @@ describe('configuration', () => {
     it('falls back to a localhost CORS origin outside production', () => {
       process.env.NODE_ENV = 'development';
       delete process.env.FRONTEND_URL;
-      expect(configuration().cors.origin).toBe('http://localhost:3000');
+      expect(configuration().cors.origin).toBe('http://localhost:3010');
     });
   });
 

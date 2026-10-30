@@ -15,7 +15,7 @@ Auth is handled entirely by the NestJS backend. It supports multi-user registrat
 
 ### Backend (`/backend`)
 ```bash
-npm run start:dev      # Dev server with watch mode (port 3001)
+npm run start:dev      # Dev server with watch mode (port 3011)
 npm run build          # Compile TypeScript to /dist
 npm run start:prod     # Run compiled JS
 npm run lint           # ESLint with auto-fix
@@ -27,7 +27,7 @@ npm run test:e2e       # End-to-end tests
 
 ### Frontend (`/frontend`)
 ```bash
-npm run dev            # Next.js dev server (port 3000)
+npm run dev            # Next.js dev server (port 3010)
 npm run build          # Production build (standalone output)
 npm run lint           # ESLint
 npm test               # Vitest unit tests
@@ -74,6 +74,6 @@ Backend (`.env` in `/backend`):
 - `MONGODB_URI`, `JWT_SECRET` (required), `JWT_EXPIRES_IN`, `FRONTEND_URL` (CORS)
 
 Frontend (`.env.local` in `/frontend`):
-- `NEXT_PUBLIC_API_URL` — backend URL (default: `http://localhost:3001/api`)
+- `NEXT_PUBLIC_API_URL` — backend URL (default: `http://localhost:3011/api`)
 
 To create an initial user, register via `POST /api/auth/register` or the registration page. Admins can then be promoted via the admin panel or database.

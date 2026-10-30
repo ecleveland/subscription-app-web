@@ -7,7 +7,7 @@ import path from 'path';
 // global.teardown.ts. All values are overridable via env (CI points them at its
 // own manually-booted servers).
 
-/** Ports for the dedicated E2E stack (distinct from the dev 3000/3001). */
+/** Ports for the dedicated E2E stack (distinct from the dev 3010/3011). */
 export const FRONTEND_PORT = process.env.E2E_FRONTEND_PORT || '3100';
 export const BACKEND_PORT = process.env.E2E_BACKEND_PORT || '3101';
 

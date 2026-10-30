@@ -1,6 +1,6 @@
 import { loginUrlFor } from './safe-redirect';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3011/api';
 
 // Readable cookie mirroring the access token, used only by the Next.js
 // middleware to gate navigation (real auth is the backend Bearer check). The

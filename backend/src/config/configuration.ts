@@ -23,7 +23,7 @@ export default () => {
 
   return {
     nodeEnv,
-    port: parseInt(process.env.PORT ?? '3001', 10),
+    port: parseInt(process.env.PORT ?? '3011', 10),
     database: {
       uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/subscriptions',
     },
@@ -39,9 +39,9 @@ export default () => {
       level: process.env.LOG_LEVEL || 'info',
       pretty: process.env.LOG_PRETTY === 'true',
     },
-    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3010',
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+      origin: process.env.FRONTEND_URL || 'http://localhost:3010',
     },
     mail: {
       // SMTP in production (real delivery), console stub otherwise (dev/test).
