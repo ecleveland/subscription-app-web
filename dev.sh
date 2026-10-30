@@ -12,10 +12,10 @@ until docker compose exec mongo mongosh --eval "db.adminCommand('ping')" --quiet
 done
 echo "MongoDB is ready."
 
-echo "Starting backend (port 3001)..."
+echo "Starting backend (port 3011)..."
 cd backend && npm run start:dev &
 
-echo "Starting frontend (port 3000)..."
+echo "Starting frontend (port 3010)..."
 cd frontend && npm run dev &
 
 wait

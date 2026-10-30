@@ -215,7 +215,7 @@ export class AuthService {
     }).save();
 
     const frontendUrl =
-      this.configService.get<string>('frontendUrl') || 'http://localhost:3000';
+      this.configService.get<string>('frontendUrl') || 'http://localhost:3010';
     const resetUrl = `${frontendUrl}/reset-password?token=${plainToken}`;
 
     // Fire-and-forget so the SMTP round-trip neither blocks the response nor

@@ -46,7 +46,7 @@ A full-stack web app for tracking and managing recurring subscriptions.
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and register a new account to get started.
+Open [http://localhost:3010](http://localhost:3010) and register a new account to get started.
 
 ### Local Development
 
@@ -62,7 +62,7 @@ Open [http://localhost:3000](http://localhost:3000) and register a new account t
    cd backend
    npm install
    cp ../.env.example .env   # JWT_SECRET is required — see Environment Variables below
-   npm run start:dev          # runs on port 3001
+   npm run start:dev          # runs on port 3011
    ```
 
 3. **Frontend:**
@@ -70,7 +70,7 @@ Open [http://localhost:3000](http://localhost:3000) and register a new account t
    ```bash
    cd frontend
    npm install
-   npm run dev             # runs on port 3000
+   npm run dev             # runs on port 3010
    ```
 
 4. **Or use the convenience script** (starts MongoDB, backend, and frontend together):
@@ -88,8 +88,8 @@ Copy `.env.example` at the repo root and fill in the values.
 | `MONGODB_URI` | MongoDB connection string | `mongodb://localhost:27017/subscriptions` |
 | `JWT_SECRET` | **Required.** Secret key for signing JWTs | *(generate one)* |
 | `JWT_EXPIRES_IN` | Token expiry duration | `24h` |
-| `FRONTEND_URL` | Frontend origin for CORS | `http://localhost:3000` |
-| `NEXT_PUBLIC_API_URL` | Backend API URL used by the frontend | `http://localhost:3001/api` |
+| `FRONTEND_URL` | Frontend origin for CORS | `http://localhost:3010` |
+| `NEXT_PUBLIC_API_URL` | Backend API URL used by the frontend | `http://localhost:3011/api` |
 
 Generate a JWT secret:
 

@@ -338,7 +338,7 @@ export class HouseholdsService {
     }
     const householdName = household?.name ?? 'your household';
     const frontendUrl =
-      this.configService.get<string>('frontendUrl') || 'http://localhost:3000';
+      this.configService.get<string>('frontendUrl') || 'http://localhost:3010';
     const inviteUrl = `${frontendUrl}/household/accept?token=${plainToken}`;
 
     const invitationId = invitation._id.toString();
