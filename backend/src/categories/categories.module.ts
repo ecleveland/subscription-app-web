@@ -18,15 +18,17 @@ import {
   BudgetCategory,
   BudgetCategorySchema,
 } from '../budgets/schemas/budget-category.schema';
+import { Goal, GoalSchema } from '../goals/schemas/goal.schema';
 
 // The category data model, default-set seeding (Phase 2), and household
 // category management (Phase 3, VEG-437). CategoriesService is exported so
 // HouseholdsService can seed defaults at household creation and the bootstrap
 // can backfill existing households. Foreign models are registered schema-only:
 // Household for the backfill enumeration and for writing the seeded stamp
-// (its only write here); Transaction and BudgetCategory strictly read-only for
-// the archive-vs-hard-delete reference check. Importing their owning modules
-// instead would be circular — both import this module.
+// (its only write here); Transaction, BudgetCategory and Goal strictly
+// read-only for the archive-vs-hard-delete reference check. Importing their
+// owning modules instead would be circular, because all three import this
+// module.
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -35,6 +37,7 @@ import {
       { name: Household.name, schema: HouseholdSchema },
       { name: Transaction.name, schema: TransactionSchema },
       { name: BudgetCategory.name, schema: BudgetCategorySchema },
+      { name: Goal.name, schema: GoalSchema },
     ]),
   ],
   providers: [CategoriesService],
