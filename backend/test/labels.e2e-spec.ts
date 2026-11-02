@@ -366,6 +366,35 @@ describe('Labels (e2e)', () => {
       expect(kept.body.labelId).toBe(id);
     });
 
+    it('archives a referenced label even when it has a child', async () => {
+      const parent = await createLabel({ name: 'Referenced Parent' });
+      const child = await createLabel({
+        name: 'Referenced Child',
+        parentId: parent,
+      });
+      await auth(request(app.getHttpServer()).post('/api/goals'))
+        .send({
+          name: 'Parent goal',
+          type: 'savings',
+          targetCents: 1000,
+          labelId: parent,
+        })
+        .expect(201);
+
+      const res = await auth(
+        request(app.getHttpServer()).delete(`/api/labels/${parent}`),
+      ).expect(200);
+      expect(res.body).toEqual({ outcome: 'archived' });
+
+      const all = await listLabels(true);
+      expect(
+        all.body.find((l: { _id: string }) => l._id === parent).isArchived,
+      ).toBe(true);
+      expect(
+        all.body.find((l: { _id: string }) => l._id === child).parentId,
+      ).toBe(parent);
+    });
+
     it('returns 409 for a label with a child', async () => {
       const parent = await createLabel({ name: 'Has Child' });
       await createLabel({ name: 'The Child', parentId: parent });

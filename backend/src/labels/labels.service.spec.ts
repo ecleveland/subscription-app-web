@@ -269,6 +269,21 @@ describe('LabelsService', () => {
       expect(doc.save).not.toHaveBeenCalled();
     });
 
+    it('rejects its own id in uppercase as parent', async () => {
+      const doc = labelDoc();
+      labelModel.findOne.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.update(HOUSEHOLD_ID, LABEL_ID, {
+          parentId: LABEL_ID.toUpperCase(),
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('A label cannot be its own parent'),
+      );
+      expect(labelModel.findOne).toHaveBeenCalledTimes(1);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
     it('rejects a parent that is a descendant of the label', async () => {
       // LABEL is the grandparent of the proposed parent: LABEL > PARENT > CHILD.
       // Making CHILD the parent of LABEL would close a loop.
@@ -354,7 +369,7 @@ describe('LabelsService', () => {
       );
     });
 
-    it('returns 409 while another label has it as parent', async () => {
+    it('returns 409 for an unreferenced label while another label has it as parent', async () => {
       const doc = labelDoc();
       labelModel.findOne.mockReturnValue(createChainable(doc));
       labelModel.exists.mockReturnValue(
@@ -367,7 +382,28 @@ describe('LabelsService', () => {
       const childFilter = labelModel.exists.mock.calls[0][0];
       expect(childFilter.householdId).toEqual(new Types.ObjectId(HOUSEHOLD_ID));
       expect(childFilter.parentId).toEqual(doc._id);
-      expect(transactionModel.exists).not.toHaveBeenCalled();
+      expect(transactionModel.exists).toHaveBeenCalledTimes(1);
+      expect(doc.save).not.toHaveBeenCalled();
+      expect(doc.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('archives a referenced label even when it has a child', async () => {
+      // Archiving leaves the child's parentId resolvable, so the child check
+      // only guards the hard delete.
+      const doc = labelDoc();
+      labelModel.findOne.mockReturnValue(createChainable(doc));
+      labelModel.exists.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId(CHILD_ID) }),
+      );
+      transactionModel.exists.mockReturnValue(
+        createChainable({ _id: new Types.ObjectId() }),
+      );
+
+      const result = await service.remove(HOUSEHOLD_ID, LABEL_ID);
+
+      expect(result).toEqual({ outcome: 'archived' });
+      expect(doc.isArchived).toBe(true);
+      expect(doc.save).toHaveBeenCalledTimes(1);
       expect(doc.deleteOne).not.toHaveBeenCalled();
     });
 
@@ -486,6 +522,55 @@ describe('LabelsService', () => {
       await expect(
         service.assertAssignable(HOUSEHOLD_ID, LABEL_ID),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('assertAssignableIfChanged', () => {
+    const CURRENT = new Types.ObjectId(LABEL_ID);
+
+    it('skips the lookup when the label is unchanged, in any letter case', async () => {
+      await service.assertAssignableIfChanged(
+        HOUSEHOLD_ID,
+        LABEL_ID.toUpperCase(),
+        CURRENT,
+      );
+
+      expect(labelModel.findOne).not.toHaveBeenCalled();
+    });
+
+    it('skips the lookup when the patch leaves the label alone or clears it', async () => {
+      await service.assertAssignableIfChanged(HOUSEHOLD_ID, undefined, CURRENT);
+      await service.assertAssignableIfChanged(HOUSEHOLD_ID, null, CURRENT);
+
+      expect(labelModel.findOne).not.toHaveBeenCalled();
+    });
+
+    it('validates a changed label', async () => {
+      labelModel.findOne.mockReturnValue(createChainable(null));
+
+      await expect(
+        service.assertAssignableIfChanged(HOUSEHOLD_ID, PARENT_ID, CURRENT),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+      expect(labelModel.findOne).toHaveBeenCalledWith({
+        _id: new Types.ObjectId(PARENT_ID),
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+      });
+    });
+
+    it('validates a first assignment', async () => {
+      labelModel.findOne.mockReturnValue(
+        createChainable(labelDoc({ isArchived: true })),
+      );
+
+      await expect(
+        service.assertAssignableIfChanged(HOUSEHOLD_ID, LABEL_ID, undefined),
+      ).rejects.toThrow(
+        new BadRequestException('Cannot assign an archived label'),
+      );
     });
   });
 });

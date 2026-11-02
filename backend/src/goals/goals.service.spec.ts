@@ -85,7 +85,10 @@ describe('GoalsService', () => {
   let goalModel: any;
   let categoriesService: { findInHousehold: jest.Mock };
   let accountsService: { findOne: jest.Mock; findAll: jest.Mock };
-  let labelsService: { assertAssignable: jest.Mock };
+  let labelsService: {
+    assertAssignable: jest.Mock;
+    assertAssignableIfChanged: jest.Mock;
+  };
   let constructed: any[];
 
   beforeEach(async () => {
@@ -123,6 +126,15 @@ describe('GoalsService', () => {
 
     labelsService = {
       assertAssignable: jest.fn().mockResolvedValue(undefined),
+      // The real change check over the mocked lookup, so these cases still
+      // pin down when a label gets validated.
+      assertAssignableIfChanged: jest.fn(
+        (...args: Parameters<LabelsService['assertAssignableIfChanged']>) =>
+          LabelsService.prototype.assertAssignableIfChanged.apply(
+            labelsService as unknown as LabelsService,
+            args,
+          ),
+      ),
     };
 
     const module: TestingModule = await Test.createTestingModule({

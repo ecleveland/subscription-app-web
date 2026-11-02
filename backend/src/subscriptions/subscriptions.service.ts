@@ -423,15 +423,11 @@ export class SubscriptionsService {
     }
     this.assertLedgerable(nextAmountCents, nextAccountId);
     // Validate a label only when it changes, as RecurringService.update does.
-    const currentLabelId = (
-      doc.labelId as unknown as Types.ObjectId | undefined
-    )?.toHexString();
-    if (
-      typeof updateDto.labelId === 'string' &&
-      updateDto.labelId.toLowerCase() !== currentLabelId
-    ) {
-      await this.labelsService.assertAssignable(householdId, updateDto.labelId);
-    }
+    await this.labelsService.assertAssignableIfChanged(
+      householdId,
+      updateDto.labelId,
+      doc.labelId as unknown as Types.ObjectId | undefined,
+    );
 
     if (updateDto.name !== undefined) doc.payee = updateDto.name;
     if (updateDto.cost !== undefined) doc.amountCents = nextAmountCents;

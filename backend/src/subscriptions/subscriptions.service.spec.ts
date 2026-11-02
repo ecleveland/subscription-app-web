@@ -60,7 +60,10 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
   let model: any;
   let savedDocs: Record<string, any>[];
   let accountsService: { findOne: jest.Mock };
-  let labelsService: { assertAssignable: jest.Mock };
+  let labelsService: {
+    assertAssignable: jest.Mock;
+    assertAssignableIfChanged: jest.Mock;
+  };
 
   beforeEach(async () => {
     savedDocs = [];
@@ -110,6 +113,15 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
 
     labelsService = {
       assertAssignable: jest.fn().mockResolvedValue(undefined),
+      // The real change check over the mocked lookup, so these cases still
+      // pin down when a label gets validated.
+      assertAssignableIfChanged: jest.fn(
+        (...args: Parameters<LabelsService['assertAssignableIfChanged']>) =>
+          LabelsService.prototype.assertAssignableIfChanged.apply(
+            labelsService as unknown as LabelsService,
+            args,
+          ),
+      ),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -1034,6 +1046,20 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
 
       expect((doc as any).labelId).toBeUndefined();
       expect(view.labelId).toBeNull();
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+    });
+
+    it('update without labelId keeps the label', async () => {
+      const doc = recDoc({ labelId: LABEL });
+      model.findById.mockReturnValue(chain(doc));
+
+      const view = await service.update(HH, doc._id.toString(), {
+        name: 'Renamed',
+      });
+
+      expect(view.name).toBe('Renamed');
+      expect((doc as any).labelId.equals(LABEL)).toBe(true);
+      expect(view.labelId?.equals(LABEL)).toBe(true);
       expect(labelsService.assertAssignable).not.toHaveBeenCalled();
     });
 

@@ -21,7 +21,7 @@ import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
 import { LabelsService } from '../labels/labels.service';
-import { LABEL_FILTER_NONE } from '../labels/dto/label-filter';
+import { labelFilterValue } from '../labels/dto/label-filter';
 import {
   addCadence,
   settleTrackedSubscriptionDate,
@@ -220,11 +220,7 @@ export class RecurringService {
       filter.categoryId = new Types.ObjectId(query.categoryId);
     }
     if (query.labelId) {
-      // null matches both a missing field and an explicit null.
-      filter.labelId =
-        query.labelId === LABEL_FILTER_NONE
-          ? null
-          : new Types.ObjectId(query.labelId);
+      filter.labelId = labelFilterValue(query.labelId);
     }
     // Exclude subscriptions by default (VEG-469): they are surfaced by the
     // Subscriptions page via /api/subscriptions, not the Bills view. An explicit
@@ -327,9 +323,6 @@ export class RecurringService {
     // category it is not re-checked on reactivation: an archived label blocks
     // new assignments, not the schedule it already sits on, and the
     // scheduler's posting never depends on it.
-    const existingLabelId = (
-      existing.labelId as unknown as Types.ObjectId | undefined
-    )?.toHexString();
     await Promise.all([
       referenceCheck(dto.accountId, existingAccountId, (accId, opts) =>
         this.assertAccountUsable(householdId, accId, opts),
@@ -337,10 +330,11 @@ export class RecurringService {
       referenceCheck(dto.categoryId, existingCategoryId, (catId, opts) =>
         this.assertCategoryUsable(householdId, catId, opts),
       ),
-      typeof dto.labelId === 'string' &&
-      dto.labelId.toLowerCase() !== existingLabelId
-        ? this.labelsService.assertAssignable(householdId, dto.labelId)
-        : null,
+      this.labelsService.assertAssignableIfChanged(
+        householdId,
+        dto.labelId,
+        existing.labelId as unknown as Types.ObjectId | undefined,
+      ),
     ]);
 
     if (dto.accountId !== undefined) {

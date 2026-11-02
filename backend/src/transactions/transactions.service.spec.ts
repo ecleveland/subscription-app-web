@@ -65,7 +65,10 @@ describe('TransactionsService', () => {
     findInHousehold: jest.Mock;
     resolveImportCategories: jest.Mock;
   };
-  let labelsService: { assertAssignable: jest.Mock };
+  let labelsService: {
+    assertAssignable: jest.Mock;
+    assertAssignableIfChanged: jest.Mock;
+  };
 
   beforeEach(async () => {
     txnSave = jest.fn().mockImplementation(function (this: any) {
@@ -107,6 +110,15 @@ describe('TransactionsService', () => {
 
     labelsService = {
       assertAssignable: jest.fn().mockResolvedValue(undefined),
+      // The real change check over the mocked lookup, so these cases still
+      // pin down when a label gets validated.
+      assertAssignableIfChanged: jest.fn(
+        (...args: Parameters<LabelsService['assertAssignableIfChanged']>) =>
+          LabelsService.prototype.assertAssignableIfChanged.apply(
+            labelsService as unknown as LabelsService,
+            args,
+          ),
+      ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -1449,7 +1461,24 @@ describe('TransactionsService', () => {
       expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
     });
 
-    it('update rejects switching a labeled transaction to a transfer', async () => {
+    it('update drops the stored label when a patch without labelId switches to a transfer', async () => {
+      // Same treatment normalize() gives the category: the type switch makes
+      // the label irrelevant, so it is cleared rather than rejected.
+      const doc = txnDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        type: TransactionType.TRANSFER,
+        transferAccountId: ACC_B,
+      });
+
+      expect(saved.labelId).toBeUndefined();
+      expect(saved.categoryId).toBeUndefined();
+      expect(doc.save).toHaveBeenCalledTimes(1);
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+    });
+
+    it('update rejects a switch to transfer that explicitly sends a label', async () => {
       const doc = txnDoc({ labelId: new Types.ObjectId(LABEL_ID) });
       mockModel.findById.mockReturnValue(createChainable(doc));
 
@@ -1457,11 +1486,40 @@ describe('TransactionsService', () => {
         service.update(HOUSEHOLD_ID, TXN_ID, {
           type: TransactionType.TRANSFER,
           transferAccountId: ACC_B,
+          labelId: LABEL_ID,
         }),
       ).rejects.toThrow(
         new BadRequestException('A transfer cannot carry a label'),
       );
       expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update rejects sending a label to an existing transfer', async () => {
+      const doc = txnDoc({
+        type: TransactionType.TRANSFER,
+        categoryId: undefined,
+        transferAccountId: new Types.ObjectId(ACC_B),
+      });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, { labelId: LABEL_ID }),
+      ).rejects.toThrow(
+        new BadRequestException('A transfer cannot carry a label'),
+      );
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update keeps the label when the patch touches only the amount', async () => {
+      const doc = txnDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        amountCents: 5000,
+      });
+
+      expect(saved.labelId).toEqual(new Types.ObjectId(LABEL_ID));
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
     });
 
     it('update allows a switch to transfer when the same patch clears the label', async () => {

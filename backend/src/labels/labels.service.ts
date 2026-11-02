@@ -141,11 +141,13 @@ export class LabelsService {
   /**
    * Delete a label, archiving instead when any transaction, recurring template
    * or goal references it, so those records keep a labelId that resolves. The
-   * outcome tells the client which happened. Blocked (409) while another label
-   * has it as parent, the way a non-empty category group is: re-parenting is
-   * the client's move. The reference check and the delete are not atomic (no
-   * multi-document transactions in this codebase), so a record labeled in the
-   * window can end up with a dangling labelId.
+   * outcome tells the client which happened. A referenced label is archived
+   * even when it has child labels, because archiving leaves their parentId
+   * resolvable. An unreferenced label with children is blocked (409), the
+   * same as a non-empty category group. Re-parenting is the client's move. The
+   * reference check and the delete are not atomic (no multi-document
+   * transactions in this codebase), so a record labeled in the window can end
+   * up with a dangling labelId.
    */
   async remove(
     householdId: string,
@@ -153,16 +155,6 @@ export class LabelsService {
   ): Promise<RemoveLabelOutcomeDto> {
     const householdObjectId = new Types.ObjectId(householdId);
     const label = await this.findOwnedLabel(householdObjectId, labelId);
-
-    const hasChild = await this.labelModel
-      .exists({
-        householdId: householdObjectId,
-        parentId: label._id,
-      } as Record<string, unknown>)
-      .exec();
-    if (hasChild) {
-      throw new ConflictException('Re-parent or delete child labels first');
-    }
 
     const referenceFilter = {
       householdId: householdObjectId,
@@ -180,6 +172,17 @@ export class LabelsService {
         await label.save();
       }
       return { outcome: 'archived' };
+    }
+
+    // Only a hard delete would leave a child pointing at nothing.
+    const hasChild = await this.labelModel
+      .exists({
+        householdId: householdObjectId,
+        parentId: label._id,
+      } as Record<string, unknown>)
+      .exec();
+    if (hasChild) {
+      throw new ConflictException('Re-parent or delete child labels first');
     }
     await label.deleteOne();
     return { outcome: 'deleted' };
@@ -222,6 +225,26 @@ export class LabelsService {
     if (label.isArchived) {
       throw new BadRequestException('Cannot assign an archived label');
     }
+  }
+
+  /**
+   * assertAssignable for an update. next follows the update-DTO contract:
+   * undefined leaves the label alone and null clears it, so neither needs a
+   * check. Resending the current label, in any letter case, is not a change
+   * either. That keeps a record whose label was archived later editable.
+   */
+  async assertAssignableIfChanged(
+    householdId: string,
+    next: string | null | undefined,
+    current: Types.ObjectId | undefined,
+  ): Promise<void> {
+    if (next === undefined || next === null) {
+      return;
+    }
+    if (current && next.toLowerCase() === current.toHexString()) {
+      return;
+    }
+    await this.assertAssignable(householdId, next);
   }
 
   // Resolve a client-supplied parentId to an active label in the household, or

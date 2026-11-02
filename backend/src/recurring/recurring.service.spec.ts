@@ -64,7 +64,10 @@ describe('RecurringService', () => {
   let accountsService: { findOne: jest.Mock };
   let categoriesService: { findInHousehold: jest.Mock };
   let transactionsService: { materializeRecurring: jest.Mock };
-  let labelsService: { assertAssignable: jest.Mock };
+  let labelsService: {
+    assertAssignable: jest.Mock;
+    assertAssignableIfChanged: jest.Mock;
+  };
 
   const validCreate = () => ({
     accountId: ACC_ID,
@@ -102,6 +105,15 @@ describe('RecurringService', () => {
     transactionsService = { materializeRecurring: jest.fn() };
     labelsService = {
       assertAssignable: jest.fn().mockResolvedValue(undefined),
+      // The real change check over the mocked lookup, so these cases still
+      // pin down when a label gets validated.
+      assertAssignableIfChanged: jest.fn(
+        (...args: Parameters<LabelsService['assertAssignableIfChanged']>) =>
+          LabelsService.prototype.assertAssignableIfChanged.apply(
+            labelsService as unknown as LabelsService,
+            args,
+          ),
+      ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -1580,6 +1592,17 @@ describe('RecurringService', () => {
       await service.update(HOUSEHOLD_ID, REC_ID, { labelId: null });
 
       expect((doc as any).labelId).toBeUndefined();
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+    });
+
+    it('update without labelId keeps the label', async () => {
+      const doc = recDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await service.update(HOUSEHOLD_ID, REC_ID, { payee: 'Renamed' });
+
+      expect(doc.payee).toBe('Renamed');
+      expect((doc as any).labelId).toEqual(new Types.ObjectId(LABEL_ID));
       expect(labelsService.assertAssignable).not.toHaveBeenCalled();
     });
 

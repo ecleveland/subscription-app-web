@@ -898,22 +898,55 @@ describe('Transactions (e2e)', () => {
       expect(res.body.message).toBe('Cannot assign an archived label');
     });
 
-    it('PATCH null clears the label, and switching to a transfer requires that', async () => {
+    it('PATCH null clears the label', async () => {
       const created = await postExpense({ labelId: labelA }).expect(201);
-      const id = created.body._id as string;
-
-      await request(app.getHttpServer())
-        .patch(`/api/transactions/${id}`)
-        .set('Authorization', `Bearer ${tokenA}`)
-        .send({ type: 'transfer', transferAccountId: savingsA })
-        .expect(400);
 
       const cleared = await request(app.getHttpServer())
-        .patch(`/api/transactions/${id}`)
+        .patch(`/api/transactions/${created.body._id}`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ labelId: null })
         .expect(200);
       expect(cleared.body.labelId).toBeUndefined();
+    });
+
+    it('PATCH to a transfer without labelId drops the stored label', async () => {
+      const created = await postExpense({ labelId: labelA }).expect(201);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/transactions/${created.body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ type: 'transfer', transferAccountId: savingsA })
+        .expect(200);
+      expect(res.body.type).toBe('transfer');
+      expect(res.body.labelId).toBeUndefined();
+      expect(res.body.categoryId).toBeUndefined();
+    });
+
+    it('PATCH to a transfer that explicitly sends a label is 400', async () => {
+      const created = await postExpense({ labelId: labelA }).expect(201);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/transactions/${created.body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          type: 'transfer',
+          transferAccountId: savingsA,
+          labelId: labelA,
+        })
+        .expect(400);
+      expect(res.body.message).toBe('A transfer cannot carry a label');
+    });
+
+    it('PATCH of only the amount keeps the label', async () => {
+      const created = await postExpense({ labelId: labelA }).expect(201);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/transactions/${created.body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ amountCents: 3400 })
+        .expect(200);
+      expect(res.body.amountCents).toBe(3400);
+      expect(res.body.labelId).toBe(labelA);
     });
 
     it('?labelId=none returns only unlabeled rows and ?labelId=<id> only that label', async () => {

@@ -38,7 +38,7 @@ export class Label {
 
 export const LabelSchema = SchemaFactory.createForClass(Label);
 
-// One label per name in a household, compared case-insensitively: the
+// One label per name in a household, compared case-insensitively. The
 // strength-2 collation makes "Business" and "business" collide. A query only
 // uses this index when it asks for the same collation, which is why the list
 // sorts with LABEL_NAME_COLLATION too. Explicit name for the same reason as

@@ -172,12 +172,11 @@ export class GoalsService {
     if (dto.categoryId) {
       await this.assertCategoryInHousehold(householdId, dto.categoryId);
     }
-    const currentLabelId = (
-      goal.labelId as unknown as Types.ObjectId | undefined
-    )?.toHexString();
-    if (dto.labelId && dto.labelId.toLowerCase() !== currentLabelId) {
-      await this.labelsService.assertAssignable(householdId, dto.labelId);
-    }
+    await this.labelsService.assertAssignableIfChanged(
+      householdId,
+      dto.labelId,
+      goal.labelId as unknown as Types.ObjectId | undefined,
+    );
 
     const writes = this.fieldWrites(dto);
     const linkedId = linkedAccountId(goal);
