@@ -143,4 +143,15 @@ export class CreateRecurringDto {
   @IsInt()
   @Min(2)
   sharedWith?: number | null;
+
+  // Null means personal, the same as omitting the field.
+  @ApiPropertyOptional({
+    description:
+      'Business label in the same household, copied onto every materialized ' +
+      'transaction; null or omit for personal',
+    nullable: true,
+  })
+  @ValidateIfNotNullish
+  @IsMongoId()
+  labelId?: string | null;
 }

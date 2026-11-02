@@ -10,17 +10,20 @@ import { AccountsModule } from '../accounts/accounts.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { HouseholdsModule } from '../households/households.module';
 import { TransactionsModule } from '../transactions/transactions.module';
+import { LabelsModule } from '../labels/labels.module';
 import { CronLockModule } from '../common/cron-lock/cron-lock.module';
 import { RecurringCronService } from './recurring-cron.service';
 
 // Phase 4 recurring schedules. Depends on AccountsService/CategoriesService
 // (to validate that referenced accounts/categories belong to the household),
 // HouseholdsModule (the HouseholdGuard applied after JwtAuthGuard),
-// TransactionsModule (materializing due schedules into the ledger, VEG-467)
-// and CronLockModule (leader election for the daily scheduler run).
+// TransactionsModule (materializing due schedules into the ledger, VEG-467),
+// LabelsModule (validating a schedule's business label) and CronLockModule
+// (leader election for the daily scheduler run).
 // NotificationsModule (reminders, VEG-468) arrives with the code that needs it.
 //
-// No cycle: TransactionsModule imports only Accounts/Categories/Households.
+// No cycle: TransactionsModule imports only Accounts/Categories/Households/
+// Labels, and LabelsModule imports only Households.
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -33,6 +36,7 @@ import { RecurringCronService } from './recurring-cron.service';
     CategoriesModule,
     HouseholdsModule,
     TransactionsModule,
+    LabelsModule,
     CronLockModule,
   ],
   controllers: [RecurringController],

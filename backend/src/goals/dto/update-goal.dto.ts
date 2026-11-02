@@ -18,8 +18,8 @@ import {
 } from '../../common/validation/transform-raw-value';
 
 // Every field optional. Required schema fields use ValidateIfDefined so a null
-// is a 400, not a Mongoose error. targetDate and categoryId accept null to
-// clear them, and accountId accepts null to unlink. currentCents is not here, so the global pipe rejects it.
+// is a 400, not a Mongoose error. targetDate, categoryId and labelId accept
+// null to clear them, and accountId accepts null to unlink. currentCents is not here, so the global pipe rejects it.
 // Numeric and boolean fields read the raw value and name is trimmed, for the
 // same reasons as in CreateGoalDto.
 export class UpdateGoalDto {
@@ -58,6 +58,14 @@ export class UpdateGoalDto {
   @ValidateIfNotNullish
   @IsMongoId()
   categoryId?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Business label in the same household, or null to clear',
+    nullable: true,
+  })
+  @ValidateIfNotNullish
+  @IsMongoId()
+  labelId?: string | null;
 
   @ApiPropertyOptional({
     description:

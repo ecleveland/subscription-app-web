@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BillingCycle } from '../billing-cycle.enum';
+import { ValidateIfNotNullish } from '../../common/validation/validate-if-not-nullish';
 
 export class CreateSubscriptionDto {
   @ApiProperty({ description: 'Name of the subscription', example: 'Netflix' })
@@ -125,4 +126,16 @@ export class CreateSubscriptionDto {
   @IsMongoId()
   @IsOptional()
   accountId?: string | null;
+
+  // Null means personal. UpdateSubscriptionDto inherits this through
+  // PartialType, where null clears the label and undefined leaves it alone.
+  @ApiPropertyOptional({
+    description:
+      'Business label in the same household; null or omit for personal',
+    example: '665f1c2e9b3a4d5e6f708193',
+    nullable: true,
+  })
+  @ValidateIfNotNullish
+  @IsMongoId()
+  labelId?: string | null;
 }

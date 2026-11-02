@@ -10,6 +10,7 @@ import { GoalsService } from './goals.service';
 import { Goal, GoalType } from './schemas/goal.schema';
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { LabelsService } from '../labels/labels.service';
 import { AccountType } from '../accounts/schemas/account.schema';
 
 const HH = '507f191e810c19729de860ea';
@@ -18,6 +19,8 @@ const GOAL_ID = '507f191e810c19729de86001';
 const CAT_ID = '507f191e810c19729de86011';
 const ACC_ID = '507f191e810c19729de86021';
 const ACC2_ID = '507f191e810c19729de86022';
+const LABEL_ID = '507f191e810c19729de86031';
+const OTHER_LABEL_ID = '507f191e810c19729de86032';
 
 function createChainable(resolvedValue: any = null) {
   const chain: any = {};
@@ -82,6 +85,10 @@ describe('GoalsService', () => {
   let goalModel: any;
   let categoriesService: { findInHousehold: jest.Mock };
   let accountsService: { findOne: jest.Mock; findAll: jest.Mock };
+  let labelsService: {
+    assertAssignable: jest.Mock;
+    assertAssignableIfChanged: jest.Mock;
+  };
   let constructed: any[];
 
   beforeEach(async () => {
@@ -117,12 +124,26 @@ describe('GoalsService', () => {
       findAll: jest.fn().mockResolvedValue([]),
     };
 
+    labelsService = {
+      assertAssignable: jest.fn().mockResolvedValue(undefined),
+      // The real change check over the mocked lookup, so these cases still
+      // pin down when a label gets validated.
+      assertAssignableIfChanged: jest.fn(
+        (...args: Parameters<LabelsService['assertAssignableIfChanged']>) =>
+          LabelsService.prototype.assertAssignableIfChanged.apply(
+            labelsService as unknown as LabelsService,
+            args,
+          ),
+      ),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GoalsService,
         { provide: getModelToken(Goal.name), useValue: goalModel },
         { provide: CategoriesService, useValue: categoriesService },
         { provide: AccountsService, useValue: accountsService },
+        { provide: LabelsService, useValue: labelsService },
       ],
     }).compile();
 
@@ -972,6 +993,124 @@ describe('GoalsService', () => {
       await expect(service.remove(HH, GOAL_ID)).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('labels (VEG-697)', () => {
+    const base = {
+      name: 'New laptop',
+      type: GoalType.SAVINGS,
+      targetCents: 200000,
+    };
+
+    it('create validates and stores a label from the household', async () => {
+      const view = await service.create(HH, { ...base, labelId: LABEL_ID });
+
+      expect(labelsService.assertAssignable).toHaveBeenCalledWith(HH, LABEL_ID);
+      expect(constructed[0].labelId).toEqual(new Types.ObjectId(LABEL_ID));
+      expect(view.labelId).toEqual(new Types.ObjectId(LABEL_ID));
+    });
+
+    it('create leaves labelId unset without a label', async () => {
+      await service.create(HH, base);
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect(constructed[0]).not.toHaveProperty('labelId');
+    });
+
+    it('create rejects a label from another household with 400', async () => {
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+
+      await expect(
+        service.create(HH, { ...base, labelId: LABEL_ID }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+      expect(constructed).toHaveLength(0);
+    });
+
+    it('create rejects an archived label with 400', async () => {
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+
+      await expect(
+        service.create(HH, { ...base, labelId: LABEL_ID }),
+      ).rejects.toThrow(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+      expect(constructed).toHaveLength(0);
+    });
+
+    it('update validates and sets a changed label', async () => {
+      const doc = goalDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      goalModel.findById.mockReturnValue(createChainable(doc));
+
+      await service.update(HH, GOAL_ID, { labelId: OTHER_LABEL_ID });
+
+      expect(labelsService.assertAssignable).toHaveBeenCalledWith(
+        HH,
+        OTHER_LABEL_ID,
+      );
+      expect(doc.labelId).toEqual(new Types.ObjectId(OTHER_LABEL_ID));
+      expect(doc.save).toHaveBeenCalled();
+    });
+
+    it('update rejects a foreign label with 400 and saves nothing', async () => {
+      const doc = goalDoc();
+      goalModel.findById.mockReturnValue(createChainable(doc));
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+
+      await expect(
+        service.update(HH, GOAL_ID, { labelId: OTHER_LABEL_ID }),
+      ).rejects.toThrow(BadRequestException);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update clears the label on null', async () => {
+      const doc = goalDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      goalModel.findById.mockReturnValue(createChainable(doc));
+
+      await service.update(HH, GOAL_ID, { labelId: null });
+
+      expect(doc.labelId).toBeUndefined();
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+    });
+
+    it('update keeps an unchanged label without re-validating it', async () => {
+      const doc = goalDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      goalModel.findById.mockReturnValue(createChainable(doc));
+
+      await service.update(HH, GOAL_ID, {
+        labelId: LABEL_ID.toUpperCase(),
+        name: 'Renamed',
+      });
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect(doc.labelId).toEqual(new Types.ObjectId(LABEL_ID));
+    });
+
+    it('update carries a label change through the atomic unlink write', async () => {
+      const doc = linkedGoalDoc();
+      goalModel.findById.mockReturnValue(createChainable(doc));
+      goalModel.findOneAndUpdate.mockReturnValue(
+        createChainable(goalDoc({ labelId: new Types.ObjectId(LABEL_ID) })),
+      );
+
+      await service.update(HH, GOAL_ID, { accountId: null, labelId: LABEL_ID });
+
+      const [, update] = goalModel.findOneAndUpdate.mock.calls[0];
+      expect(update.$set.labelId).toEqual(new Types.ObjectId(LABEL_ID));
     });
   });
 });

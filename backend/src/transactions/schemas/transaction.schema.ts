@@ -87,6 +87,12 @@ export class Transaction {
   // scheduler's exactly-once guarantee — see the unique index below.
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'RecurringTransaction' })
   recurringId?: MongooseSchema.Types.ObjectId;
+
+  // The business label (VEG-697); absent means personal. A transfer never
+  // carries one: it is net-zero to the household and would double-count on the
+  // business view. TransactionsService enforces both rules.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Label' })
+  labelId?: MongooseSchema.Types.ObjectId;
 }
 
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);
@@ -95,6 +101,9 @@ export const TransactionSchema = SchemaFactory.createForClass(Transaction);
 // household-scoped date-range filters.
 TransactionSchema.index({ householdId: 1, date: -1 });
 TransactionSchema.index({ accountId: 1, date: -1 });
+// Serves the household ledger filtered by label (?labelId=<id> or none),
+// newest first.
+TransactionSchema.index({ householdId: 1, labelId: 1, date: -1 });
 
 // The recurring scheduler's idempotency backstop (VEG-467): one materialized
 // transaction per (schedule, occurrence day). The scheduler inserts BEFORE

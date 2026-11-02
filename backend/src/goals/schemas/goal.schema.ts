@@ -54,6 +54,11 @@ export class Goal {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Category' })
   categoryId?: MongooseSchema.Types.ObjectId;
 
+  // The business label (VEG-697), same household, validated by GoalsService.
+  // Absent means personal.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Label' })
+  labelId?: MongooseSchema.Types.ObjectId;
+
   // The account whose balance drives progress. Same household, validated by
   // GoalsService.
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Account' })

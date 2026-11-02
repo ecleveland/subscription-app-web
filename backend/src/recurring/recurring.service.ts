@@ -20,6 +20,8 @@ import { QueryRecurringDto } from './dto/query-recurring.dto';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
+import { LabelsService } from '../labels/labels.service';
+import { labelFilterValue } from '../labels/dto/label-filter';
 import {
   addCadence,
   settleTrackedSubscriptionDate,
@@ -81,6 +83,7 @@ interface DueSchedule {
   accountId?: Types.ObjectId;
   categoryId: Types.ObjectId;
   memberId?: Types.ObjectId;
+  labelId?: Types.ObjectId;
   type: RecurringType;
   amountCents: number;
   payee: string;
@@ -129,6 +132,7 @@ export class RecurringService {
     private readonly accountsService: AccountsService,
     private readonly categoriesService: CategoriesService,
     private readonly transactionsService: TransactionsService,
+    private readonly labelsService: LabelsService,
   ) {}
 
   /**
@@ -160,6 +164,9 @@ export class RecurringService {
     await Promise.all([
       this.assertAccountUsable(householdId, dto.accountId),
       this.assertCategoryUsable(householdId, dto.categoryId),
+      dto.labelId
+        ? this.labelsService.assertAssignable(householdId, dto.labelId)
+        : null,
     ]);
 
     const created = await new this.recurringModel({
@@ -167,6 +174,7 @@ export class RecurringService {
       accountId: new Types.ObjectId(dto.accountId),
       categoryId: new Types.ObjectId(dto.categoryId),
       memberId: memberId ? new Types.ObjectId(memberId) : undefined,
+      labelId: dto.labelId ? new Types.ObjectId(dto.labelId) : undefined,
       type: dto.type,
       amountCents: dto.amountCents,
       payee: dto.payee,
@@ -210,6 +218,9 @@ export class RecurringService {
     }
     if (query.categoryId) {
       filter.categoryId = new Types.ObjectId(query.categoryId);
+    }
+    if (query.labelId) {
+      filter.labelId = labelFilterValue(query.labelId);
     }
     // Exclude subscriptions by default (VEG-469): they are surfaced by the
     // Subscriptions page via /api/subscriptions, not the Bills view. An explicit
@@ -308,12 +319,21 @@ export class RecurringService {
       }
       return undefined;
     };
+    // A label is validated only when it changes. Unlike the account and
+    // category it is not re-checked on reactivation: an archived label blocks
+    // new assignments, not the schedule it already sits on, and the
+    // scheduler's posting never depends on it.
     await Promise.all([
       referenceCheck(dto.accountId, existingAccountId, (accId, opts) =>
         this.assertAccountUsable(householdId, accId, opts),
       ),
       referenceCheck(dto.categoryId, existingCategoryId, (catId, opts) =>
         this.assertCategoryUsable(householdId, catId, opts),
+      ),
+      this.labelsService.assertAssignableIfChanged(
+        householdId,
+        dto.labelId,
+        existing.labelId as unknown as Types.ObjectId | undefined,
       ),
     ]);
 
@@ -362,6 +382,13 @@ export class RecurringService {
     if (dto.sharedWith !== undefined) {
       // Null-to-clear: store as unset rather than a persisted null.
       existing.sharedWith = dto.sharedWith ?? undefined;
+    }
+    // Null clears the label. Transactions already materialized keep theirs;
+    // only future occurrences pick up the change.
+    if (dto.labelId !== undefined) {
+      existing.labelId = (dto.labelId
+        ? new Types.ObjectId(dto.labelId)
+        : undefined) as unknown as typeof existing.labelId;
     }
 
     // Attaching an account or reactivating here bypasses /api/subscriptions,
@@ -666,6 +693,7 @@ export class RecurringService {
         accountId: accountId.toString(),
         categoryId: schedule.categoryId.toString(),
         memberId: schedule.memberId?.toString(),
+        labelId: schedule.labelId?.toString(),
         type: toTransactionType(schedule.type),
         amountCents: schedule.amountCents,
         date: occurrence,

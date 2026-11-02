@@ -5,12 +5,17 @@ import {
   IsDateString,
   IsBoolean,
   IsInt,
+  Matches,
   Min,
   Max,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TransactionType } from '../schemas/transaction.schema';
 import { TransformBooleanParam } from '../../common/validation/transform-raw-value';
+import {
+  LABEL_FILTER_MESSAGE,
+  LABEL_FILTER_PATTERN,
+} from '../../labels/dto/label-filter';
 
 export class QueryTransactionDto {
   @ApiPropertyOptional({ description: 'Filter by account' })
@@ -29,6 +34,14 @@ export class QueryTransactionDto {
   @IsOptional()
   @IsMongoId()
   recurringId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Filter by business label: a label id, or 'none' for personal records",
+  })
+  @IsOptional()
+  @Matches(LABEL_FILTER_PATTERN, { message: LABEL_FILTER_MESSAGE })
+  labelId?: string;
 
   @ApiPropertyOptional({ enum: TransactionType })
   @IsOptional()

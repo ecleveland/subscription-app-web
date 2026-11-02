@@ -11,6 +11,7 @@ import {
 import { AccountsService } from '../accounts/accounts.service';
 import { CategoriesService } from '../categories/categories.service';
 import { TransactionsService } from '../transactions/transactions.service';
+import { LabelsService } from '../labels/labels.service';
 
 const HOUSEHOLD_ID = '507f191e810c19729de860ea';
 const MEMBER_ID = '507f191e810c19729de860e1';
@@ -20,6 +21,8 @@ const CAT_ID = '507f191e810c19729de860d4';
 const OTHER_CAT_ID = '507f191e810c19729de860d5';
 const REC_ID = '507f191e810c19729de860f5';
 const OTHER_HOUSEHOLD_ID = '507f191e810c19729de860eb';
+const LABEL_ID = '507f191e810c19729de86101';
+const OTHER_LABEL_ID = '507f191e810c19729de86102';
 
 function createChainable(resolvedValue: any = null) {
   const chain: any = {};
@@ -61,6 +64,10 @@ describe('RecurringService', () => {
   let accountsService: { findOne: jest.Mock };
   let categoriesService: { findInHousehold: jest.Mock };
   let transactionsService: { materializeRecurring: jest.Mock };
+  let labelsService: {
+    assertAssignable: jest.Mock;
+    assertAssignableIfChanged: jest.Mock;
+  };
 
   const validCreate = () => ({
     accountId: ACC_ID,
@@ -96,6 +103,18 @@ describe('RecurringService', () => {
         .mockResolvedValue({ _id: new Types.ObjectId(CAT_ID) }),
     };
     transactionsService = { materializeRecurring: jest.fn() };
+    labelsService = {
+      assertAssignable: jest.fn().mockResolvedValue(undefined),
+      // The real change check over the mocked lookup, so these cases still
+      // pin down when a label gets validated.
+      assertAssignableIfChanged: jest.fn(
+        (...args: Parameters<LabelsService['assertAssignableIfChanged']>) =>
+          LabelsService.prototype.assertAssignableIfChanged.apply(
+            labelsService as unknown as LabelsService,
+            args,
+          ),
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -107,6 +126,7 @@ describe('RecurringService', () => {
         { provide: AccountsService, useValue: accountsService },
         { provide: CategoriesService, useValue: categoriesService },
         { provide: TransactionsService, useValue: transactionsService },
+        { provide: LabelsService, useValue: labelsService },
       ],
     }).compile();
 
@@ -1470,6 +1490,229 @@ describe('RecurringService', () => {
         materialized: 1,
         skipped: 1,
       });
+    });
+  });
+
+  describe('labels (VEG-697)', () => {
+    it('create validates and persists a label from the household', async () => {
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...validCreate(),
+        labelId: LABEL_ID,
+      });
+
+      expect(labelsService.assertAssignable).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        LABEL_ID,
+      );
+      expect(mockModel.mock.calls[0][0].labelId).toEqual(
+        new Types.ObjectId(LABEL_ID),
+      );
+    });
+
+    it('create leaves labelId unset when none or null is sent', async () => {
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, validCreate());
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...validCreate(),
+        labelId: null,
+      });
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect(mockModel.mock.calls[0][0].labelId).toBeUndefined();
+      expect(mockModel.mock.calls[1][0].labelId).toBeUndefined();
+    });
+
+    it('create rejects a label from another household with 400', async () => {
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...validCreate(),
+          labelId: LABEL_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+      expect(recSave).not.toHaveBeenCalled();
+    });
+
+    it('create rejects an archived label with 400', async () => {
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...validCreate(),
+          labelId: LABEL_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+      expect(recSave).not.toHaveBeenCalled();
+    });
+
+    it('update validates and sets a changed label', async () => {
+      const doc = recDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await service.update(HOUSEHOLD_ID, REC_ID, { labelId: OTHER_LABEL_ID });
+
+      expect(labelsService.assertAssignable).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        OTHER_LABEL_ID,
+      );
+      expect((doc as any).labelId).toEqual(new Types.ObjectId(OTHER_LABEL_ID));
+    });
+
+    it('update rejects re-pointing onto a foreign label', async () => {
+      const doc = recDoc();
+      mockModel.findById.mockReturnValue(createChainable(doc));
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+
+      await expect(
+        service.update(HOUSEHOLD_ID, REC_ID, { labelId: OTHER_LABEL_ID }),
+      ).rejects.toThrow(BadRequestException);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update with labelId null unsets the label', async () => {
+      const doc = recDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await service.update(HOUSEHOLD_ID, REC_ID, { labelId: null });
+
+      expect((doc as any).labelId).toBeUndefined();
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+    });
+
+    it('update without labelId keeps the label', async () => {
+      const doc = recDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await service.update(HOUSEHOLD_ID, REC_ID, { payee: 'Renamed' });
+
+      expect(doc.payee).toBe('Renamed');
+      expect((doc as any).labelId).toEqual(new Types.ObjectId(LABEL_ID));
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+    });
+
+    it('update keeps an unchanged label without re-validating it', async () => {
+      const doc = recDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await service.update(HOUSEHOLD_ID, REC_ID, {
+        labelId: LABEL_ID.toUpperCase(),
+        payee: 'Renamed',
+      });
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect((doc as any).labelId).toEqual(new Types.ObjectId(LABEL_ID));
+    });
+
+    it("findAll with labelId 'none' filters on a null labelId", async () => {
+      await service.findAll(HOUSEHOLD_ID, { labelId: 'none' });
+
+      expect(mockModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ labelId: null }),
+      );
+    });
+
+    it('findAll with a label id filters on that ObjectId', async () => {
+      await service.findAll(HOUSEHOLD_ID, { labelId: LABEL_ID });
+
+      expect(mockModel.find).toHaveBeenCalledWith(
+        expect.objectContaining({ labelId: new Types.ObjectId(LABEL_ID) }),
+      );
+    });
+
+    it('materializeDue passes the schedule label to materializeRecurring', async () => {
+      mockModel.find.mockReturnValue({
+        lean: () => ({
+          cursor: () => ({
+            async *[Symbol.asyncIterator]() {
+              yield await Promise.resolve({
+                _id: new Types.ObjectId(REC_ID),
+                householdId: new Types.ObjectId(HOUSEHOLD_ID),
+                accountId: new Types.ObjectId(ACC_ID),
+                categoryId: new Types.ObjectId(CAT_ID),
+                labelId: new Types.ObjectId(LABEL_ID),
+                type: RecurringType.EXPENSE,
+                amountCents: 1999,
+                payee: 'Coworking',
+                tags: [],
+                cadence: RecurringCadence.MONTHLY,
+                nextDate: new Date('2026-08-01T00:00:00Z'),
+                cadenceAnchorDay: 1,
+                isActive: true,
+                isSubscription: false,
+              });
+            },
+          }),
+        }),
+      });
+      mockModel.updateOne.mockReturnValue(
+        createChainable({ matchedCount: 1, modifiedCount: 1 }),
+      );
+      transactionsService.materializeRecurring.mockResolvedValue({
+        materialized: true,
+        duplicate: false,
+      });
+
+      await service.materializeDue(new Date('2026-08-15T00:00:00Z'));
+
+      expect(transactionsService.materializeRecurring).toHaveBeenCalledTimes(1);
+      const [, occurrence] =
+        transactionsService.materializeRecurring.mock.calls[0];
+      expect(occurrence.labelId).toBe(LABEL_ID);
+    });
+
+    it('materializeDue passes no label for an unlabeled schedule', async () => {
+      mockModel.find.mockReturnValue({
+        lean: () => ({
+          cursor: () => ({
+            async *[Symbol.asyncIterator]() {
+              yield await Promise.resolve({
+                _id: new Types.ObjectId(REC_ID),
+                householdId: new Types.ObjectId(HOUSEHOLD_ID),
+                accountId: new Types.ObjectId(ACC_ID),
+                categoryId: new Types.ObjectId(CAT_ID),
+                type: RecurringType.EXPENSE,
+                amountCents: 1999,
+                payee: 'Netflix',
+                tags: [],
+                cadence: RecurringCadence.MONTHLY,
+                nextDate: new Date('2026-08-01T00:00:00Z'),
+                cadenceAnchorDay: 1,
+                isActive: true,
+                isSubscription: false,
+              });
+            },
+          }),
+        }),
+      });
+      mockModel.updateOne.mockReturnValue(
+        createChainable({ matchedCount: 1, modifiedCount: 1 }),
+      );
+      transactionsService.materializeRecurring.mockResolvedValue({
+        materialized: true,
+        duplicate: false,
+      });
+
+      await service.materializeDue(new Date('2026-08-15T00:00:00Z'));
+
+      const [, occurrence] =
+        transactionsService.materializeRecurring.mock.calls[0];
+      expect(occurrence.labelId).toBeUndefined();
     });
   });
 });

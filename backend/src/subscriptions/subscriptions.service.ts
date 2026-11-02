@@ -17,6 +17,7 @@ import {
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { AccountDocument } from '../accounts/schemas/account.schema';
+import { LabelsService } from '../labels/labels.service';
 import { settleTrackedSubscriptionDate } from '../recurring/recurring-dates.util';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
@@ -47,6 +48,7 @@ export interface SubscriptionView {
   trialEndDate?: Date;
   sharedWith?: number | null;
   accountId: Types.ObjectId | null;
+  labelId: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -66,6 +68,7 @@ export class SubscriptionsService {
     private readonly recurringModel: Model<RecurringTransactionDocument>,
     private readonly categoriesService: CategoriesService,
     private readonly accountsService: AccountsService,
+    private readonly labelsService: LabelsService,
   ) {}
 
   private static getMonthlyCost(
@@ -128,6 +131,7 @@ export class SubscriptionsService {
       sharedWith: doc.sharedWith ?? null,
       accountId:
         (doc.accountId as unknown as Types.ObjectId | undefined) ?? null,
+      labelId: (doc.labelId as unknown as Types.ObjectId | undefined) ?? null,
       createdAt: (doc as unknown as { createdAt: Date }).createdAt,
       updatedAt: (doc as unknown as { updatedAt: Date }).updatedAt,
     };
@@ -217,6 +221,9 @@ export class SubscriptionsService {
     if (typeof createDto.accountId === 'string') {
       await this.assertAccountUsable(householdId, createDto.accountId);
     }
+    if (typeof createDto.labelId === 'string') {
+      await this.labelsService.assertAssignable(householdId, createDto.labelId);
+    }
 
     const categoryId = await this.resolveCategoryId(
       householdId,
@@ -232,6 +239,10 @@ export class SubscriptionsService {
       isSubscription: true,
       amountCents,
       accountId,
+      labelId:
+        typeof createDto.labelId === 'string'
+          ? new Types.ObjectId(createDto.labelId)
+          : undefined,
       payee: createDto.name,
       cadence,
       nextDate,
@@ -411,6 +422,12 @@ export class SubscriptionsService {
       });
     }
     this.assertLedgerable(nextAmountCents, nextAccountId);
+    // Validate a label only when it changes, as RecurringService.update does.
+    await this.labelsService.assertAssignableIfChanged(
+      householdId,
+      updateDto.labelId,
+      doc.labelId as unknown as Types.ObjectId | undefined,
+    );
 
     if (updateDto.name !== undefined) doc.payee = updateDto.name;
     if (updateDto.cost !== undefined) doc.amountCents = nextAmountCents;
@@ -455,6 +472,12 @@ export class SubscriptionsService {
     }
     if (updateDto.accountId !== undefined) {
       doc.accountId = nextAccountId as unknown as typeof doc.accountId;
+    }
+    // Null clears the label.
+    if (updateDto.labelId !== undefined) {
+      doc.labelId = (updateDto.labelId
+        ? new Types.ObjectId(updateDto.labelId)
+        : undefined) as unknown as typeof doc.labelId;
     }
     SubscriptionsService.settleTrackedDate(doc, now);
 

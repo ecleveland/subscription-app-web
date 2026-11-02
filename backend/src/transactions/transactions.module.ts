@@ -6,11 +6,13 @@ import { Transaction, TransactionSchema } from './schemas/transaction.schema';
 import { AccountsModule } from '../accounts/accounts.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { HouseholdsModule } from '../households/households.module';
+import { LabelsModule } from '../labels/labels.module';
 
 // Phase 2 core: the transaction ledger. Depends on AccountsService (to keep
 // account balances in sync via applyBalanceDelta) and CategoriesService (to
-// validate that a referenced category belongs to the household). HouseholdsModule
-// provides the HouseholdGuard the controller applies after JwtAuthGuard.
+// validate that a referenced category belongs to the household). LabelsModule
+// validates a transaction's business label. HouseholdsModule provides the
+// HouseholdGuard the controller applies after JwtAuthGuard.
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -19,6 +21,7 @@ import { HouseholdsModule } from '../households/households.module';
     AccountsModule,
     CategoriesModule,
     HouseholdsModule,
+    LabelsModule,
   ],
   controllers: [TransactionsController],
   providers: [TransactionsService],

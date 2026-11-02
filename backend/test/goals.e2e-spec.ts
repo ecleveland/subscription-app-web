@@ -691,4 +691,109 @@ describe('Goals (e2e)', () => {
         .expect(401);
     });
   });
+
+  describe('business labels (VEG-697)', () => {
+    let labelA: string;
+    let labelB: string;
+
+    async function createLabel(token: string, name: string): Promise<string> {
+      const res = await api()
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name, color: '#336699' })
+        .expect(201);
+      return res.body._id;
+    }
+
+    beforeAll(async () => {
+      labelA = await createLabel(tokenA, 'Bakery');
+      labelB = await createLabel(tokenB, 'B Bakery');
+    });
+
+    it('creates a goal with a label from the same household', async () => {
+      const res = await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Oven fund',
+          type: 'savings',
+          targetCents: 500000,
+          labelId: labelA,
+        })
+        .expect(201);
+      expect(res.body.labelId).toBe(labelA);
+    });
+
+    it("rejects another household's label on create with 400", async () => {
+      const res = await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Foreign label',
+          type: 'savings',
+          targetCents: 100,
+          labelId: labelB,
+        })
+        .expect(400);
+      expect(res.body.message).toBe(
+        'labelId does not reference a label in this household',
+      );
+    });
+
+    it('rejects a malformed labelId on create', async () => {
+      await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          name: 'Malformed label',
+          type: 'savings',
+          targetCents: 100,
+          labelId: 'not-an-id',
+        })
+        .expect(400);
+    });
+
+    it('PATCH sets a label, and PATCH null clears it', async () => {
+      const created = await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Van fund', type: 'savings', targetCents: 900000 })
+        .expect(201);
+      const id = created.body._id as string;
+      expect(created.body.labelId).toBeUndefined();
+
+      const labeled = await api()
+        .patch(`/api/goals/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ labelId: labelA })
+        .expect(200);
+      expect(labeled.body.labelId).toBe(labelA);
+
+      const cleared = await api()
+        .patch(`/api/goals/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ labelId: null })
+        .expect(200);
+      expect(cleared.body.labelId).toBeUndefined();
+
+      const fetched = await api()
+        .get(`/api/goals/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(fetched.body.labelId).toBeUndefined();
+    });
+
+    it("rejects another household's label on patch with 400", async () => {
+      const created = await api()
+        .post('/api/goals')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Mine too', type: 'savings', targetCents: 100 })
+        .expect(201);
+      await api()
+        .patch(`/api/goals/${created.body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ labelId: labelB })
+        .expect(400);
+    });
+  });
 });
