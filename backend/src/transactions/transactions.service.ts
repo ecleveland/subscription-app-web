@@ -23,6 +23,8 @@ import { parseAmountToCents } from './csv-import.util';
 import { AccountsService } from '../accounts/accounts.service';
 import type { AccountDocument } from '../accounts/schemas/account.schema';
 import { CategoriesService } from '../categories/categories.service';
+import { LabelsService } from '../labels/labels.service';
+import { LABEL_FILTER_NONE } from '../labels/dto/label-filter';
 import { utcDay } from '../common/utc-date.util';
 
 // The normalized, validated reference/effect shape of a transaction, derived
@@ -83,6 +85,8 @@ export interface RecurringOccurrence {
   payee: string;
   notes?: string;
   tags: string[];
+  /** The schedule's business label, copied onto the ledger row. */
+  labelId?: string;
 }
 
 export interface MaterializeResult {
@@ -101,6 +105,7 @@ export class TransactionsService {
     private readonly transactionModel: Model<TransactionDocument>,
     private readonly accountsService: AccountsService,
     private readonly categoriesService: CategoriesService,
+    private readonly labelsService: LabelsService,
   ) {}
 
   async create(
@@ -115,7 +120,12 @@ export class TransactionsService {
       categoryId: dto.categoryId,
       transferAccountId: dto.transferAccountId,
     });
+    const labelId = dto.labelId ?? undefined;
+    this.assertLabelAllowedOnType(resolved.type, labelId);
     await this.validateReferences(householdId, resolved, true);
+    if (labelId) {
+      await this.labelsService.assertAssignable(householdId, labelId);
+    }
 
     const created = await new this.transactionModel({
       householdId: new Types.ObjectId(householdId),
@@ -126,6 +136,7 @@ export class TransactionsService {
       transferAccountId: resolved.transferAccountId
         ? new Types.ObjectId(resolved.transferAccountId)
         : undefined,
+      labelId: labelId ? new Types.ObjectId(labelId) : undefined,
       memberId: memberId ? new Types.ObjectId(memberId) : undefined,
       type: resolved.type,
       amountCents: resolved.amountCents,
@@ -189,6 +200,9 @@ export class TransactionsService {
           ? new Types.ObjectId(occurrence.memberId)
           : undefined,
         recurringId: new Types.ObjectId(occurrence.recurringId),
+        labelId: occurrence.labelId
+          ? new Types.ObjectId(occurrence.labelId)
+          : undefined,
         type: occurrence.type,
         amountCents: occurrence.amountCents,
         date,
@@ -288,6 +302,14 @@ export class TransactionsService {
     }
     if (query.recurringId) {
       filter.recurringId = new Types.ObjectId(query.recurringId);
+    }
+    if (query.labelId) {
+      // null matches both a missing field and an explicit null, so 'none'
+      // returns every personal transaction however it was written.
+      filter.labelId =
+        query.labelId === LABEL_FILTER_NONE
+          ? null
+          : new Types.ObjectId(query.labelId);
     }
     if (query.type) {
       filter.type = query.type;
@@ -606,6 +628,21 @@ export class TransactionsService {
         merged.categoryId !== before.categoryId,
     );
 
+    // undefined leaves the label alone and null clears it. The transfer rule
+    // applies to the merged state, so switching a labeled transaction to a
+    // transfer must clear the label in the same patch. Only a changed label is
+    // validated: an edit to a transaction whose label was archived later
+    // stays allowed, the same rule as categories.
+    const beforeLabelId = (
+      existing.labelId as unknown as Types.ObjectId | undefined
+    )?.toHexString();
+    const mergedLabelId =
+      dto.labelId === undefined ? beforeLabelId : (dto.labelId ?? undefined);
+    this.assertLabelAllowedOnType(merged.type, mergedLabelId);
+    if (mergedLabelId && mergedLabelId.toLowerCase() !== beforeLabelId) {
+      await this.labelsService.assertAssignable(householdId, mergedLabelId);
+    }
+
     existing.type = merged.type;
     existing.accountId = new Types.ObjectId(
       merged.accountId,
@@ -617,6 +654,9 @@ export class TransactionsService {
     existing.transferAccountId = (merged.transferAccountId
       ? new Types.ObjectId(merged.transferAccountId)
       : undefined) as unknown as typeof existing.transferAccountId;
+    existing.labelId = (mergedLabelId
+      ? new Types.ObjectId(mergedLabelId)
+      : undefined) as unknown as typeof existing.labelId;
     if (dto.date !== undefined) existing.date = new Date(dto.date);
     if (dto.payee !== undefined) existing.payee = dto.payee;
     if (dto.notes !== undefined) existing.notes = dto.notes;
@@ -933,6 +973,17 @@ export class TransactionsService {
           'Cannot record a transaction against an archived category',
         );
       }
+    }
+  }
+
+  // A transfer is net-zero to the household; a label on it would double-count
+  // on the business view.
+  private assertLabelAllowedOnType(
+    type: TransactionType,
+    labelId: string | undefined,
+  ): void {
+    if (labelId && type === TransactionType.TRANSFER) {
+      throw new BadRequestException('A transfer cannot carry a label');
     }
   }
 

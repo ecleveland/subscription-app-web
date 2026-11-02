@@ -29,8 +29,8 @@ import {
 // on nextDate silently persisting the epoch (new Date(null)). Every field here
 // uses ValidateIfDefined so null fails its validators as a 400 instead, except
 // the two fields whose null is a deliberate contract: endDate (null clears the
-// end date) and sharedWith (legacy null-to-clear, per the Subscription
-// contract the schema preserves).
+// end date), sharedWith (legacy null-to-clear, per the Subscription
+// contract the schema preserves) and labelId (null clears the label).
 export class UpdateRecurringDto {
   @ApiPropertyOptional({
     description: 'Account the materialized transactions will post to',
@@ -139,4 +139,14 @@ export class UpdateRecurringDto {
   @IsInt()
   @Min(2)
   sharedWith?: number | null;
+
+  // Null-to-clear: undefined means "unchanged". Affects future materialized
+  // transactions only.
+  @ApiPropertyOptional({
+    description: 'Business label in the same household; null clears it',
+    nullable: true,
+  })
+  @ValidateIfNotNullish
+  @IsMongoId()
+  labelId?: string | null;
 }

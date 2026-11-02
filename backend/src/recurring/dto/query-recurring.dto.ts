@@ -1,7 +1,17 @@
-import { IsBoolean, IsEnum, IsMongoId, IsOptional } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsMongoId,
+  IsOptional,
+  Matches,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { RecurringType } from '../schemas/recurring-transaction.schema';
 import { TransformBooleanParam } from '../../common/validation/transform-raw-value';
+import {
+  LABEL_FILTER_MESSAGE,
+  LABEL_FILTER_PATTERN,
+} from '../../labels/dto/label-filter';
 
 export class QueryRecurringDto {
   @ApiPropertyOptional({ enum: RecurringType })
@@ -18,6 +28,14 @@ export class QueryRecurringDto {
   @IsOptional()
   @IsMongoId()
   categoryId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Filter by business label: a label id, or 'none' for personal records",
+  })
+  @IsOptional()
+  @Matches(LABEL_FILTER_PATTERN, { message: LABEL_FILTER_MESSAGE })
+  labelId?: string;
 
   @ApiPropertyOptional({
     description: 'Only subscriptions (true) or only non-subscriptions (false)',

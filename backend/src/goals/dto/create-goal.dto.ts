@@ -73,4 +73,12 @@ export class CreateGoalDto {
   @IsOptional()
   @IsMongoId()
   accountId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Business label in the same household; omit for personal',
+    example: '665f1c2e9b3a4d5e6f708194',
+  })
+  @IsOptional()
+  @IsMongoId()
+  labelId?: string;
 }

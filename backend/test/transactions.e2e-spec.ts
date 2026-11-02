@@ -818,4 +818,139 @@ describe('Transactions (e2e)', () => {
         .expect(409);
     });
   });
+
+  describe('business labels (VEG-697)', () => {
+    let labelA: string;
+    let labelB: string;
+    let labelAccount: string;
+
+    async function createLabel(token: string, name: string): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name, color: '#336699' })
+        .expect(201);
+      return res.body._id;
+    }
+
+    function postExpense(body: Record<string, unknown>) {
+      return request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: labelAccount,
+          type: 'expense',
+          amountCents: 1200,
+          date: '2026-09-01',
+          categoryId: expenseCatA,
+          ...body,
+        });
+    }
+
+    beforeAll(async () => {
+      labelA = await createLabel(tokenA, 'Freelance');
+      labelB = await createLabel(tokenB, 'B Business');
+      // A dedicated account keeps these rows off the balances other blocks
+      // assert on.
+      labelAccount = await createAccount(app, tokenA, {
+        name: 'Label Checking',
+        type: 'checking',
+      });
+    });
+
+    it('creates a transaction with a label from the same household', async () => {
+      const res = await postExpense({ labelId: labelA }).expect(201);
+      expect(res.body.labelId).toBe(labelA);
+    });
+
+    it('rejects a label from another household with 400', async () => {
+      const res = await postExpense({ labelId: labelB }).expect(400);
+      expect(res.body.message).toBe(
+        'labelId does not reference a label in this household',
+      );
+    });
+
+    it('rejects a label on a transfer with 400', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId: labelAccount,
+          transferAccountId: savingsA,
+          type: 'transfer',
+          amountCents: 500,
+          date: '2026-09-01',
+          labelId: labelA,
+        })
+        .expect(400);
+      expect(res.body.message).toBe('A transfer cannot carry a label');
+    });
+
+    it('rejects an archived label with 400', async () => {
+      const archived = await createLabel(tokenA, 'Closed Shop');
+      await request(app.getHttpServer())
+        .patch(`/api/labels/${archived}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ isArchived: true })
+        .expect(200);
+
+      const res = await postExpense({ labelId: archived }).expect(400);
+      expect(res.body.message).toBe('Cannot assign an archived label');
+    });
+
+    it('PATCH null clears the label, and switching to a transfer requires that', async () => {
+      const created = await postExpense({ labelId: labelA }).expect(201);
+      const id = created.body._id as string;
+
+      await request(app.getHttpServer())
+        .patch(`/api/transactions/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ type: 'transfer', transferAccountId: savingsA })
+        .expect(400);
+
+      const cleared = await request(app.getHttpServer())
+        .patch(`/api/transactions/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ labelId: null })
+        .expect(200);
+      expect(cleared.body.labelId).toBeUndefined();
+    });
+
+    it('?labelId=none returns only unlabeled rows and ?labelId=<id> only that label', async () => {
+      const labeled = await postExpense({ labelId: labelA }).expect(201);
+      const unlabeled = await postExpense({}).expect(201);
+
+      const none = await request(app.getHttpServer())
+        .get('/api/transactions?labelId=none&limit=0')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const noneIds = none.body.data.map((t: { _id: string }) => t._id);
+      expect(noneIds).toContain(unlabeled.body._id);
+      expect(noneIds).not.toContain(labeled.body._id);
+      expect(
+        none.body.data.every((t: { labelId?: string }) => !t.labelId),
+      ).toBe(true);
+
+      const byLabel = await request(app.getHttpServer())
+        .get(`/api/transactions?labelId=${labelA}&limit=0`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const byLabelIds = byLabel.body.data.map((t: { _id: string }) => t._id);
+      expect(byLabelIds).toContain(labeled.body._id);
+      expect(byLabelIds).not.toContain(unlabeled.body._id);
+      expect(
+        byLabel.body.data.every(
+          (t: { labelId?: string }) => t.labelId === labelA,
+        ),
+      ).toBe(true);
+      expect(byLabel.body.meta.total).toBe(byLabel.body.data.length);
+    });
+
+    it('rejects a malformed labelId filter with 400', async () => {
+      await request(app.getHttpServer())
+        .get('/api/transactions?labelId=personal')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+    });
+  });
 });

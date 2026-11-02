@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TransactionType } from '../schemas/transaction.schema';
+import { ValidateIfNotNullish } from '../../common/validation/validate-if-not-nullish';
 
 export class CreateTransactionDto {
   @ApiProperty({
@@ -83,4 +84,15 @@ export class CreateTransactionDto {
   @IsOptional()
   @IsBoolean()
   cleared?: boolean;
+
+  // Null means personal. On create it is the same as omitting the field; on
+  // update (PartialType) null clears the label and undefined leaves it alone.
+  @ApiPropertyOptional({
+    description:
+      'Business label in the same household; null or omit for personal',
+    nullable: true,
+  })
+  @ValidateIfNotNullish
+  @IsMongoId()
+  labelId?: string | null;
 }

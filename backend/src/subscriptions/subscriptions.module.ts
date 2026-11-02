@@ -9,6 +9,7 @@ import {
 import { HouseholdsModule } from '../households/households.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { AccountsModule } from '../accounts/accounts.module';
+import { LabelsModule } from '../labels/labels.module';
 
 @Module({
   imports: [
@@ -24,6 +25,9 @@ import { AccountsModule } from '../accounts/accounts.module';
     // Provides AccountsService, which checks that a subscription's ledger
     // account belongs to the household and is not archived (VEG-486).
     AccountsModule,
+    // Provides LabelsService, which validates a subscription's business label
+    // (VEG-697).
+    LabelsModule,
   ],
   controllers: [SubscriptionsController],
   providers: [SubscriptionsService],

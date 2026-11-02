@@ -1344,4 +1344,107 @@ describe('Subscriptions (e2e)', () => {
         .expect(401);
     });
   });
+
+  describe('Business labels (VEG-697)', () => {
+    // A fresh household so these subscriptions never show up in the list
+    // counts the blocks above assert on.
+    let token: string;
+    let label: string;
+    let foreignLabel: string;
+
+    const base = {
+      name: 'Figma',
+      cost: 15,
+      billingCycle: 'monthly',
+      nextBillingDate: '2026-12-01',
+      category: 'Software',
+    };
+
+    beforeAll(async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ username: 'labelsubuser', password: 'Password123' });
+      token = res.body.access_token;
+
+      const own = await request(app.getHttpServer())
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name: 'Design studio', color: '#336699' })
+        .expect(201);
+      label = own.body._id;
+      const foreign = await request(app.getHttpServer())
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({ name: 'B Studio', color: '#336699' })
+        .expect(201);
+      foreignLabel = foreign.body._id;
+    });
+
+    it('round-trips labelId through create, get and list', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...base, labelId: label })
+        .expect(201);
+      expect(created.body.labelId).toBe(label);
+
+      const fetched = await request(app.getHttpServer())
+        .get(`/api/subscriptions/${created.body._id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(fetched.body.labelId).toBe(label);
+
+      const list = await request(app.getHttpServer())
+        .get('/api/subscriptions')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const row = list.body.data.find(
+        (s: { _id: string }) => s._id === created.body._id,
+      );
+      expect(row.labelId).toBe(label);
+    });
+
+    it('views an unlabeled subscription with labelId null', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...base, name: 'Spotify' })
+        .expect(201);
+      expect(created.body.labelId).toBeNull();
+    });
+
+    it("rejects another household's label with 400", async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...base, name: 'Intruder', labelId: foreignLabel })
+        .expect(400);
+      expect(res.body.message).toBe(
+        'labelId does not reference a label in this household',
+      );
+    });
+
+    it('PATCH sets and clears the label', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/subscriptions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...base, name: 'Notion' })
+        .expect(201);
+      const id = created.body._id as string;
+
+      const labeled = await request(app.getHttpServer())
+        .patch(`/api/subscriptions/${id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ labelId: label })
+        .expect(200);
+      expect(labeled.body.labelId).toBe(label);
+
+      const cleared = await request(app.getHttpServer())
+        .patch(`/api/subscriptions/${id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ labelId: null })
+        .expect(200);
+      expect(cleared.body.labelId).toBeNull();
+    });
+  });
 });

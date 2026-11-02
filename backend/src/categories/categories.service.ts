@@ -31,20 +31,10 @@ import { CreateCategoryGroupDto } from './dto/create-category-group.dto';
 import { UpdateCategoryGroupDto } from './dto/update-category-group.dto';
 import { RemoveCategoryOutcomeDto } from './dto/remove-category-outcome.dto';
 import { DEFAULT_CATEGORY_GROUPS } from './default-categories';
-
-// MongoDB duplicate-key error code. A concurrent seed (two boots/replicas, or a
-// household-creation seed racing the startup backfill) can lose the upsert race
-// and surface this; the document it tried to insert already exists, which is the
-// desired end state, so we treat it as a benign no-op.
-const DUPLICATE_KEY = 11000;
-
-function isDuplicateKeyError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    (error as { code: number }).code === DUPLICATE_KEY
-  );
-}
+import {
+  asConflictIfDuplicate,
+  isDuplicateKeyError,
+} from '../common/mongo-errors';
 
 @Injectable()
 export class CategoriesService {
@@ -135,6 +125,11 @@ export class CategoriesService {
         .exec();
       return group;
     } catch (error: unknown) {
+      // A concurrent seed (two boots/replicas, or a household-creation seed
+      // racing the startup backfill) can lose the upsert race and surface a
+      // duplicate-key error; the document it tried to insert already exists,
+      // which is the desired end state, so the seed paths treat it as a
+      // benign no-op.
       if (isDuplicateKeyError(error)) {
         const existing = await this.groupModel.findOne(filter).exec();
         if (existing) {
@@ -340,7 +335,7 @@ export class CategoriesService {
         sortOrder,
       }).save();
     } catch (error: unknown) {
-      throw this.asConflictIfDuplicate(
+      throw asConflictIfDuplicate(
         error,
         'A category with this name already exists in this group (possibly archived)',
       );
@@ -381,7 +376,7 @@ export class CategoriesService {
     try {
       return await category.save();
     } catch (error: unknown) {
-      throw this.asConflictIfDuplicate(
+      throw asConflictIfDuplicate(
         error,
         'A category with this name already exists in this group (possibly archived)',
       );
@@ -552,7 +547,7 @@ export class CategoriesService {
         sortOrder,
       }).save();
     } catch (error: unknown) {
-      throw this.asConflictIfDuplicate(
+      throw asConflictIfDuplicate(
         error,
         'A group with this name already exists in this household',
       );
@@ -578,7 +573,7 @@ export class CategoriesService {
     try {
       return await group.save();
     } catch (error: unknown) {
-      throw this.asConflictIfDuplicate(
+      throw asConflictIfDuplicate(
         error,
         'A group with this name already exists in this household',
       );
@@ -671,21 +666,5 @@ export class CategoriesService {
   ): Promise<number> {
     const top = await model.findOne(filter).sort({ sortOrder: -1 }).exec();
     return top ? top.sortOrder + 1 : 0;
-  }
-
-  // Map a duplicate-name unique-index violation to a client-facing 409. Keyed
-  // on the violated index actually covering `name` (when the driver reports
-  // one), so a future non-name unique index isn't mislabeled as a name
-  // conflict. Anything else is returned unchanged when it's an Error, else
-  // wrapped in one. Returns rather than throws for `throw`-site clarity.
-  private asConflictIfDuplicate(error: unknown, message: string): Error {
-    if (isDuplicateKeyError(error)) {
-      const keyPattern = (error as { keyPattern?: Record<string, unknown> })
-        .keyPattern;
-      if (!keyPattern || 'name' in keyPattern) {
-        return new ConflictException(message);
-      }
-    }
-    return error instanceof Error ? error : new Error(String(error));
   }
 }

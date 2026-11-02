@@ -204,6 +204,12 @@ export class RecurringTransaction {
   // independent of the best-effort budget-category link. Absent for non-subs.
   @Prop({ required: false, trim: true })
   subscriptionCategory?: string;
+
+  // The business label (VEG-697); absent means personal. Copied onto every
+  // transaction the scheduler materializes. Changing it affects future
+  // occurrences only. Unindexed: a household's schedules are few.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Label' })
+  labelId?: MongooseSchema.Types.ObjectId;
 }
 
 export const RecurringTransactionSchema =

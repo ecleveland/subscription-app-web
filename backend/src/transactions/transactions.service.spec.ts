@@ -11,6 +11,7 @@ import { TransactionsService } from './transactions.service';
 import { Transaction, TransactionType } from './schemas/transaction.schema';
 import { AccountsService } from '../accounts/accounts.service';
 import { CategoriesService } from '../categories/categories.service';
+import { LabelsService } from '../labels/labels.service';
 
 const HOUSEHOLD_ID = '507f191e810c19729de860ea';
 const MEMBER_ID = '507f191e810c19729de860e1';
@@ -20,6 +21,8 @@ const ACC_C = '507f191e810c19729de860c3';
 const CAT_ID = '507f191e810c19729de860d4';
 const TXN_ID = '507f191e810c19729de860f5';
 const OTHER_HOUSEHOLD_ID = '507f191e810c19729de860eb';
+const LABEL_ID = '507f191e810c19729de86101';
+const OTHER_LABEL_ID = '507f191e810c19729de86102';
 
 function createChainable(resolvedValue: any = null) {
   const chain: any = {};
@@ -62,6 +65,7 @@ describe('TransactionsService', () => {
     findInHousehold: jest.Mock;
     resolveImportCategories: jest.Mock;
   };
+  let labelsService: { assertAssignable: jest.Mock };
 
   beforeEach(async () => {
     txnSave = jest.fn().mockImplementation(function (this: any) {
@@ -101,12 +105,17 @@ describe('TransactionsService', () => {
       }),
     };
 
+    labelsService = {
+      assertAssignable: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TransactionsService,
         { provide: getModelToken(Transaction.name), useValue: mockModel },
         { provide: AccountsService, useValue: accountsService },
         { provide: CategoriesService, useValue: categoriesService },
+        { provide: LabelsService, useValue: labelsService },
       ],
     }).compile();
 
@@ -1343,6 +1352,242 @@ describe('TransactionsService', () => {
         expect.objectContaining({ householdId: HOUSEHOLD_ID }),
         expect.stringMatching(/null account id/),
       );
+    });
+  });
+
+  describe('labels (VEG-697)', () => {
+    const expense = {
+      accountId: ACC_A,
+      date: '2026-06-17',
+      amountCents: 4200,
+      type: TransactionType.EXPENSE,
+      categoryId: CAT_ID,
+    };
+
+    it('create persists a label from the household', async () => {
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...expense,
+        labelId: LABEL_ID,
+      });
+
+      expect(labelsService.assertAssignable).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        LABEL_ID,
+      );
+      expect(mockModel.mock.calls[0][0].labelId).toEqual(
+        new Types.ObjectId(LABEL_ID),
+      );
+    });
+
+    it('create leaves labelId unset when no label is sent', async () => {
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, expense);
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect(mockModel.mock.calls[0][0].labelId).toBeUndefined();
+    });
+
+    it('create treats an explicit null label as personal', async () => {
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...expense,
+        labelId: null,
+      });
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect(mockModel.mock.calls[0][0].labelId).toBeUndefined();
+    });
+
+    it('create rejects a label from another household with 400', async () => {
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...expense,
+          labelId: LABEL_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+      expect(txnSave).not.toHaveBeenCalled();
+    });
+
+    it('create rejects an archived label with 400', async () => {
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...expense,
+          labelId: LABEL_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+      expect(txnSave).not.toHaveBeenCalled();
+    });
+
+    it('create rejects a label on a transfer with 400', async () => {
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          accountId: ACC_A,
+          date: '2026-06-17',
+          amountCents: 10000,
+          type: TransactionType.TRANSFER,
+          transferAccountId: ACC_B,
+          labelId: LABEL_ID,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('A transfer cannot carry a label'),
+      );
+      expect(txnSave).not.toHaveBeenCalled();
+      expect(accountsService.applyBalanceDelta).not.toHaveBeenCalled();
+    });
+
+    it('update rejects switching a labeled transaction to a transfer', async () => {
+      const doc = txnDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, {
+          type: TransactionType.TRANSFER,
+          transferAccountId: ACC_B,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('A transfer cannot carry a label'),
+      );
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update allows a switch to transfer when the same patch clears the label', async () => {
+      const doc = txnDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        type: TransactionType.TRANSFER,
+        transferAccountId: ACC_B,
+        labelId: null,
+      });
+
+      expect(saved.labelId).toBeUndefined();
+      expect(doc.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('update with labelId null unsets the label', async () => {
+      const doc = txnDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        labelId: null,
+      });
+
+      expect(saved.labelId).toBeUndefined();
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+    });
+
+    it('update validates and sets a changed label', async () => {
+      const doc = txnDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        labelId: OTHER_LABEL_ID,
+      });
+
+      expect(labelsService.assertAssignable).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        OTHER_LABEL_ID,
+      );
+      expect(saved.labelId).toEqual(new Types.ObjectId(OTHER_LABEL_ID));
+    });
+
+    it('update rejects re-pointing onto a foreign label', async () => {
+      const doc = txnDoc();
+      mockModel.findById.mockReturnValue(createChainable(doc));
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, { labelId: OTHER_LABEL_ID }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update keeps an unchanged label without re-validating it', async () => {
+      // The label was archived after the transaction was labeled. Edits to
+      // other fields, or echoing the same id back, must still work.
+      const doc = txnDoc({ labelId: new Types.ObjectId(LABEL_ID) });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        amountCents: 5000,
+        labelId: LABEL_ID.toUpperCase(),
+      });
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect(saved.labelId).toEqual(new Types.ObjectId(LABEL_ID));
+    });
+
+    it("findAll with labelId 'none' filters on a null labelId", async () => {
+      await service.findAll(HOUSEHOLD_ID, { labelId: 'none' });
+
+      const filter = mockModel.find.mock.calls[0][0];
+      expect(filter).toHaveProperty('labelId', null);
+    });
+
+    it('findAll with a label id filters on that ObjectId', async () => {
+      await service.findAll(HOUSEHOLD_ID, { labelId: LABEL_ID });
+
+      const filter = mockModel.find.mock.calls[0][0];
+      expect(filter.labelId).toEqual(new Types.ObjectId(LABEL_ID));
+      expect(mockModel.countDocuments.mock.calls[0][0]).toBe(filter);
+    });
+
+    it('materializeRecurring persists the schedule label', async () => {
+      await service.materializeRecurring(HOUSEHOLD_ID, {
+        recurringId: '507f191e810c19729de860c9',
+        accountId: ACC_A,
+        categoryId: CAT_ID,
+        type: TransactionType.EXPENSE,
+        amountCents: 1999,
+        date: new Date('2026-08-01T00:00:00Z'),
+        payee: 'Coworking',
+        tags: [],
+        labelId: LABEL_ID,
+      });
+
+      expect(mockModel.mock.calls[0][0].labelId).toEqual(
+        new Types.ObjectId(LABEL_ID),
+      );
+    });
+
+    it('materializeRecurring leaves labelId unset for an unlabeled schedule', async () => {
+      await service.materializeRecurring(HOUSEHOLD_ID, {
+        recurringId: '507f191e810c19729de860c9',
+        accountId: ACC_A,
+        categoryId: CAT_ID,
+        type: TransactionType.EXPENSE,
+        amountCents: 1999,
+        date: new Date('2026-08-01T00:00:00Z'),
+        payee: 'Netflix',
+        tags: [],
+      });
+
+      expect(mockModel.mock.calls[0][0].labelId).toBeUndefined();
     });
   });
 });

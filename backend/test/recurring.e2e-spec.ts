@@ -841,6 +841,28 @@ describe('Recurring (e2e)', () => {
       expect(after.body.nextDate).toContain('2026-09-01');
     });
 
+    it("copies a labeled schedule's labelId onto the materialized transaction (VEG-697)", async () => {
+      const label = await request(app.getHttpServer())
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Studio', color: '#663399' })
+        .expect(201);
+      const { id } = await scheduleOnFreshAccount({
+        payee: 'Studio rent',
+        amountCents: 50000,
+        nextDate: '2026-08-03',
+        labelId: label.body._id,
+      });
+
+      await recurringService.materializeDue(NOW);
+
+      const rows = await ledgerFor(id);
+      expect(rows).toHaveLength(1);
+      expect(
+        (rows[0].labelId as unknown as Types.ObjectId | undefined)?.toString(),
+      ).toBe(label.body._id);
+    });
+
     // The ticket's headline acceptance criterion. Asserted as an exact DELTA,
     // not a lower bound: expenseCatA is shared with the CRUD suites and with
     // the other scheduler tests in this month, so `toBeGreaterThanOrEqual`
@@ -1035,6 +1057,93 @@ describe('Recurring (e2e)', () => {
       ).toBe(householdIdB);
       // And the isolation that actually matters: A's money did not move.
       expect(await balanceOf(checkingA)).toBe(aBalanceBefore);
+    });
+  });
+
+  describe('business labels (VEG-697)', () => {
+    let labelA: string;
+    let labelB: string;
+
+    beforeAll(async () => {
+      const resA = await request(app.getHttpServer())
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Rental unit', color: '#336699' })
+        .expect(201);
+      labelA = resA.body._id;
+      const resB = await request(app.getHttpServer())
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${tokenB}`)
+        .send({ name: 'B Rental', color: '#336699' })
+        .expect(201);
+      labelB = resB.body._id;
+    });
+
+    it('creates a labeled schedule', async () => {
+      const body = await createSchedule(tokenA, {
+        payee: 'Property tax',
+        labelId: labelA,
+      });
+      expect(body.labelId).toBe(labelA);
+    });
+
+    it('rejects a label from another household with 400', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/recurring')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send(validBody({ labelId: labelB }))
+        .expect(400);
+      expect(res.body.message).toBe(
+        'labelId does not reference a label in this household',
+      );
+    });
+
+    it('PATCH null clears the label', async () => {
+      const body = await createSchedule(tokenA, { labelId: labelA });
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/recurring/${body._id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ labelId: null })
+        .expect(200);
+      expect(res.body.labelId).toBeUndefined();
+    });
+
+    it('?labelId=none returns only unlabeled schedules and ?labelId=<id> only that label', async () => {
+      const labeled = await createSchedule(tokenA, {
+        payee: 'Insurance',
+        labelId: labelA,
+      });
+      const unlabeled = await createSchedule(tokenA, { payee: 'Gym' });
+
+      const none = await request(app.getHttpServer())
+        .get('/api/recurring?labelId=none')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const noneIds = none.body.map((s: { _id: string }) => s._id);
+      expect(noneIds).toContain(unlabeled._id);
+      expect(noneIds).not.toContain(labeled._id);
+      expect(none.body.every((s: { labelId?: string }) => !s.labelId)).toBe(
+        true,
+      );
+
+      const byLabel = await request(app.getHttpServer())
+        .get(`/api/recurring?labelId=${labelA}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const byLabelIds = byLabel.body.map((s: { _id: string }) => s._id);
+      expect(byLabelIds).toContain(labeled._id);
+      expect(byLabelIds).not.toContain(unlabeled._id);
+      expect(
+        byLabel.body.every((s: { labelId?: string }) => s.labelId === labelA),
+      ).toBe(true);
+    });
+
+    it('rejects a malformed labelId filter with 400', async () => {
+      await request(app.getHttpServer())
+        .get('/api/recurring?labelId=personal')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
     });
   });
 });

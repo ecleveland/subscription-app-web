@@ -13,6 +13,7 @@ import { UpdateGoalDto } from './dto/update-goal.dto';
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { AccountDocument } from '../accounts/schemas/account.schema';
+import { LabelsService } from '../labels/labels.service';
 import { parseUtcDate } from '../common/utc-date.util';
 import { accountFitsGoal } from './goal-account-pairing';
 
@@ -62,6 +63,7 @@ export class GoalsService {
     private readonly goalModel: Model<GoalDocument>,
     private readonly categoriesService: CategoriesService,
     private readonly accountsService: AccountsService,
+    private readonly labelsService: LabelsService,
   ) {}
 
   /**
@@ -72,6 +74,9 @@ export class GoalsService {
   async create(householdId: string, dto: CreateGoalDto): Promise<GoalView> {
     if (dto.categoryId) {
       await this.assertCategoryInHousehold(householdId, dto.categoryId);
+    }
+    if (dto.labelId) {
+      await this.labelsService.assertAssignable(householdId, dto.labelId);
     }
     const account = dto.accountId
       ? await this.assertAccountLinkable(householdId, dto.accountId, dto.type)
@@ -87,6 +92,7 @@ export class GoalsService {
       ...(dto.categoryId && {
         categoryId: new Types.ObjectId(dto.categoryId),
       }),
+      ...(dto.labelId && { labelId: new Types.ObjectId(dto.labelId) }),
       ...(account && {
         accountId: account._id,
         baselineCents: account.balanceCents,
@@ -148,7 +154,8 @@ export class GoalsService {
   /**
    * Update the editable fields. Reads an explicit allowlist from the DTO so
    * currentCents can never be written here, even if it slips past validation.
-   * null clears targetDate and categoryId.
+   * null clears targetDate, categoryId and labelId. A label is validated only
+   * when it changes, so a goal whose label was archived later stays editable.
    *
    * accountId links, relinks or (with null) unlinks, each as one atomic
    * write. Linking sets the baseline so the progress shown does not move.
@@ -164,6 +171,12 @@ export class GoalsService {
 
     if (dto.categoryId) {
       await this.assertCategoryInHousehold(householdId, dto.categoryId);
+    }
+    const currentLabelId = (
+      goal.labelId as unknown as Types.ObjectId | undefined
+    )?.toHexString();
+    if (dto.labelId && dto.labelId.toLowerCase() !== currentLabelId) {
+      await this.labelsService.assertAssignable(householdId, dto.labelId);
     }
 
     const writes = this.fieldWrites(dto);
@@ -375,8 +388,8 @@ export class GoalsService {
     return this.toView(unlinked);
   }
 
-  // The non-link edits from the allowlist. null clears targetDate and
-  // categoryId.
+  // The non-link edits from the allowlist. null clears targetDate, categoryId
+  // and labelId.
   private fieldWrites(dto: UpdateGoalDto): GoalWrites {
     const writes: GoalWrites = { $set: {}, $unset: {} };
     if (dto.name !== undefined) writes.$set.name = dto.name;
@@ -394,6 +407,11 @@ export class GoalsService {
       writes.$unset.categoryId = 1;
     } else if (dto.categoryId !== undefined) {
       writes.$set.categoryId = new Types.ObjectId(dto.categoryId);
+    }
+    if (dto.labelId === null) {
+      writes.$unset.labelId = 1;
+    } else if (dto.labelId !== undefined) {
+      writes.$set.labelId = new Types.ObjectId(dto.labelId);
     }
     return writes;
   }

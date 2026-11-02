@@ -6,6 +6,7 @@ import { SubscriptionsService } from './subscriptions.service';
 import { RecurringTransaction } from '../recurring/schemas/recurring-transaction.schema';
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { LabelsService } from '../labels/labels.service';
 import { BulkAction } from './dto/bulk-operation.dto';
 
 // A chainable Mongoose query mock: every builder method returns `this`, and
@@ -59,6 +60,7 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
   let model: any;
   let savedDocs: Record<string, any>[];
   let accountsService: { findOne: jest.Mock };
+  let labelsService: { assertAssignable: jest.Mock };
 
   beforeEach(async () => {
     savedDocs = [];
@@ -106,12 +108,17 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
         ),
     };
 
+    labelsService = {
+      assertAssignable: jest.fn().mockResolvedValue(undefined),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         SubscriptionsService,
         { provide: getModelToken(RecurringTransaction.name), useValue: model },
         { provide: CategoriesService, useValue: categoriesService },
         { provide: AccountsService, useValue: accountsService },
+        { provide: LabelsService, useValue: labelsService },
       ],
     }).compile();
 
@@ -918,6 +925,129 @@ describe('SubscriptionsService (over RecurringTransaction, VEG-469)', () => {
       const n = await service.removeAllByHouseholdId(HH);
       expect(model.deleteMany.mock.calls[0][0].isSubscription).toBe(true);
       expect(n).toBe(3);
+    });
+  });
+
+  describe('labels (VEG-697)', () => {
+    const LABEL = new Types.ObjectId();
+    const OTHER_LABEL = new Types.ObjectId();
+    const base = {
+      name: 'Figma',
+      cost: 15,
+      billingCycle: 'monthly' as any,
+      nextBillingDate: '2026-08-01',
+      category: 'Software',
+    };
+
+    it('create validates the label and returns it on the view', async () => {
+      const view = await service.create(HH, MEMBER, {
+        ...base,
+        labelId: LABEL.toString(),
+      });
+
+      expect(labelsService.assertAssignable).toHaveBeenCalledWith(
+        HH,
+        LABEL.toString(),
+      );
+      expect(savedDocs[0].labelId.equals(LABEL)).toBe(true);
+      expect(view.labelId?.equals(LABEL)).toBe(true);
+    });
+
+    it('create without a label views labelId as null', async () => {
+      const view = await service.create(HH, MEMBER, { ...base, labelId: null });
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect(savedDocs[0].labelId).toBeUndefined();
+      expect(view.labelId).toBeNull();
+    });
+
+    it('create rejects a label from another household with 400', async () => {
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+
+      await expect(
+        service.create(HH, MEMBER, { ...base, labelId: LABEL.toString() }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+      expect(savedDocs).toHaveLength(0);
+    });
+
+    it('create rejects an archived label with 400', async () => {
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+
+      await expect(
+        service.create(HH, MEMBER, { ...base, labelId: LABEL.toString() }),
+      ).rejects.toThrow(
+        new BadRequestException('Cannot assign an archived label'),
+      );
+      expect(savedDocs).toHaveLength(0);
+    });
+
+    it('update validates and sets a changed label', async () => {
+      const doc = recDoc({ labelId: LABEL });
+      model.findById.mockReturnValue(chain(doc));
+
+      const view = await service.update(HH, doc._id.toString(), {
+        labelId: OTHER_LABEL.toString(),
+      });
+
+      expect(labelsService.assertAssignable).toHaveBeenCalledWith(
+        HH,
+        OTHER_LABEL.toString(),
+      );
+      expect((doc as any).labelId.equals(OTHER_LABEL)).toBe(true);
+      expect(view.labelId?.equals(OTHER_LABEL)).toBe(true);
+    });
+
+    it('update rejects a foreign label and saves nothing', async () => {
+      const doc = recDoc();
+      model.findById.mockReturnValue(chain(doc));
+      labelsService.assertAssignable.mockRejectedValue(
+        new BadRequestException(
+          'labelId does not reference a label in this household',
+        ),
+      );
+
+      await expect(
+        service.update(HH, doc._id.toString(), {
+          labelId: OTHER_LABEL.toString(),
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update clears the label on null', async () => {
+      const doc = recDoc({ labelId: LABEL });
+      model.findById.mockReturnValue(chain(doc));
+
+      const view = await service.update(HH, doc._id.toString(), {
+        labelId: null,
+      });
+
+      expect((doc as any).labelId).toBeUndefined();
+      expect(view.labelId).toBeNull();
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+    });
+
+    it('update keeps an unchanged label without re-validating it', async () => {
+      const doc = recDoc({ labelId: LABEL });
+      model.findById.mockReturnValue(chain(doc));
+
+      await service.update(HH, doc._id.toString(), {
+        labelId: LABEL.toString().toUpperCase(),
+        name: 'Renamed',
+      });
+
+      expect(labelsService.assertAssignable).not.toHaveBeenCalled();
+      expect((doc as any).labelId.equals(LABEL)).toBe(true);
     });
   });
 });
