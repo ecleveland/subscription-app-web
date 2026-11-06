@@ -129,6 +129,30 @@ describe('LabelForm', () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
+  it('saves an existing label named Personal when only its color changes', async () => {
+    const personal: Label = { ...label, name: 'Personal' };
+    vi.mocked(updateLabel).mockResolvedValue(personal);
+    const onSaved = vi.fn();
+    const user = userEvent.setup();
+
+    render(<LabelForm label={personal} onSaved={onSaved} onCancel={vi.fn()} />);
+    fireEvent.input(screen.getByLabelText('Color'), {
+      target: { value: '#112233' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Update' }));
+
+    await waitFor(() =>
+      expect(updateLabel).toHaveBeenCalledWith('l1', {
+        name: 'Personal',
+        color: '#112233',
+      }),
+    );
+    expect(
+      screen.queryByText('"Personal" is the built-in default and cannot be a label name'),
+    ).toBeNull();
+    expect(onSaved).toHaveBeenCalled();
+  });
+
   it('calls onCancel from the Cancel button', async () => {
     const onCancel = vi.fn();
     const user = userEvent.setup();

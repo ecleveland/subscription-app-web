@@ -35,7 +35,9 @@ export default function LabelForm({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (isReservedLabelName(name)) {
+    // The backend never reserved the name, so a label already called
+    // Personal can exist. Only a create or a rename to it is blocked.
+    if (name.trim() !== label?.name && isReservedLabelName(name)) {
       setError(RESERVED_LABEL_NAME_ERROR);
       return;
     }

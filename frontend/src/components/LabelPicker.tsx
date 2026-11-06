@@ -65,7 +65,6 @@ export default function LabelPicker({
 
   function closeRow() {
     attemptRef.current += 1;
-    setSaving(false);
     setAdding(false);
     setNewName('');
     setError('');
@@ -94,7 +93,9 @@ export default function LabelPicker({
       setError(message);
       showErrorToast(message);
     } finally {
-      if (isCurrent()) setSaving(false);
+      // Saving stays true across Cancel until the request settles, so a
+      // reopened row cannot send a duplicate create.
+      setSaving(false);
     }
   }
 

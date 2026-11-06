@@ -291,9 +291,33 @@ describe('LabelPicker', () => {
     expect(onCreated).toHaveBeenCalledTimes(1);
     expect(onCreated).toHaveBeenCalledWith(created);
     expect(onChange).not.toHaveBeenCalled();
-    // A reopened row is not stuck waiting on the discarded request.
+  });
+
+  it('keeps Add disabled after Cancel until the pending create settles', async () => {
+    let resolve!: (label: Label) => void;
+    vi.mocked(createLabel).mockReturnValue(
+      new Promise<Label>((r) => {
+        resolve = r;
+      }),
+    );
+    const user = userEvent.setup();
+    renderPicker({ labels: [etsy] });
+
     await user.click(screen.getByRole('button', { name: 'Add a label' }));
+    await user.type(screen.getByLabelText('New label name'), 'Bakery');
+    await user.click(screen.getByRole('button', { name: 'Add new label' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel new label' }));
+    await user.click(screen.getByRole('button', { name: 'Add a label' }));
+
+    // A retry now would create a duplicate while the first request is pending.
+    expect(screen.getByRole('button', { name: 'Add new label' })).toBeDisabled();
+
+    await act(async () => {
+      resolve(makeLabel({ _id: 'l9', name: 'Bakery' }));
+    });
+
     expect(screen.getByRole('button', { name: 'Add new label' })).toBeEnabled();
+    expect(createLabel).toHaveBeenCalledTimes(1);
   });
 
   it('rejects the reserved name Personal in any case', async () => {
