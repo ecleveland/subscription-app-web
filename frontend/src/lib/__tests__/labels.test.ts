@@ -9,6 +9,8 @@ import {
   updateLabel,
   deleteLabel,
   withLabel,
+  isReservedLabelName,
+  RESERVED_LABEL_NAME,
 } from '../labels';
 import type { Label } from '../types';
 
@@ -94,5 +96,20 @@ describe('withLabel', () => {
 
   it('adds to an empty list', () => {
     expect(withLabel([], make('l1', 'Solo')).map((l) => l._id)).toEqual(['l1']);
+  });
+});
+
+describe('isReservedLabelName', () => {
+  it('matches Personal ignoring case and surrounding space', () => {
+    expect(RESERVED_LABEL_NAME).toBe('Personal');
+    expect(isReservedLabelName('Personal')).toBe(true);
+    expect(isReservedLabelName('  personal ')).toBe(true);
+    expect(isReservedLabelName('PERSONAL')).toBe(true);
+  });
+
+  it('allows other names, including ones that contain Personal', () => {
+    expect(isReservedLabelName('Personal care')).toBe(false);
+    expect(isReservedLabelName('Etsy shop')).toBe(false);
+    expect(isReservedLabelName('')).toBe(false);
   });
 });

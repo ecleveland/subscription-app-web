@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { contributeToGoal, listGoals, updateGoal } from '@/lib/goals';
 import { listCategories } from '@/lib/categories';
@@ -89,6 +89,11 @@ export default function GoalsPage() {
       cancelled = true;
     };
   }, [isAuthenticated]);
+
+  const labelById = useMemo(
+    () => new Map(labels.map((l) => [l._id, l])),
+    [labels],
+  );
 
   function handleLabelCreated(label: Label) {
     setLabels((prev) => withLabel(prev, label));
@@ -227,6 +232,7 @@ export default function GoalsPage() {
             <li key={goal._id}>
               <GoalCard
                 goal={goal}
+                label={labelById.get(goal.labelId ?? '')}
                 onEdit={(g) => {
                   setShowCreate(false);
                   setEditing(g);

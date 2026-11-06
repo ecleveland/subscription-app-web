@@ -1,7 +1,13 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { createLabel, defaultLabelColor, updateLabel } from '@/lib/labels';
+import {
+  RESERVED_LABEL_NAME_ERROR,
+  createLabel,
+  defaultLabelColor,
+  isReservedLabelName,
+  updateLabel,
+} from '@/lib/labels';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import type { Label } from '@/lib/types';
 
@@ -29,6 +35,10 @@ export default function LabelForm({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (isReservedLabelName(name)) {
+      setError(RESERVED_LABEL_NAME_ERROR);
+      return;
+    }
     setError('');
     setLoading(true);
     try {

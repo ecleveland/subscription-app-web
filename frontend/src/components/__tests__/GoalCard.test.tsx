@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import GoalCard from '@/components/GoalCard';
-import type { Goal } from '@/lib/types';
+import type { Goal, Label } from '@/lib/types';
 
 function goal(over: Partial<Goal> = {}): Goal {
   return {
@@ -21,13 +21,24 @@ function goal(over: Partial<Goal> = {}): Goal {
   };
 }
 
-function renderCard(over: Partial<Goal> = {}) {
+const etsy: Label = {
+  _id: 'l1',
+  householdId: 'h',
+  name: 'Etsy shop',
+  color: '#2f8a93',
+  isArchived: false,
+  parentId: null,
+  createdAt: '',
+  updatedAt: '',
+};
+
+function renderCard(over: Partial<Goal> = {}, label?: Label) {
   const props = {
     onEdit: vi.fn(),
     onArchiveToggle: vi.fn(),
     onContribute: vi.fn().mockResolvedValue(true),
   };
-  render(<GoalCard goal={goal(over)} {...props} />);
+  render(<GoalCard goal={goal(over)} label={label} {...props} />);
   return props;
 }
 
@@ -48,6 +59,16 @@ describe('GoalCard', () => {
     expect(screen.getByText('$500.00 of $1,000.00')).toBeInTheDocument();
     expect(screen.getByText('50%')).toBeInTheDocument();
     expect(bar().style.width).toBe('50%');
+  });
+
+  it('shows the label chip when the goal has a label', () => {
+    renderCard({ labelId: 'l1' }, etsy);
+    expect(screen.getByText('Etsy shop')).toBeInTheDocument();
+  });
+
+  it('shows no label chip for a personal goal', () => {
+    renderCard();
+    expect(screen.queryByText('Etsy shop')).toBeNull();
   });
 
   it('labels a debt goal', () => {

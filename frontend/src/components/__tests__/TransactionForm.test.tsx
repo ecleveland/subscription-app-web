@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/transactions', () => ({
@@ -237,10 +237,7 @@ describe('TransactionForm', () => {
 
       await user.selectOptions(screen.getByLabelText('Category'), 'c1');
       await user.type(screen.getByLabelText('Amount ($)'), '12');
-      expect(screen.getByRole('radio', { name: 'Personal' })).toHaveAttribute(
-        'aria-checked',
-        'true',
-      );
+      expect(screen.getByRole('radio', { name: 'Personal' })).toBeChecked();
       await user.click(screen.getByRole('button', { name: 'Add' }));
 
       await waitFor(() => expect(createTransaction).toHaveBeenCalledTimes(1));
@@ -252,10 +249,7 @@ describe('TransactionForm', () => {
       vi.mocked(updateTransaction).mockResolvedValue({} as never);
       renderForm({ labels: [bizLabel], transaction: labeledTxn });
 
-      expect(screen.getByRole('radio', { name: 'Etsy shop' })).toHaveAttribute(
-        'aria-checked',
-        'true',
-      );
+      expect(screen.getByRole('radio', { name: 'Etsy shop' })).toBeChecked();
       await user.click(screen.getByRole('radio', { name: 'Personal' }));
       await user.click(screen.getByRole('button', { name: 'Update' }));
 
@@ -276,9 +270,7 @@ describe('TransactionForm', () => {
       await user.click(screen.getByRole('button', { name: 'Add a label' }));
       const nameInput = screen.getByLabelText('New label name');
       await user.type(nameInput, 'Consulting');
-      await user.click(
-        within(nameInput.parentElement!).getByRole('button', { name: 'Add' }),
-      );
+      await user.click(screen.getByRole('button', { name: 'Add new label' }));
 
       await waitFor(() => expect(onLabelCreated).toHaveBeenCalledWith(created));
       await user.click(screen.getByRole('button', { name: 'Add' }));

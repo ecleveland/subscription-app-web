@@ -15,13 +15,19 @@ vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
 }));
-// LabelForm renders for real and seeds its color from defaultLabelColor.
-vi.mock('@/lib/labels', () => ({
-  listLabels: vi.fn(),
-  createLabel: vi.fn(),
-  updateLabel: vi.fn(),
-  defaultLabelColor: () => '#2f8a93',
-}));
+// LabelForm renders for real, seeds its color from defaultLabelColor and
+// checks names with the real reserved name helper.
+vi.mock('@/lib/labels', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/labels')>();
+  return {
+    listLabels: vi.fn(),
+    createLabel: vi.fn(),
+    updateLabel: vi.fn(),
+    defaultLabelColor: () => '#2f8a93',
+    isReservedLabelName: actual.isReservedLabelName,
+    RESERVED_LABEL_NAME_ERROR: actual.RESERVED_LABEL_NAME_ERROR,
+  };
+});
 // CategoryForm renders for real: its lib and toast imports are mocked above,
 // and the edit-switch regression below depends on its internal state.
 

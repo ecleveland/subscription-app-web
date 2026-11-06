@@ -305,10 +305,7 @@ describe('RecurringForm', () => {
     vi.mocked(updateRecurring).mockResolvedValue(existing);
     renderForm({ labels: [bizLabel], recurring: { ...existing, labelId: 'l1' } });
 
-    expect(screen.getByRole('radio', { name: 'Etsy shop' })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
+    expect(screen.getByRole('radio', { name: 'Etsy shop' })).toBeChecked();
     await user.click(screen.getByRole('radio', { name: 'Personal' }));
     await user.click(screen.getByRole('button', { name: /update|save/i }));
 

@@ -413,6 +413,21 @@ describe('GoalsPage', () => {
       expect(await screen.findByRole('radio', { name: 'Etsy shop' })).toBeInTheDocument();
     });
 
+    it('shows a label chip on a labeled goal card only', async () => {
+      vi.mocked(listGoals).mockResolvedValue([
+        { ...half, labelId: 'l1' },
+        empty,
+      ]);
+      render(<GoalsPage />);
+
+      expect(
+        await within(await screen.findByRole('article', { name: 'Emergency fund' })).findByText(
+          'Etsy shop',
+        ),
+      ).toBeInTheDocument();
+      expect(within(card('Vacation')).queryByText('Etsy shop')).toBeNull();
+    });
+
     it('toasts a labels failure while goals still render', async () => {
       vi.mocked(listLabels).mockRejectedValue(new Error('Labels down'));
       render(<GoalsPage />);

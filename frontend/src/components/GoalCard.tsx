@@ -3,10 +3,13 @@
 import { useState, type FormEvent } from 'react';
 import { daysUntilTarget, formatDateOnly, goalProgress } from '@/lib/goals';
 import { dollarsToCents, formatCents } from '@/lib/utils';
-import type { Goal } from '@/lib/types';
+import LabelChip from '@/components/LabelChip';
+import type { Goal, Label } from '@/lib/types';
 
 interface Props {
   goal: Goal;
+  // The goal's label, resolved by the page. Personal goals pass none.
+  label?: Label;
   onEdit: (goal: Goal) => void;
   onArchiveToggle: (goal: Goal) => void;
   // Resolves true when the contribution saved, so the card can clear its input.
@@ -29,7 +32,13 @@ function parseSignedCents(value: string): number | null {
   return negative ? -cents : cents;
 }
 
-export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }: Props) {
+export default function GoalCard({
+  goal,
+  label,
+  onEdit,
+  onArchiveToggle,
+  onContribute,
+}: Props) {
   const [amount, setAmount] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -79,6 +88,7 @@ export default function GoalCard({ goal, onEdit, onArchiveToggle, onContribute }
             >
               {goal.type === 'debt' ? 'Debt' : 'Savings'}
             </span>
+            <LabelChip label={label} />
           </div>
           {goal.linkedAccount && (
             <p className="text-xs text-muted mt-1">

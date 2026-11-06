@@ -107,6 +107,28 @@ describe('LabelForm', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Etsy shop');
   });
 
+  it.each([
+    ['create', undefined],
+    ['edit', label],
+  ])('rejects the reserved name Personal in %s mode', async (_mode, existing) => {
+    const onSaved = vi.fn();
+    const user = userEvent.setup();
+
+    render(<LabelForm label={existing} onSaved={onSaved} onCancel={vi.fn()} />);
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), ' PERSONAL ');
+    await user.click(
+      screen.getByRole('button', { name: existing ? 'Update' : 'Create' }),
+    );
+
+    expect(
+      screen.getByText('"Personal" is the built-in default and cannot be a label name'),
+    ).toBeInTheDocument();
+    expect(createLabel).not.toHaveBeenCalled();
+    expect(updateLabel).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
   it('calls onCancel from the Cancel button', async () => {
     const onCancel = vi.fn();
     const user = userEvent.setup();

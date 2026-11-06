@@ -5,6 +5,16 @@ import type { Label } from './types';
 // label, so there is no Personal record to filter by id.
 export const LABEL_FILTER_NONE = 'none';
 
+// Personal is the absence of a label, so a label with that name would read as
+// two Personal choices in every picker.
+export const RESERVED_LABEL_NAME = 'Personal';
+
+export function isReservedLabelName(name: string): boolean {
+  return name.trim().toLowerCase() === RESERVED_LABEL_NAME.toLowerCase();
+}
+
+export const RESERVED_LABEL_NAME_ERROR = `"${RESERVED_LABEL_NAME}" is the built-in default and cannot be a label name`;
+
 // The API accepts six digit hex. Lowercase matches what a color input
 // reports, so a saved color round trips unchanged.
 export const LABEL_COLORS = [

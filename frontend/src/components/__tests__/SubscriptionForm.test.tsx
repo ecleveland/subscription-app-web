@@ -660,7 +660,7 @@ describe('SubscriptionForm', () => {
         <SubscriptionForm subscription={{ ...existingSub, labelId: 'lab-1' }} />,
       );
       const business = await screen.findByRole('radio', { name: 'Business' });
-      expect(business).toHaveAttribute('aria-checked', 'true');
+      expect(business).toBeChecked();
 
       await user.click(screen.getByRole('radio', { name: 'Personal' }));
       await user.click(screen.getByRole('button', { name: 'Update' }));
@@ -696,7 +696,7 @@ describe('SubscriptionForm', () => {
       await screen.findByRole('radio', { name: 'Business' });
       await user.click(screen.getByRole('button', { name: 'Add a label' }));
       await user.type(screen.getByLabelText('New label name'), 'Agency');
-      await user.click(screen.getByRole('button', { name: 'Add' }));
+      await user.click(screen.getByRole('button', { name: 'Add new label' }));
 
       // Two labels switch the picker to a select.
       const select = await screen.findByRole('combobox', { name: 'Label' });
