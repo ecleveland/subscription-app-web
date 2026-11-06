@@ -8,9 +8,11 @@ import {
 } from '@/lib/transactions';
 import { dollarsToCents } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
+import LabelPicker from './LabelPicker';
 import type {
   Account,
   BudgetCategory,
+  Label,
   Transaction,
   TransactionType,
 } from '@/lib/types';
@@ -19,6 +21,9 @@ interface Props {
   transaction?: Transaction;
   accounts: Account[];
   categories: BudgetCategory[];
+  // Full list, archived included.
+  labels: Label[];
+  onLabelCreated: (label: Label) => void;
   onSaved: () => void;
   onCancel: () => void;
 }
@@ -29,6 +34,8 @@ export default function TransactionForm({
   transaction,
   accounts,
   categories,
+  labels,
+  onLabelCreated,
   onSaved,
   onCancel,
 }: Props) {
@@ -43,6 +50,10 @@ export default function TransactionForm({
     transaction?.transferAccountId ?? '',
   );
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? '');
+  // Null is Personal.
+  const [labelId, setLabelId] = useState<string | null>(
+    transaction?.labelId ?? null,
+  );
   const [amount, setAmount] = useState(
     transaction ? (transaction.amountCents / 100).toFixed(2) : '',
   );
@@ -91,6 +102,11 @@ export default function TransactionForm({
       cleared,
       ...(isTransfer ? { transferAccountId } : { categoryId }),
     };
+    // Transfers carry no label. On edit, null clears the label back to
+    // Personal. On create, Personal is the default, so leave it out.
+    if (!isTransfer && (isEditing || labelId !== null)) {
+      body.labelId = labelId;
+    }
 
     setLoading(true);
     try {
@@ -201,6 +217,17 @@ export default function TransactionForm({
             ))}
           </select>
         </div>
+      )}
+
+      {!isTransfer && (
+        <LabelPicker
+          id="txn-label"
+          labels={labels}
+          value={labelId}
+          onChange={setLabelId}
+          onCreated={onLabelCreated}
+          disabled={loading}
+        />
       )}
 
       <div>

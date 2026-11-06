@@ -9,9 +9,11 @@ import {
 import { dollarsToCents } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import TagInput from './TagInput';
+import LabelPicker from './LabelPicker';
 import type {
   Account,
   BudgetCategory,
+  Label,
   RecurringCadence,
   RecurringTransaction,
   RecurringType,
@@ -21,6 +23,9 @@ interface Props {
   recurring?: RecurringTransaction;
   accounts: Account[];
   categories: BudgetCategory[];
+  // Full list, archived included.
+  labels: Label[];
+  onLabelCreated: (label: Label) => void;
   onSaved: () => void;
   onCancel: () => void;
 }
@@ -32,6 +37,8 @@ export default function RecurringForm({
   recurring,
   accounts,
   categories,
+  labels,
+  onLabelCreated,
   onSaved,
   onCancel,
 }: Props) {
@@ -41,6 +48,10 @@ export default function RecurringForm({
     recurring?.accountId ?? accounts[0]?._id ?? '',
   );
   const [categoryId, setCategoryId] = useState(recurring?.categoryId ?? '');
+  // Null is Personal.
+  const [labelId, setLabelId] = useState<string | null>(
+    recurring?.labelId ?? null,
+  );
   const [amount, setAmount] = useState(
     recurring ? (recurring.amountCents / 100).toFixed(2) : '',
   );
@@ -109,6 +120,12 @@ export default function RecurringForm({
       notes: isEditing ? notes.trim() : notes.trim() || undefined,
       tags,
     };
+
+    // On edit, null clears the label back to Personal. On create, Personal is
+    // the default, so leave it out.
+    if (isEditing || labelId !== null) {
+      body.labelId = labelId;
+    }
 
     // Send an explicit end date, or null to clear it on edit.
     if (hasEndDate && endDate) {
@@ -209,6 +226,15 @@ export default function RecurringForm({
           ))}
         </select>
       </div>
+
+      <LabelPicker
+        id="rec-label"
+        labels={labels}
+        value={labelId}
+        onChange={setLabelId}
+        onCreated={onLabelCreated}
+        disabled={loading}
+      />
 
       <div>
         <label htmlFor="rec-payee" className={labelClass}>

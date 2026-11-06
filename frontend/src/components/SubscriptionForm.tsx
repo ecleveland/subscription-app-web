@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
-import { Subscription, CATEGORIES } from '@/lib/types';
+import { listLabels, withLabel } from '@/lib/labels';
+import { Label, Subscription, CATEGORIES } from '@/lib/types';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import { useAccounts } from '@/lib/accounts-context';
+import LabelPicker from './LabelPicker';
 import TagInput from './TagInput';
 
 interface Props {
@@ -54,8 +56,28 @@ export default function SubscriptionForm({ subscription }: Props) {
     !accountsLoading &&
     !!subscription?.accountId &&
     !accounts.some((a) => a._id === subscription.accountId);
+  // Null is Personal.
+  const [labelId, setLabelId] = useState<string | null>(subscription?.labelId ?? null);
+  const [labels, setLabels] = useState<Label[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Archived labels included, so an edit keeps showing the label already on
+  // the subscription.
+  useEffect(() => {
+    let cancelled = false;
+    listLabels(true)
+      .then((ls) => {
+        if (!cancelled) setLabels(ls);
+      })
+      .catch((err) => {
+        console.error('Label load failed', err);
+        showErrorToast('Failed to load labels');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -94,6 +116,12 @@ export default function SubscriptionForm({ subscription }: Props) {
       body.accountId = accountId;
     } else if (isEditing) {
       body.accountId = null;
+    }
+
+    if (labelId) {
+      body.labelId = labelId;
+    } else if (isEditing) {
+      body.labelId = null;
     }
 
     try {
@@ -231,6 +259,17 @@ export default function SubscriptionForm({ subscription }: Props) {
             ))}
           </select>
         </div>
+      </div>
+
+      <div>
+        <LabelPicker
+          id="sub-label"
+          labels={labels}
+          value={labelId}
+          onChange={setLabelId}
+          onCreated={(l) => setLabels((prev) => withLabel(prev, l))}
+          disabled={loading}
+        />
       </div>
 
       <div>

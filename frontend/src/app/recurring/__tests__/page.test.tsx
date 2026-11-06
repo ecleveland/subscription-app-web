@@ -13,6 +13,10 @@ vi.mock('@/lib/recurring', async (importActual) => ({
   deleteRecurring: vi.fn(),
 }));
 vi.mock('@/lib/categories', () => ({ listCategories: vi.fn() }));
+vi.mock('@/lib/labels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/labels')>()),
+  listLabels: vi.fn(),
+}));
 vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
@@ -22,12 +26,14 @@ vi.mock('@/components/RecurringForm', async () => {
   function RecurringFormStub(props: {
     recurring?: { _id: string };
     categories: { name: string }[];
+    labels: { name: string }[];
   }) {
     const [mountedFor] = useState(props.recurring?._id ?? 'new');
     return (
       <div>
         RecurringFormStub:mounted-for={mountedFor};
-        {props.categories.map((c) => c.name).join(',')}
+        {props.categories.map((c) => c.name).join(',')};labels=
+        {props.labels.map((l) => l.name).join(',')}
       </div>
     );
   }
@@ -36,9 +42,10 @@ vi.mock('@/components/RecurringForm', async () => {
 
 import { listRecurring, deleteRecurring } from '@/lib/recurring';
 import { listCategories } from '@/lib/categories';
+import { listLabels } from '@/lib/labels';
 import { showSuccessToast, showErrorToast } from '@/lib/toast';
 import RecurringPage from '@/app/recurring/page';
-import type { Account, BudgetCategory, RecurringTransaction } from '@/lib/types';
+import type { Account, BudgetCategory, Label, RecurringTransaction } from '@/lib/types';
 
 /** ISO date-only string offset from today by whole UTC days. */
 function dayOffset(days: number): string {
@@ -51,6 +58,9 @@ const accounts: Account[] = [
 const categories: BudgetCategory[] = [
   { _id: 'c1', householdId: 'h', groupId: 'g', name: 'Utilities', isIncome: false, sortOrder: 0, isArchived: false, createdAt: '', updatedAt: '' },
   { _id: 'c2', householdId: 'h', groupId: 'g', name: 'Salary', isIncome: true, sortOrder: 0, isArchived: false, createdAt: '', updatedAt: '' },
+];
+const labels: Label[] = [
+  { _id: 'l1', householdId: 'h', name: 'Etsy shop', color: '#2f8a93', isArchived: false, createdAt: '', updatedAt: '' },
 ];
 
 const bill: RecurringTransaction = {
@@ -91,6 +101,7 @@ describe('RecurringPage', () => {
       refresh: vi.fn().mockResolvedValue(undefined),
     };
     vi.mocked(listCategories).mockResolvedValue(categories);
+    vi.mocked(listLabels).mockResolvedValue(labels);
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -250,5 +261,46 @@ describe('RecurringPage', () => {
     vi.mocked(listCategories).mockRejectedValue(new Error('no cats'));
     render(<RecurringPage />);
     await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('no cats'));
+  });
+
+  describe('labels', () => {
+    // The Upcoming summary repeats payees, so find the schedule row by its
+    // History link.
+    function scheduleRow(payee: string) {
+      return screen
+        .getAllByRole('link', { name: /history/i })
+        .map((link) => link.closest('li')!)
+        .find((li) => within(li).queryByText(payee))!;
+    }
+
+    it('shows a chip on a labeled schedule and none on a personal one', async () => {
+      vi.mocked(listRecurring).mockResolvedValue([{ ...bill, labelId: 'l1' }, paycheck]);
+      render(<RecurringPage />);
+      await screen.findAllByText('Netflix');
+
+      expect(listLabels).toHaveBeenCalledWith(true);
+      expect(await within(scheduleRow('Netflix')).findByText('Etsy shop')).toBeInTheDocument();
+      expect(within(scheduleRow('Employer')).queryByText('Etsy shop')).toBeNull();
+    });
+
+    it('passes the labels to the form', async () => {
+      vi.mocked(listRecurring).mockResolvedValue([]);
+      const user = userEvent.setup();
+      render(<RecurringPage />);
+      await screen.findByText(/no schedules/i);
+      await waitFor(() => expect(listLabels).toHaveBeenCalled());
+
+      await user.click(screen.getByRole('button', { name: /add bill/i }));
+      await waitFor(() =>
+        expect(screen.getByText(/RecurringFormStub:/)).toHaveTextContent('labels=Etsy shop'),
+      );
+    });
+
+    it('toasts when labels fail to load', async () => {
+      vi.mocked(listRecurring).mockResolvedValue([]);
+      vi.mocked(listLabels).mockRejectedValue(new Error('no labels'));
+      render(<RecurringPage />);
+      await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('no labels'));
+    });
   });
 });

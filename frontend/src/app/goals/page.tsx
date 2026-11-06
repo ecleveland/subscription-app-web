@@ -4,10 +4,11 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { contributeToGoal, listGoals, updateGoal } from '@/lib/goals';
 import { listCategories } from '@/lib/categories';
+import { listLabels, withLabel } from '@/lib/labels';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import GoalCard from '@/components/GoalCard';
 import GoalForm from '@/components/GoalForm';
-import type { BudgetCategory, Goal } from '@/lib/types';
+import type { BudgetCategory, Goal, Label } from '@/lib/types';
 
 const errorMessage = (err: unknown, fallback: string) =>
   err instanceof Error ? err.message : fallback;
@@ -16,6 +17,7 @@ export default function GoalsPage() {
   const { isAuthenticated } = useAuth();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
+  const [labels, setLabels] = useState<Label[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +72,27 @@ export default function GoalsPage() {
       cancelled = true;
     };
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    listLabels(true)
+      .then((list) => {
+        if (!cancelled) setLabels(list);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        // Goals still work without labels. The picker offers only Personal.
+        showErrorToast(errorMessage(err, 'Failed to load labels'));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  function handleLabelCreated(label: Label) {
+    setLabels((prev) => withLabel(prev, label));
+  }
 
   function replaceGoal(updated: Goal) {
     setGoals((prev) =>
@@ -163,6 +186,8 @@ export default function GoalsPage() {
           <GoalForm
             categories={categories}
             categoriesUnavailable={categoriesUnavailable}
+            labels={labels}
+            onLabelCreated={handleLabelCreated}
             onSaved={handleSaved}
             onCancel={() => setShowCreate(false)}
           />
@@ -176,6 +201,8 @@ export default function GoalsPage() {
             goal={editing}
             categories={categories}
             categoriesUnavailable={categoriesUnavailable}
+            labels={labels}
+            onLabelCreated={handleLabelCreated}
             onSaved={handleSaved}
             onCancel={() => setEditing(null)}
           />

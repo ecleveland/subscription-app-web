@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Subscription, PaginatedResponse } from '@/lib/types';
+import type { Label, Subscription, PaginatedResponse } from '@/lib/types';
 
 vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
@@ -10,7 +10,14 @@ vi.mock('@/lib/auth-context', () => ({
   useAuth: () => ({ isAuthenticated: true }),
 }));
 
+// Labels load through their own module, so the subscriptions envelope that
+// apiFetch resolves never reaches the label list.
+vi.mock('@/lib/labels', () => ({
+  listLabels: vi.fn().mockResolvedValue([]),
+}));
+
 import { apiFetch } from '@/lib/api';
+import { listLabels } from '@/lib/labels';
 import DashboardPage from '../page';
 
 function makeSub(overrides: Partial<Subscription> = {}): Subscription {
@@ -303,5 +310,32 @@ describe('DashboardPage bulk edit', () => {
 
     expect(screen.getByText('Edit Multiple')).toBeInTheDocument();
     expect(screen.queryByText('Select cards to edit them in bulk')).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage labels', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows the label chip on a labeled subscription card', async () => {
+    const label: Label = {
+      _id: 'l1',
+      householdId: 'h',
+      name: 'Consulting',
+      color: '#2f8a93',
+      isArchived: false,
+      createdAt: '2025-01-01',
+      updatedAt: '2025-01-01',
+    };
+    vi.mocked(listLabels).mockResolvedValueOnce([label]);
+    vi.mocked(apiFetch).mockResolvedValue(
+      makeEnvelope([makeSub({ name: 'Adobe', labelId: 'l1' })]),
+    );
+
+    render(<DashboardPage />);
+
+    expect(await screen.findByText('Consulting')).toBeInTheDocument();
+    expect(listLabels).toHaveBeenCalledWith(true);
   });
 });

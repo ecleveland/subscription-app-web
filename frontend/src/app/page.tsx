@@ -6,7 +6,8 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import { downloadSubscriptionsCsv } from '@/lib/csv';
-import { Subscription, PaginatedResponse, PaginationMeta, BulkAction, BulkOperationResult } from '@/lib/types';
+import { listLabels } from '@/lib/labels';
+import { Label, Subscription, PaginatedResponse, PaginationMeta, BulkAction, BulkOperationResult } from '@/lib/types';
 import DashboardSummary from '@/components/DashboardSummary';
 import SearchInput from '@/components/SearchInput';
 import SubscriptionList from '@/components/SubscriptionList';
@@ -41,6 +42,7 @@ export default function DashboardPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [sharedFilter, setSharedFilter] = useState<'all' | 'shared' | 'individual'>('all');
+  const [labels, setLabels] = useState<Label[]>([]);
 
   function handleSortChange(newSortKey: string) {
     setSortKey(newSortKey);
@@ -106,6 +108,29 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [isAuthenticated]);
+
+  // Archived labels included: a card keeps the chip of a label archived after
+  // it was assigned.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    listLabels(true)
+      .then((ls) => {
+        if (!cancelled) setLabels(ls);
+      })
+      .catch((err) => {
+        console.error('Label load failed', err);
+        showErrorToast('Failed to load labels');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
+
+  const labelById = useMemo(
+    () => new Map(labels.map((l) => [l._id, l])),
+    [labels],
+  );
 
   function handleToggleActive(id: string, isActive: boolean) {
     setSubscriptions((prev) =>
@@ -322,6 +347,7 @@ export default function DashboardPage() {
           selectionMode={selectionMode}
           selectedIds={selectedIds}
           onSelect={handleSelect}
+          labelById={labelById}
         />
       )}
       {meta && meta.totalPages > 1 && (

@@ -13,7 +13,7 @@ vi.mock('@/lib/toast', () => ({
 import RecurringForm from '../RecurringForm';
 import { createRecurring, updateRecurring } from '@/lib/recurring';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
-import type { Account, BudgetCategory, RecurringTransaction } from '@/lib/types';
+import type { Account, BudgetCategory, Label, RecurringTransaction } from '@/lib/types';
 
 const accounts: Account[] = [
   {
@@ -70,6 +70,16 @@ const existing: RecurringTransaction = {
   updatedAt: '',
 };
 
+const bizLabel: Label = {
+  _id: 'l1',
+  householdId: 'h1',
+  name: 'Etsy shop',
+  color: '#2f8a93',
+  isArchived: false,
+  createdAt: '',
+  updatedAt: '',
+};
+
 function renderForm(props: Partial<React.ComponentProps<typeof RecurringForm>> = {}) {
   const onSaved = vi.fn();
   const onCancel = vi.fn();
@@ -77,6 +87,8 @@ function renderForm(props: Partial<React.ComponentProps<typeof RecurringForm>> =
     <RecurringForm
       accounts={accounts}
       categories={categories}
+      labels={[]}
+      onLabelCreated={vi.fn()}
       onSaved={onSaved}
       onCancel={onCancel}
       {...props}
@@ -98,7 +110,7 @@ describe('RecurringForm', () => {
     await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
     await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
 
-    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => expect(createRecurring).toHaveBeenCalledTimes(1));
     const body = vi.mocked(createRecurring).mock.calls[0][0];
@@ -122,7 +134,7 @@ describe('RecurringForm', () => {
     await user.type(screen.getByLabelText(/payee/i), 'Netflix');
     await user.type(screen.getByLabelText(/amount/i), '0');
     await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
-    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(await screen.findByText(/amount must be a positive number/i)).toBeInTheDocument();
     expect(createRecurring).not.toHaveBeenCalled();
@@ -137,7 +149,7 @@ describe('RecurringForm', () => {
     await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
     await user.click(screen.getByLabelText('Has end date'));
     await user.type(screen.getByLabelText('End date'), '2026-07-01');
-    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(
       await screen.findByText(/end date must be on or after the next date/i),
@@ -155,7 +167,7 @@ describe('RecurringForm', () => {
     await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
     await user.click(screen.getByLabelText('Has end date'));
     await user.type(screen.getByLabelText('End date'), '2026-12-01');
-    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => expect(createRecurring).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createRecurring).mock.calls[0][0].endDate).toBe('2026-12-01');
@@ -169,7 +181,7 @@ describe('RecurringForm', () => {
     await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
     await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
     await user.click(screen.getByLabelText('Has end date'));
-    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(await screen.findByText(/please choose an end date/i)).toBeInTheDocument();
     expect(createRecurring).not.toHaveBeenCalled();
@@ -197,7 +209,7 @@ describe('RecurringForm', () => {
     await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
     await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
     await user.click(screen.getByLabelText(/subscription/i));
-    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() => expect(createRecurring).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createRecurring).mock.calls[0][0].isSubscription).toBe(true);
@@ -224,7 +236,7 @@ describe('RecurringForm', () => {
     await user.selectOptions(screen.getByLabelText(/^type$/i), 'income');
 
     // The expense category must not carry over to an income schedule.
-    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
     expect(await screen.findByText(/please choose a category/i)).toBeInTheDocument();
     expect(createRecurring).not.toHaveBeenCalled();
   });
@@ -253,9 +265,54 @@ describe('RecurringForm', () => {
     await user.type(screen.getByLabelText(/amount/i), '9.99');
     await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
     await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
-    await user.click(screen.getByRole('button', { name: /add|create|save/i }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
 
     expect(await screen.findByText(/server exploded/i)).toBeInTheDocument();
     expect(showErrorToast).toHaveBeenCalledWith('Server exploded');
+  });
+
+  it('sends the picked labelId on create', async () => {
+    const user = userEvent.setup();
+    vi.mocked(createRecurring).mockResolvedValue(existing);
+    renderForm({ labels: [bizLabel] });
+    await user.type(screen.getByLabelText(/payee/i), 'Netflix');
+    await user.type(screen.getByLabelText(/amount/i), '9.99');
+    await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
+    await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
+    await user.click(screen.getByRole('radio', { name: 'Etsy shop' }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => expect(createRecurring).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRecurring).mock.calls[0][0].labelId).toBe('l1');
+  });
+
+  it('omits labelId on create when Personal is picked', async () => {
+    const user = userEvent.setup();
+    vi.mocked(createRecurring).mockResolvedValue(existing);
+    renderForm({ labels: [bizLabel] });
+    await user.type(screen.getByLabelText(/payee/i), 'Netflix');
+    await user.type(screen.getByLabelText(/amount/i), '9.99');
+    await user.type(screen.getByLabelText(/next date/i), '2026-08-01');
+    await user.selectOptions(screen.getByLabelText('Category'), 'catExp');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => expect(createRecurring).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createRecurring).mock.calls[0][0]).not.toHaveProperty('labelId');
+  });
+
+  it('sends labelId null when an edit switches a labeled schedule to Personal', async () => {
+    const user = userEvent.setup();
+    vi.mocked(updateRecurring).mockResolvedValue(existing);
+    renderForm({ labels: [bizLabel], recurring: { ...existing, labelId: 'l1' } });
+
+    expect(screen.getByRole('radio', { name: 'Etsy shop' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await user.click(screen.getByRole('radio', { name: 'Personal' }));
+    await user.click(screen.getByRole('button', { name: /update|save/i }));
+
+    await waitFor(() => expect(updateRecurring).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(updateRecurring).mock.calls[0][1].labelId).toBeNull();
   });
 });

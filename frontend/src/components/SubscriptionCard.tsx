@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Subscription } from '@/lib/types';
+import { Label, Subscription } from '@/lib/types';
 import { apiFetch } from '@/lib/api';
 import { formatCurrency, formatDate, daysUntil, getMonthlyCost, getPersonalShare } from '@/lib/utils';
 import { showErrorToast } from '@/lib/toast';
 import CategoryBadge from './CategoryBadge';
+import LabelChip from './LabelChip';
 import TagBadge from './TagBadge';
 
 const CYCLE_SUFFIX: Record<string, string> = { monthly: 'mo', yearly: 'yr', weekly: 'wk' };
@@ -17,12 +18,15 @@ export default function SubscriptionCard({
   selectionMode,
   isSelected,
   onSelect,
+  label,
 }: {
   subscription: Subscription;
   onToggleActive?: (id: string, isActive: boolean) => void;
   selectionMode?: boolean;
   isSelected?: boolean;
   onSelect?: (id: string) => void;
+  // Undefined for a personal subscription.
+  label?: Label;
 }) {
   const [isActive, setIsActive] = useState(subscription.isActive !== false);
   const [toggling, setToggling] = useState(false);
@@ -141,6 +145,7 @@ export default function SubscriptionCard({
       )}
       <div className="mb-2 flex items-center gap-2">
         <CategoryBadge category={subscription.category} />
+        <LabelChip label={label} />
         {subscription.billingCycle !== 'monthly' && (
           <span className="num text-xs text-muted">
             ({formatCurrency(monthly)}/mo)

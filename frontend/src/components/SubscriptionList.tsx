@@ -1,4 +1,4 @@
-import { Subscription } from '@/lib/types';
+import { Label, Subscription } from '@/lib/types';
 import SubscriptionCard from './SubscriptionCard';
 import EmptyState from './EmptyState';
 
@@ -8,12 +8,14 @@ export default function SubscriptionList({
   selectionMode,
   selectedIds,
   onSelect,
+  labelById,
 }: {
   subscriptions: Subscription[];
   onToggleActive?: (id: string, isActive: boolean) => void;
   selectionMode?: boolean;
   selectedIds?: Set<string>;
   onSelect?: (id: string) => void;
+  labelById?: Map<string, Label>;
 }) {
   if (subscriptions.length === 0) {
     return <EmptyState />;
@@ -29,6 +31,7 @@ export default function SubscriptionList({
           selectionMode={selectionMode}
           isSelected={selectedIds?.has(sub._id)}
           onSelect={onSelect}
+          label={labelById?.get(sub.labelId ?? '')}
         />
       ))}
     </div>

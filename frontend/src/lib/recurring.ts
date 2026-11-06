@@ -12,6 +12,8 @@ export interface RecurringFilters {
   categoryId?: string;
   isSubscription?: boolean;
   isActive?: boolean;
+  // A label id, or LABEL_FILTER_NONE for personal records.
+  labelId?: string;
 }
 
 export interface RecurringInput {
@@ -31,6 +33,8 @@ export interface RecurringInput {
   // Expenses only — the server rejects an income schedule flagged true.
   isSubscription?: boolean;
   sharedWith?: number | null;
+  // Null clears the label, which makes the schedule personal.
+  labelId?: string | null;
 }
 
 function toQuery(filters: RecurringFilters): string {

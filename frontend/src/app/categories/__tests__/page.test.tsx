@@ -15,6 +15,13 @@ vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
 }));
+// LabelForm renders for real and seeds its color from defaultLabelColor.
+vi.mock('@/lib/labels', () => ({
+  listLabels: vi.fn(),
+  createLabel: vi.fn(),
+  updateLabel: vi.fn(),
+  defaultLabelColor: () => '#2f8a93',
+}));
 // CategoryForm renders for real: its lib and toast imports are mocked above,
 // and the edit-switch regression below depends on its internal state.
 
@@ -29,8 +36,9 @@ import {
   reorderCategoryGroups,
 } from '@/lib/categories';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
+import { listLabels, createLabel, updateLabel } from '@/lib/labels';
 import CategoriesPage from '@/app/categories/page';
-import type { BudgetCategory, CategoryGroup } from '@/lib/types';
+import type { BudgetCategory, CategoryGroup, Label } from '@/lib/types';
 
 function group(over: Partial<CategoryGroup>): CategoryGroup {
   return {
@@ -71,6 +79,34 @@ const categories = [
   category({ _id: 'c4', name: 'Old Hobby', sortOrder: 2, isArchived: true }),
 ];
 
+function label(over: Partial<Label>): Label {
+  return {
+    _id: 'l?',
+    householdId: 'h',
+    name: '?',
+    color: '#2f8a93',
+    isArchived: false,
+    createdAt: '',
+    updatedAt: '',
+    ...over,
+  };
+}
+
+const labels = [
+  label({ _id: 'l1', name: 'Consulting' }),
+  label({ _id: 'l2', name: 'Old Shop', isArchived: true }),
+];
+
+function labelsSection() {
+  return screen.getByRole('region', { name: 'Labels' });
+}
+
+function labelRow(name: string) {
+  return within(labelsSection())
+    .getAllByRole('listitem')
+    .find((li) => li.textContent?.includes(name))!;
+}
+
 function foodSection() {
   return screen.getByRole('region', { name: 'Food' });
 }
@@ -88,6 +124,7 @@ describe('CategoriesPage', () => {
   beforeEach(() => {
     vi.mocked(listCategories).mockResolvedValue(categories);
     vi.mocked(listCategoryGroups).mockResolvedValue(groups);
+    vi.mocked(listLabels).mockResolvedValue(labels);
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -264,9 +301,11 @@ describe('CategoriesPage', () => {
     await user.click(
       within(groceriesRow).getByRole('button', { name: 'Archive' }),
     );
-    // The dialog's confirm button (hidden in jsdom).
+    // The dialog's confirm button (hidden in jsdom). Scoped to the category
+    // dialog, because the label dialog has an Archive button too.
+    const dialog = screen.getByText('Archive category').closest('dialog')!;
     await user.click(
-      screen.getAllByRole('button', { name: 'Archive', hidden: true }).at(-1)!,
+      within(dialog).getByRole('button', { name: 'Archive', hidden: true }),
     );
 
     await waitFor(() =>
@@ -579,5 +618,197 @@ describe('CategoriesPage', () => {
         'Couldn’t confirm the current order — reload the page.',
       ),
     );
+  });
+  describe('labels', () => {
+    async function renderWithLabels() {
+      await renderPage();
+      await within(labelsSection()).findByText('Consulting');
+    }
+
+    it('lists active labels with Rename and Archive', async () => {
+      await renderWithLabels();
+      expect(listLabels).toHaveBeenCalledWith(true);
+
+      const row = labelRow('Consulting');
+      expect(
+        within(row).getByRole('button', { name: 'Rename' }),
+      ).toBeInTheDocument();
+      expect(
+        within(row).getByRole('button', { name: 'Archive' }),
+      ).toBeInTheDocument();
+      // The archived label waits behind its toggle.
+      expect(
+        within(labelsSection()).queryByText('Old Shop'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows an empty state when the household has no labels', async () => {
+      vi.mocked(listLabels).mockResolvedValue([]);
+      await renderPage();
+      expect(
+        await within(labelsSection()).findByText('No labels yet.'),
+      ).toBeInTheDocument();
+    });
+
+    it('creates a label and refetches the list', async () => {
+      vi.mocked(createLabel).mockResolvedValue(
+        label({ _id: 'l3', name: 'Rental' }),
+      );
+      await renderWithLabels();
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole('button', { name: '+ Add label' }));
+      expect(
+        screen.queryByRole('button', { name: '+ Add label' }),
+      ).not.toBeInTheDocument();
+      await user.type(screen.getByLabelText('Name'), 'Rental');
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() =>
+        expect(createLabel).toHaveBeenCalledWith({
+          name: 'Rental',
+          color: expect.stringMatching(/^#[0-9a-f]{6}$/),
+        }),
+      );
+      await waitFor(() => expect(listLabels).toHaveBeenCalledTimes(2));
+      expect(
+        screen.queryByRole('heading', { name: 'New label' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('renames a label in place', async () => {
+      vi.mocked(updateLabel).mockResolvedValue(
+        label({ _id: 'l1', name: 'Freelance' }),
+      );
+      await renderWithLabels();
+      const user = userEvent.setup();
+
+      await user.click(
+        within(labelRow('Consulting')).getByRole('button', { name: 'Rename' }),
+      );
+      const input = screen.getByLabelText('Name');
+      expect(input).toHaveValue('Consulting');
+      await user.clear(input);
+      await user.type(input, 'Freelance');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() =>
+        expect(updateLabel).toHaveBeenCalledWith('l1', {
+          name: 'Freelance',
+          color: '#2f8a93',
+        }),
+      );
+      await waitFor(() => expect(listLabels).toHaveBeenCalledTimes(2));
+      expect(
+        screen.queryByRole('heading', { name: 'Edit label' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('keeps the create and rename forms mutually exclusive', async () => {
+      await renderWithLabels();
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole('button', { name: '+ Add label' }));
+      await user.click(
+        within(labelRow('Consulting')).getByRole('button', { name: 'Rename' }),
+      );
+      expect(
+        screen.queryByRole('heading', { name: 'New label' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Edit label' }),
+      ).toBeInTheDocument();
+    });
+
+    it('archives a label through its confirm dialog', async () => {
+      vi.mocked(updateLabel).mockResolvedValue(
+        label({ _id: 'l1', name: 'Consulting', isArchived: true }),
+      );
+      await renderWithLabels();
+      const user = userEvent.setup();
+
+      await user.click(
+        within(labelRow('Consulting')).getByRole('button', { name: 'Archive' }),
+      );
+      const dialog = screen.getByText('Archive label').closest('dialog')!;
+      expect(dialog).toHaveTextContent(
+        'Archive "Consulting"? Records keep it and it stays in filters, but it cannot be assigned to new records.',
+      );
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Archive', hidden: true }),
+      );
+
+      await waitFor(() =>
+        expect(updateLabel).toHaveBeenCalledWith('l1', { isArchived: true }),
+      );
+      expect(showSuccessToast).toHaveBeenCalledWith('Label archived');
+      await waitFor(() => expect(listLabels).toHaveBeenCalledTimes(2));
+      // The category archive path stays untouched.
+      expect(updateCategory).not.toHaveBeenCalled();
+    });
+
+    it('closes the rename form when its label is archived', async () => {
+      vi.mocked(updateLabel).mockResolvedValue(
+        label({ _id: 'l1', name: 'Consulting', isArchived: true }),
+      );
+      await renderWithLabels();
+      const user = userEvent.setup();
+
+      await user.click(
+        within(labelRow('Consulting')).getByRole('button', { name: 'Rename' }),
+      );
+      expect(
+        screen.getByRole('heading', { name: 'Edit label' }),
+      ).toBeInTheDocument();
+
+      await user.click(
+        within(labelRow('Consulting')).getByRole('button', { name: 'Archive' }),
+      );
+      const dialog = screen.getByText('Archive label').closest('dialog')!;
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Archive', hidden: true }),
+      );
+
+      await waitFor(() =>
+        expect(showSuccessToast).toHaveBeenCalledWith('Label archived'),
+      );
+      expect(
+        screen.queryByRole('heading', { name: 'Edit label' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('unarchives a label from the archived labels toggle', async () => {
+      vi.mocked(updateLabel).mockResolvedValue(
+        label({ _id: 'l2', name: 'Old Shop', isArchived: false }),
+      );
+      await renderWithLabels();
+      const user = userEvent.setup();
+
+      await user.click(
+        screen.getByRole('button', { name: 'Archived labels (1)' }),
+      );
+      const row = labelRow('Old Shop');
+      await user.click(within(row).getByRole('button', { name: 'Unarchive' }));
+
+      await waitFor(() =>
+        expect(updateLabel).toHaveBeenCalledWith('l2', { isArchived: false }),
+      );
+      expect(showSuccessToast).toHaveBeenCalledWith('Label restored');
+      expect(updateCategory).not.toHaveBeenCalled();
+    });
+
+    it('keeps categories on screen when labels fail to load', async () => {
+      vi.mocked(listLabels).mockRejectedValue(new Error('labels down'));
+      await renderPage();
+
+      await waitFor(() =>
+        expect(showErrorToast).toHaveBeenCalledWith('Failed to load labels'),
+      );
+      expect(within(foodSection()).getByText('Groceries')).toBeInTheDocument();
+      expect(screen.queryByText('labels down')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Failed to load categories/),
+      ).not.toBeInTheDocument();
+    });
   });
 });

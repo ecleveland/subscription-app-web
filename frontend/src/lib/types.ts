@@ -24,6 +24,8 @@ export interface Subscription {
   trialEndDate?: string;
   sharedWith?: number | null;
   accountId?: string | null;
+  // Null or absent means personal.
+  labelId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -142,6 +144,19 @@ export interface Account {
   updatedAt: string;
 }
 
+// A household business label. Records with no labelId are personal, so
+// there is never a Personal label record.
+export interface Label {
+  _id: string;
+  householdId: string;
+  name: string;
+  color: string;
+  isArchived: boolean;
+  parentId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type TransactionType = 'income' | 'expense' | 'transfer';
 
 export interface Transaction {
@@ -159,6 +174,8 @@ export interface Transaction {
   cleared: boolean;
   transferAccountId?: string;
   recurringId?: string;
+  // Null or absent means personal.
+  labelId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -194,6 +211,8 @@ export interface RecurringTransaction {
   // Expenses only — the server rejects an income schedule flagged true.
   isSubscription: boolean;
   sharedWith?: number | null;
+  // Null or absent means personal.
+  labelId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -289,6 +308,8 @@ export interface Goal {
   // Set while the goal tracks a ledger account. currentCents then follows that
   // account's balance and contributions are rejected.
   linkedAccount: { accountId: string; name: string } | null;
+  // Null or absent means personal.
+  labelId?: string | null;
   isArchived: boolean;
   createdAt: string;
   updatedAt: string;

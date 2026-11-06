@@ -11,13 +11,17 @@ import {
 import { dollarsToCents } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import { useAccounts } from '@/lib/accounts-context';
-import type { BudgetCategory, Goal, GoalType } from '@/lib/types';
+import LabelPicker from './LabelPicker';
+import type { BudgetCategory, Goal, GoalType, Label } from '@/lib/types';
 
 interface Props {
   goal?: Goal;
   categories: BudgetCategory[];
   // True when the categories fetch failed, so the empty picker is explained.
   categoriesUnavailable?: boolean;
+  // Full list, archived included.
+  labels: Label[];
+  onLabelCreated: (label: Label) => void;
   onSaved: (goal: Goal) => void;
   onCancel: () => void;
 }
@@ -29,6 +33,8 @@ export default function GoalForm({
   goal,
   categories,
   categoriesUnavailable = false,
+  labels,
+  onLabelCreated,
   onSaved,
   onCancel,
 }: Props) {
@@ -37,6 +43,8 @@ export default function GoalForm({
   const initialDate = goal?.targetDate ? goal.targetDate.slice(0, 10) : '';
   const initialCategory = goal?.categoryId ?? '';
   const initialAccount = goal?.linkedAccount?.accountId ?? '';
+  // Null is Personal.
+  const initialLabel = goal?.labelId ?? null;
 
   const [name, setName] = useState(goal?.name ?? '');
   const [type, setType] = useState<GoalType>(goal?.type ?? 'savings');
@@ -44,6 +52,7 @@ export default function GoalForm({
   const [targetDate, setTargetDate] = useState(initialDate);
   const [categoryId, setCategoryId] = useState(initialCategory);
   const [accountId, setAccountId] = useState(initialAccount);
+  const [labelId, setLabelId] = useState<string | null>(initialLabel);
   const { accounts, loading: accountsLoading, error: accountsError } = useAccounts();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -114,6 +123,7 @@ export default function GoalForm({
         if (targetCents !== goal.targetCents) body.targetCents = targetCents;
         if (targetDate !== initialDate) body.targetDate = targetDate || null;
         if (categoryId !== initialCategory) body.categoryId = categoryId || null;
+        if (labelId !== initialLabel) body.labelId = labelId;
         if (effectiveAccountId !== initialAccount) {
           body.accountId = effectiveAccountId || null;
         }
@@ -123,6 +133,7 @@ export default function GoalForm({
         const body: CreateGoalBody = { name, type, targetCents };
         if (targetDate) body.targetDate = targetDate;
         if (categoryId) body.categoryId = categoryId;
+        if (labelId) body.labelId = labelId;
         if (effectiveAccountId) body.accountId = effectiveAccountId;
         saved = await createGoal(body);
         showSuccessToast('Goal created');
@@ -235,6 +246,15 @@ export default function GoalForm({
           </p>
         )}
       </div>
+
+      <LabelPicker
+        id="goal-label"
+        labels={labels}
+        value={labelId}
+        onChange={setLabelId}
+        onCreated={onLabelCreated}
+        disabled={loading}
+      />
 
       <div>
         <label htmlFor="goal-account" className="label">

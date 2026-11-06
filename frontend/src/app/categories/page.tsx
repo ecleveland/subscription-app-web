@@ -17,11 +17,14 @@ import {
   reorderCategories,
   reorderCategoryGroups,
 } from '@/lib/categories';
+import { listLabels, updateLabel } from '@/lib/labels';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import { bySortOrder } from '@/lib/utils';
 import CategoryForm from '@/components/CategoryForm';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import type { BudgetCategory, CategoryGroup } from '@/lib/types';
+import LabelChip from '@/components/LabelChip';
+import LabelForm from '@/components/LabelForm';
+import type { BudgetCategory, CategoryGroup, Label } from '@/lib/types';
 
 // Shared by group create and rename: one copy of the input + submit/cancel
 // markup and validation so the two flows can't drift.
@@ -87,6 +90,14 @@ export default function CategoriesPage() {
   const [groupName, setGroupName] = useState('');
 
   const [showArchived, setShowArchived] = useState(false);
+
+  const [labels, setLabels] = useState<Label[]>([]);
+  // The label create and rename forms exclude each other, and stay
+  // independent of the category forms.
+  const [creatingLabel, setCreatingLabel] = useState(false);
+  const [editingLabel, setEditingLabel] = useState<Label | null>(null);
+  const [archivingLabel, setArchivingLabel] = useState<Label | null>(null);
+  const [showArchivedLabels, setShowArchivedLabels] = useState(false);
   // Serializes reorder requests: concurrent moves would both compute their
   // swap from the same stale order and race each other's responses.
   const [reordering, setReordering] = useState(false);
@@ -122,6 +133,30 @@ export default function CategoriesPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Labels load apart from categories, so a labels outage never hides the
+  // category list.
+  const refreshLabels = useCallback(async () => {
+    try {
+      setLabels(await listLabels(true));
+    } catch (err) {
+      console.error('Label load failed', err);
+      showErrorToast('Failed to load labels');
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshLabels();
+  }, [refreshLabels]);
+
+  const activeLabels = useMemo(
+    () => labels.filter((l) => !l.isArchived),
+    [labels],
+  );
+  const archivedLabels = useMemo(
+    () => labels.filter((l) => l.isArchived),
+    [labels],
+  );
 
   const sortedGroups = useMemo(
     () => [...groups].sort(bySortOrder),
@@ -207,6 +242,38 @@ export default function CategoriesPage() {
       await refreshOrWarn();
     } catch (err) {
       showErrorToast(err instanceof Error ? err.message : 'Failed to restore');
+    }
+  }
+
+  async function handleLabelSaved() {
+    setCreatingLabel(false);
+    setEditingLabel(null);
+    await refreshLabels();
+  }
+
+  async function handleArchiveLabel() {
+    if (!archivingLabel) return;
+    try {
+      await updateLabel(archivingLabel._id, { isArchived: true });
+      showSuccessToast('Label archived');
+      // An open rename form for this label would edit an archived record.
+      setEditingLabel((current) =>
+        current?._id === archivingLabel._id ? null : current,
+      );
+      setArchivingLabel(null);
+      await refreshLabels();
+    } catch (err) {
+      showErrorToast(err instanceof Error ? err.message : 'Failed to archive label');
+    }
+  }
+
+  async function handleUnarchiveLabel(label: Label) {
+    try {
+      await updateLabel(label._id, { isArchived: false });
+      showSuccessToast('Label restored');
+      await refreshLabels();
+    } catch (err) {
+      showErrorToast(err instanceof Error ? err.message : 'Failed to restore label');
     }
   }
 
@@ -471,6 +538,111 @@ export default function CategoriesPage() {
         })}
       </div>
 
+      <section aria-label="Labels" className="mt-10">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="section-title">Labels</h2>
+          {!creatingLabel && (
+            <button
+              onClick={() => {
+                setEditingLabel(null);
+                setCreatingLabel(true);
+              }}
+              className="text-sm text-accent hover:underline"
+            >
+              + Add label
+            </button>
+          )}
+        </div>
+        <p className="text-sm text-muted mb-3">
+          Mark expenses, bills, subscriptions and goals as business. Personal is
+          the default and needs no label.
+        </p>
+
+        {creatingLabel && (
+          <div className="mb-4">
+            <LabelForm
+              existingCount={labels.length}
+              onSaved={handleLabelSaved}
+              onCancel={() => setCreatingLabel(false)}
+            />
+          </div>
+        )}
+
+        {editingLabel && (
+          <div className="mb-4">
+            <LabelForm
+              // Remount per label: the form reads its fields from the prop
+              // only on mount.
+              key={editingLabel._id}
+              label={editingLabel}
+              onSaved={handleLabelSaved}
+              onCancel={() => setEditingLabel(null)}
+            />
+          </div>
+        )}
+
+        {activeLabels.length === 0 ? (
+          <p className="text-sm text-muted py-2">No labels yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {activeLabels.map((l) => (
+              <li
+                key={l._id}
+                className="flex items-center justify-between border border-line rounded-md px-4 py-2 bg-surface"
+              >
+                <LabelChip label={l} />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setCreatingLabel(false);
+                      setEditingLabel(l);
+                    }}
+                    className="text-sm text-ink-2 hover:underline"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    onClick={() => setArchivingLabel(l)}
+                    className="text-sm text-danger hover:underline"
+                  >
+                    Archive
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {archivedLabels.length > 0 && (
+          <div className="mt-4">
+            <button
+              onClick={() => setShowArchivedLabels((v) => !v)}
+              className="text-sm text-muted hover:underline"
+            >
+              {`Archived labels (${archivedLabels.length})`}
+            </button>
+            {showArchivedLabels && (
+              <ul className="space-y-2 mt-3">
+                {archivedLabels.map((l) => (
+                  <li
+                    key={l._id}
+                    className="flex items-center justify-between border border-line rounded-md px-4 py-2 bg-paper text-muted"
+                  >
+                    <LabelChip label={l} />
+                    <button
+                      onClick={() => handleUnarchiveLabel(l)}
+                      className="text-sm text-accent hover:underline"
+                    >
+                      Unarchive
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
+
       {archived.length > 0 && (
         <div className="mt-10">
           <button
@@ -504,6 +676,16 @@ export default function CategoriesPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!archivingLabel}
+        title="Archive label"
+        message={`Archive "${archivingLabel?.name}"? Records keep it and it stays in filters, but it cannot be assigned to new records.`}
+        confirmLabel="Archive"
+        onConfirm={handleArchiveLabel}
+        onCancel={() => setArchivingLabel(null)}
+        destructive
+      />
 
       <ConfirmDialog
         open={!!archiving}

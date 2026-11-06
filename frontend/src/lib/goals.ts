@@ -17,11 +17,12 @@ export interface CreateGoalBody {
   targetDate?: string;
   categoryId?: string;
   accountId?: string;
+  labelId?: string;
 }
 
 // currentCents is not patchable; it only moves through contributeToGoal, or
-// follows the linked account. Send null for targetDate, categoryId or
-// accountId to clear it.
+// follows the linked account. Send null for targetDate, categoryId,
+// accountId or labelId to clear it.
 export interface UpdateGoalBody {
   name?: string;
   type?: GoalType;
@@ -29,6 +30,7 @@ export interface UpdateGoalBody {
   targetDate?: string | null;
   categoryId?: string | null;
   accountId?: string | null;
+  labelId?: string | null;
   isArchived?: boolean;
 }
 
