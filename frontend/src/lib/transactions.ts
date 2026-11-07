@@ -39,6 +39,8 @@ export interface TransactionInput {
   cleared?: boolean;
   // Null clears the label, which makes the record personal.
   labelId?: string | null;
+  // Null clears the reimbursement block on edit.
+  reimbursement?: { status: 'owed' } | null;
 }
 
 function toQuery(filters: TransactionFilters): string {

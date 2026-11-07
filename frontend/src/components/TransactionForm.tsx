@@ -63,10 +63,15 @@ export default function TransactionForm({
   const [payee, setPayee] = useState(transaction?.payee ?? '');
   const [notes, setNotes] = useState(transaction?.notes ?? '');
   const [cleared, setCleared] = useState(transaction?.cleared ?? false);
+  const [reimbursable, setReimbursable] = useState(
+    transaction?.reimbursement != null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const isTransfer = type === 'transfer';
+  // Only a labeled expense can be owed back.
+  const canReimburse = type === 'expense' && labelId !== null;
   // Offer income categories for income, expense categories for expense.
   const selectableCategories = categories.filter(
     (c) => c.isIncome === (type === 'income'),
@@ -106,6 +111,16 @@ export default function TransactionForm({
     // Personal. On create, Personal is the default, so leave it out.
     if (!isTransfer && (isEditing || labelId !== null)) {
       body.labelId = labelId;
+    }
+    // Send the block only when it changes. On edit, null clears it, which
+    // covers a switch to Personal, income or transfer. Leaving it out when
+    // it stays on keeps a reimbursed record from dropping back to owed.
+    const wantBlock = canReimburse && reimbursable;
+    const hadBlock = transaction?.reimbursement != null;
+    if (wantBlock && !hadBlock) {
+      body.reimbursement = { status: 'owed' };
+    } else if (!wantBlock && hadBlock) {
+      body.reimbursement = null;
     }
 
     setLoading(true);
@@ -228,6 +243,22 @@ export default function TransactionForm({
           onCreated={onLabelCreated}
           disabled={loading}
         />
+      )}
+
+      {canReimburse && (
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={reimbursable}
+              onChange={(e) => setReimbursable(e.target.checked)}
+            />
+            I&apos;ll be reimbursed for this
+          </label>
+          {transaction?.reimbursement?.status === 'reimbursed' && (
+            <span className="text-xs text-muted">Reimbursed</span>
+          )}
+        </div>
       )}
 
       <div>

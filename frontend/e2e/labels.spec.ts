@@ -44,11 +44,14 @@ test.describe('Business labels', () => {
       amount: '55.00',
       payee,
       label,
+      reimbursable: true,
     });
 
-    // Only the business row carries the chip.
+    // Only the business row carries the chip and the Owed marker.
     await expect(txRow(page, payee).first()).toContainText(label);
+    await expect(txRow(page, payee).first()).toContainText('Owed');
     await expect(txRow(page, personalPayee).first()).not.toContainText(label);
+    await expect(txRow(page, personalPayee).first()).not.toContainText('Owed');
 
     // Filtering by the label keeps the business row only.
     const filter = page.getByLabel('Filter by label');
