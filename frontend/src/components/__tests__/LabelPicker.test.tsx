@@ -85,6 +85,24 @@ describe('LabelPicker', () => {
     expect(onChange).toHaveBeenLastCalledWith('l1');
   });
 
+  it('paints the selected label segment in the label color, not the Personal one', () => {
+    renderPicker({ labels: [etsy], value: 'l1' });
+    const labelSegment = screen.getByRole('radio', { name: 'Etsy shop' }).closest('label');
+    const personalSegment = screen.getByRole('radio', { name: 'Personal' }).closest('label');
+    expect(labelSegment).toHaveStyle({ backgroundColor: etsy.color });
+    expect(labelSegment).not.toHaveClass('btn-primary');
+    expect(personalSegment).not.toHaveStyle({ backgroundColor: etsy.color });
+  });
+
+  it('shows a color dot on the label segment when it is not selected', () => {
+    renderPicker({ labels: [etsy], value: null });
+    const labelSegment = screen.getByRole('radio', { name: 'Etsy shop' }).closest('label');
+    expect(labelSegment).not.toHaveStyle({ backgroundColor: etsy.color });
+    expect(labelSegment?.querySelector('[aria-hidden="true"]')).toHaveStyle({
+      backgroundColor: etsy.color,
+    });
+  });
+
   it('reports null when Personal is clicked in the radio group', async () => {
     const user = userEvent.setup();
     const { onChange } = renderPicker({ labels: [etsy], value: 'l1' });

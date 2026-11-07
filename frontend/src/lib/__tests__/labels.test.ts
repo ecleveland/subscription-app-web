@@ -11,6 +11,7 @@ import {
   withLabel,
   isReservedLabelName,
   RESERVED_LABEL_NAME,
+  labelTextColor,
 } from '../labels';
 import type { Label } from '../types';
 
@@ -111,5 +112,19 @@ describe('isReservedLabelName', () => {
     expect(isReservedLabelName('Personal care')).toBe(false);
     expect(isReservedLabelName('Etsy shop')).toBe(false);
     expect(isReservedLabelName('')).toBe(false);
+  });
+});
+
+describe('labelTextColor', () => {
+  it('uses dark text on light colors and light text on dark ones', () => {
+    expect(labelTextColor('#ffffff')).toBe('#111111');
+    expect(labelTextColor('#f5d76e')).toBe('#111111');
+    expect(labelTextColor('#000000')).toBe('#ffffff');
+    expect(labelTextColor('#2f8a93')).toBe('#ffffff');
+  });
+
+  it('accepts short hex and falls back to light text on bad input', () => {
+    expect(labelTextColor('#fff')).toBe('#111111');
+    expect(labelTextColor('nope')).toBe('#ffffff');
   });
 });

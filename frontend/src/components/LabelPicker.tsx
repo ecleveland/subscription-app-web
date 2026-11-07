@@ -6,6 +6,7 @@ import {
   createLabel,
   defaultLabelColor,
   isReservedLabelName,
+  labelTextColor,
 } from '@/lib/labels';
 import { showErrorToast } from '@/lib/toast';
 import type { Label } from '@/lib/types';
@@ -114,12 +115,20 @@ export default function LabelPicker({
   // transparent and covers its label, so a click anywhere on the segment
   // lands on the input itself. An sr-only input would leave the label
   // intercepting Playwright's clicks.
-  function renderRadio(optionValue: string | null, text: string) {
+  // A label segment carries the label's own color: as a dot when unselected
+  // and as the fill when selected. Personal keeps the standard button styles.
+  function renderRadio(optionValue: string | null, text: string, color?: string) {
     const checked = value === optionValue;
+    const painted = checked && color !== undefined;
     return (
       <label
         key={optionValue ?? ''}
-        className={`${checked ? 'btn-primary' : 'btn-secondary'} relative cursor-pointer has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent`}
+        className={`${checked && !painted ? 'btn-primary' : 'btn-secondary'} relative cursor-pointer has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent`}
+        style={
+          painted
+            ? { backgroundColor: color, borderColor: color, color: labelTextColor(color) }
+            : undefined
+        }
       >
         <input
           type="radio"
@@ -130,6 +139,13 @@ export default function LabelPicker({
           onChange={() => onChange(optionValue)}
           className="absolute inset-0 m-0 cursor-pointer appearance-none opacity-0 disabled:cursor-not-allowed"
         />
+        {color !== undefined && !painted && (
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: color }}
+            aria-hidden="true"
+          />
+        )}
         {text}
       </label>
     );
@@ -149,7 +165,11 @@ export default function LabelPicker({
           >
             {renderRadio(null, 'Personal')}
             {options.map((l) =>
-              renderRadio(l._id, l.isArchived ? `${l.name} (archived)` : l.name),
+              renderRadio(
+                l._id,
+                l.isArchived ? `${l.name} (archived)` : l.name,
+                l.color,
+              ),
             )}
           </div>
         </>

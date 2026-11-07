@@ -35,6 +35,27 @@ export function defaultLabelColor(existingCount: number): string {
 
 // The API lists labels by name. A label created inline goes into its sorted
 // place, so pickers and filters keep that order without a refetch.
+// Picks black or white text for a label colored background. Falls back to
+// white when the color is not a hex string, since the palette is dark enough
+// for that to be the usual case.
+export function labelTextColor(hex: string): string {
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) return '#ffffff';
+  let digits = match[1];
+  if (digits.length === 3) {
+    digits = digits
+      .split('')
+      .map((d) => d + d)
+      .join('');
+  }
+  const r = parseInt(digits.slice(0, 2), 16);
+  const g = parseInt(digits.slice(2, 4), 16);
+  const b = parseInt(digits.slice(4, 6), 16);
+  // Perceived luminance, same weighting the chip colors were picked against.
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? '#111111' : '#ffffff';
+}
+
 export function withLabel(labels: Label[], label: Label): Label[] {
   return [...labels, label].sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
