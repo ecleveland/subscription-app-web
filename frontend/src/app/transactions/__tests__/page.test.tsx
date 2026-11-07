@@ -21,6 +21,10 @@ vi.mock('@/lib/transactions', () => ({
   deleteTransaction: vi.fn(),
 }));
 vi.mock('@/lib/categories', () => ({ listCategories: vi.fn() }));
+vi.mock('@/lib/labels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/labels')>()),
+  listLabels: vi.fn(),
+}));
 vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
@@ -30,6 +34,7 @@ vi.mock('@/components/TransactionForm', async () => {
   function TransactionFormStub(props: {
     transaction?: { _id: string };
     categories: { name: string }[];
+    labels: { name: string }[];
   }) {
     // Captured on mount only, like the real form's useState initializers —
     // lets tests assert the page remounts the form when the target changes.
@@ -37,7 +42,8 @@ vi.mock('@/components/TransactionForm', async () => {
     return (
       <div>
         TransactionFormStub:mounted-for={mountedFor};
-        {props.categories.map((c) => c.name).join(',')}
+        {props.categories.map((c) => c.name).join(',')};labels=
+        {props.labels.map((l) => l.name).join(',')}
       </div>
     );
   }
@@ -54,9 +60,10 @@ vi.mock('@/components/CsvImportWizard', () => ({
 
 import { listTransactions, deleteTransaction } from '@/lib/transactions';
 import { listCategories } from '@/lib/categories';
+import { listLabels } from '@/lib/labels';
 import { showSuccessToast, showErrorToast } from '@/lib/toast';
 import TransactionsPage from '@/app/transactions/page';
-import type { Account, BudgetCategory, Transaction } from '@/lib/types';
+import type { Account, BudgetCategory, Label, Transaction } from '@/lib/types';
 
 const accounts: Account[] = [
   { _id: 'a1', householdId: 'h', name: 'Checking', type: 'checking', balanceCents: 0, isArchived: false, createdAt: '', updatedAt: '' },
@@ -88,6 +95,10 @@ const txn: Transaction = {
   createdAt: '',
   updatedAt: '',
 };
+const labels: Label[] = [
+  { _id: 'l1', householdId: 'h', name: 'Etsy shop', color: '#2f8a93', isArchived: false, createdAt: '', updatedAt: '' },
+  { _id: 'l2', householdId: 'h', name: 'Old gig', color: '#6b4f9e', isArchived: true, createdAt: '', updatedAt: '' },
+];
 
 function mockList(data: Transaction[], total = data.length) {
   vi.mocked(listTransactions).mockResolvedValue({
@@ -110,6 +121,7 @@ describe('TransactionsPage', () => {
       refresh: vi.fn().mockResolvedValue(undefined),
     };
     vi.mocked(listCategories).mockResolvedValue(categories);
+    vi.mocked(listLabels).mockResolvedValue(labels);
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -361,5 +373,80 @@ describe('TransactionsPage', () => {
 
     await waitFor(() => expect(deleteTransaction).toHaveBeenCalledWith('t1'));
     expect(showSuccessToast).toHaveBeenCalledWith('Transaction deleted');
+  });
+
+  describe('labels', () => {
+    function lastFilters() {
+      return vi.mocked(listTransactions).mock.calls.at(-1)?.[0];
+    }
+
+    it('fetches labels with archived ones and lists them in the filter', async () => {
+      mockList([txn]);
+      render(<TransactionsPage />);
+      await screen.findByText('-$42.00');
+
+      expect(listLabels).toHaveBeenCalledWith(true);
+      const filter = screen.getByLabelText('Filter by label');
+      await within(filter).findByRole('option', { name: 'Etsy shop' });
+      expect(within(filter).getByRole('option', { name: 'All labels' })).toBeInTheDocument();
+      expect(within(filter).getByRole('option', { name: 'Personal' })).toBeInTheDocument();
+      expect(
+        within(filter).getByRole('option', { name: 'Old gig (archived)' }),
+      ).toBeInTheDocument();
+    });
+
+    it('filters by Personal, by a label, and back to all labels', async () => {
+      mockList([txn]);
+      const user = userEvent.setup();
+      render(<TransactionsPage />);
+      await screen.findByText('-$42.00');
+      const filter = screen.getByLabelText('Filter by label');
+      await within(filter).findByRole('option', { name: 'Etsy shop' });
+
+      await user.selectOptions(filter, 'none');
+      await waitFor(() => expect(lastFilters()).toMatchObject({ labelId: 'none', page: 1 }));
+
+      await user.selectOptions(filter, 'l1');
+      await waitFor(() => expect(lastFilters()).toMatchObject({ labelId: 'l1' }));
+
+      await user.selectOptions(filter, '');
+      await waitFor(() => expect(lastFilters()?.labelId).toBeUndefined());
+    });
+
+    it('shows a chip on a labeled row and none on a personal row', async () => {
+      mockList([
+        { ...txn, _id: 't1', payee: 'Kiln parts', labelId: 'l1' },
+        { ...txn, _id: 't2', payee: 'Groceries run' },
+      ]);
+      render(<TransactionsPage />);
+
+      const labeledRow = (await screen.findByText('Kiln parts')).closest('li')!;
+      expect(await within(labeledRow).findByText('Etsy shop')).toBeInTheDocument();
+      const personalRow = screen.getByText('Groceries run').closest('li')!;
+      expect(within(personalRow).queryByText('Etsy shop')).toBeNull();
+    });
+
+    it('passes the labels to the form', async () => {
+      mockList([]);
+      const user = userEvent.setup();
+      render(<TransactionsPage />);
+      await screen.findByText('No transactions found.');
+      await within(screen.getByLabelText('Filter by label')).findByRole('option', {
+        name: 'Etsy shop',
+      });
+
+      await user.click(screen.getByRole('button', { name: '+ Add transaction' }));
+      expect(screen.getByText(/TransactionFormStub:/)).toHaveTextContent(
+        'labels=Etsy shop,Old gig',
+      );
+    });
+
+    it('toasts when labels fail to load', async () => {
+      mockList([]);
+      vi.mocked(listLabels).mockRejectedValue(new Error('no labels'));
+      render(<TransactionsPage />);
+
+      await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('no labels'));
+    });
   });
 });

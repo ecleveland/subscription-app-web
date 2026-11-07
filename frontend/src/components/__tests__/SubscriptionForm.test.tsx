@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SubscriptionForm from '../SubscriptionForm';
-import type { Account, Subscription } from '@/lib/types';
+import type { Account, Label, Subscription } from '@/lib/types';
 
 vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
@@ -10,6 +10,25 @@ vi.mock('@/lib/api', () => ({
 vi.mock('@/lib/toast', () => ({
   showErrorToast: vi.fn(),
   showSuccessToast: vi.fn(),
+}));
+
+// One active label keeps the picker in its radio layout.
+const businessLabel: Label = {
+  _id: 'lab-1',
+  householdId: 'hh-1',
+  name: 'Business',
+  color: '#2f8a93',
+  isArchived: false,
+  createdAt: '2025-01-01',
+  updatedAt: '2025-01-01',
+};
+
+// The real defaultLabelColor and withLabel stay in place. Only the calls
+// that reach the API are mocked.
+vi.mock('@/lib/labels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/labels')>()),
+  listLabels: vi.fn(),
+  createLabel: vi.fn(),
 }));
 
 const ledgerAccounts: Account[] = [
@@ -59,6 +78,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import { apiFetch } from '@/lib/api';
+import { createLabel, listLabels } from '@/lib/labels';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 
 const existingSub: Subscription = {
@@ -78,6 +98,10 @@ const existingSub: Subscription = {
 };
 
 describe('SubscriptionForm', () => {
+  beforeEach(() => {
+    vi.mocked(listLabels).mockResolvedValue([businessLabel]);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     mockPush.mockClear();
@@ -578,6 +602,117 @@ describe('SubscriptionForm', () => {
         expect(screen.getByText(message)).toBeInTheDocument();
         expect(showErrorToast).toHaveBeenCalledWith(message);
       });
+    });
+  });
+
+  describe('label', () => {
+    function lastBody() {
+      const calls = vi.mocked(apiFetch).mock.calls;
+      return JSON.parse(calls[calls.length - 1][1]!.body as string);
+    }
+
+    async function fillRequired(user: ReturnType<typeof userEvent.setup>) {
+      await user.type(screen.getByLabelText('Name'), 'Adobe');
+      await user.type(screen.getByLabelText('Cost ($)'), '54.99');
+      await user.type(screen.getByLabelText('Next Billing Date'), '2025-07-01');
+    }
+
+    it('loads labels with archived ones included', async () => {
+      render(<SubscriptionForm />);
+      await screen.findByRole('radio', { name: 'Business' });
+      expect(listLabels).toHaveBeenCalledWith(true);
+    });
+
+    it('sends the chosen labelId on create', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm />);
+      await fillRequired(user);
+      await user.click(await screen.findByRole('radio', { name: 'Business' }));
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody().labelId).toBe('lab-1');
+    });
+
+    it('omits labelId when a new subscription stays personal', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(<SubscriptionForm />);
+      await screen.findByRole('radio', { name: 'Business' });
+      await fillRequired(user);
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody()).not.toHaveProperty('labelId');
+    });
+
+    it('preselects the label and sends null when switched to Personal on edit', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockResolvedValueOnce({});
+
+      render(
+        <SubscriptionForm subscription={{ ...existingSub, labelId: 'lab-1' }} />,
+      );
+      const business = await screen.findByRole('radio', { name: 'Business' });
+      expect(business).toBeChecked();
+
+      await user.click(screen.getByRole('radio', { name: 'Personal' }));
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+      expect(lastBody().labelId).toBeNull();
+    });
+
+    it('disables the picker while a save is in flight', async () => {
+      const user = userEvent.setup();
+      vi.mocked(apiFetch).mockReset();
+      vi.mocked(apiFetch).mockReturnValue(new Promise(() => {}));
+
+      render(<SubscriptionForm />);
+      await screen.findByRole('radio', { name: 'Business' });
+      await fillRequired(user);
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      expect(await screen.findByRole('button', { name: 'Saving...' })).toBeDisabled();
+      expect(screen.getByRole('radio', { name: 'Personal' })).toBeDisabled();
+      expect(screen.getByRole('radio', { name: 'Business' })).toBeDisabled();
+    });
+
+    it('keeps the label options sorted by name after an inline create', async () => {
+      const user = userEvent.setup();
+      vi.mocked(createLabel).mockResolvedValue({
+        ...businessLabel,
+        _id: 'lab-2',
+        name: 'Agency',
+      });
+
+      render(<SubscriptionForm />);
+      await screen.findByRole('radio', { name: 'Business' });
+      await user.click(screen.getByRole('button', { name: 'Add a label' }));
+      await user.type(screen.getByLabelText('New label name'), 'Agency');
+      await user.click(screen.getByRole('button', { name: 'Add new label' }));
+
+      // Two labels switch the picker to a select.
+      const select = await screen.findByRole('combobox', { name: 'Label' });
+      const names = Array.from(select.querySelectorAll('option')).map(
+        (o) => o.textContent,
+      );
+      expect(names).toEqual(['Personal', 'Agency', 'Business']);
+      expect(select).toHaveValue('lab-2');
+    });
+
+    it('toasts when labels fail to load', async () => {
+      vi.mocked(listLabels).mockRejectedValue(new Error('down'));
+      render(<SubscriptionForm />);
+      await waitFor(() =>
+        expect(showErrorToast).toHaveBeenCalledWith('Failed to load labels'),
+      );
     });
   });
 

@@ -21,6 +21,8 @@ export interface TransactionFilters {
   dateFrom?: string;
   dateTo?: string;
   cleared?: boolean;
+  // A label id, or LABEL_FILTER_NONE for personal records.
+  labelId?: string;
   page?: number;
   limit?: number;
 }
@@ -35,6 +37,8 @@ export interface TransactionInput {
   payee?: string;
   notes?: string;
   cleared?: boolean;
+  // Null clears the label, which makes the record personal.
+  labelId?: string | null;
 }
 
 function toQuery(filters: TransactionFilters): string {

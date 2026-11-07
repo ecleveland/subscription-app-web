@@ -15,6 +15,10 @@ vi.mock('@/lib/goals', async (importOriginal) => {
   };
 });
 vi.mock('@/lib/categories', () => ({ listCategories: vi.fn() }));
+vi.mock('@/lib/labels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/labels')>()),
+  listLabels: vi.fn(),
+}));
 let authState = { isAuthenticated: true };
 vi.mock('@/lib/auth-context', () => ({ useAuth: () => authState }));
 // GoalForm reads the ledger accounts for its Account picker.
@@ -32,9 +36,10 @@ vi.mock('next/navigation', () => ({
 
 import { listGoals, createGoal, updateGoal, contributeToGoal } from '@/lib/goals';
 import { listCategories } from '@/lib/categories';
+import { listLabels } from '@/lib/labels';
 import { showErrorToast } from '@/lib/toast';
 import GoalsPage from '@/app/goals/page';
-import type { Goal } from '@/lib/types';
+import type { Goal, Label } from '@/lib/types';
 
 function goal(over: Partial<Goal>): Goal {
   return {
@@ -58,6 +63,9 @@ const empty = goal({ _id: 'g0', name: 'Vacation', currentCents: 0 });
 const half = goal({ _id: 'g1', name: 'Emergency fund', currentCents: 5000 });
 const over = goal({ _id: 'g2', name: 'Card payoff', type: 'debt', currentCents: 12000 });
 const archived = goal({ _id: 'g3', name: 'Old laptop', isArchived: true });
+const labels: Label[] = [
+  { _id: 'l1', householdId: 'h', name: 'Etsy shop', color: '#2f8a93', isArchived: false, createdAt: '', updatedAt: '' },
+];
 
 function card(name: string) {
   return screen.getByRole('article', { name });
@@ -75,6 +83,7 @@ describe('GoalsPage', () => {
       includeArchived ? [empty, half, over, archived] : [empty, half, over],
     );
     vi.mocked(listCategories).mockResolvedValue([]);
+    vi.mocked(listLabels).mockResolvedValue(labels);
   });
   afterEach(() => vi.clearAllMocks());
 
@@ -83,6 +92,7 @@ describe('GoalsPage', () => {
     render(<GoalsPage />);
     expect(listGoals).not.toHaveBeenCalled();
     expect(listCategories).not.toHaveBeenCalled();
+    expect(listLabels).not.toHaveBeenCalled();
   });
 
   it('shows loading, then goals with progress labels and clamped bars', async () => {
@@ -377,5 +387,52 @@ describe('GoalsPage', () => {
 
     expect(await screen.findByRole('article', { name: 'Rainy day' })).toBeInTheDocument();
     expect(screen.queryByRole('article', { name: 'Emergency fund' })).toBeNull();
+  });
+
+  describe('labels', () => {
+    it('passes the labels to the create form', async () => {
+      const user = userEvent.setup();
+      render(<GoalsPage />);
+      await screen.findByRole('article', { name: 'Vacation' });
+      await waitFor(() => expect(listLabels).toHaveBeenCalledWith(true));
+
+      await user.click(screen.getByRole('button', { name: '+ Add goal' }));
+
+      expect(screen.getByRole('radiogroup', { name: 'Label' })).toBeInTheDocument();
+      expect(await screen.findByRole('radio', { name: 'Etsy shop' })).toBeInTheDocument();
+    });
+
+    it('passes the labels to the edit form', async () => {
+      const user = userEvent.setup();
+      render(<GoalsPage />);
+      await screen.findByRole('article', { name: 'Emergency fund' });
+      await waitFor(() => expect(listLabels).toHaveBeenCalled());
+
+      await user.click(within(card('Emergency fund')).getByRole('button', { name: 'Edit' }));
+
+      expect(await screen.findByRole('radio', { name: 'Etsy shop' })).toBeInTheDocument();
+    });
+
+    it('shows a label chip on a labeled goal card only', async () => {
+      vi.mocked(listGoals).mockResolvedValue([
+        { ...half, labelId: 'l1' },
+        empty,
+      ]);
+      render(<GoalsPage />);
+
+      expect(
+        await within(await screen.findByRole('article', { name: 'Emergency fund' })).findByText(
+          'Etsy shop',
+        ),
+      ).toBeInTheDocument();
+      expect(within(card('Vacation')).queryByText('Etsy shop')).toBeNull();
+    });
+
+    it('toasts a labels failure while goals still render', async () => {
+      vi.mocked(listLabels).mockRejectedValue(new Error('Labels down'));
+      render(<GoalsPage />);
+      expect(await screen.findByRole('article', { name: 'Vacation' })).toBeInTheDocument();
+      await waitFor(() => expect(showErrorToast).toHaveBeenCalledWith('Labels down'));
+    });
   });
 });

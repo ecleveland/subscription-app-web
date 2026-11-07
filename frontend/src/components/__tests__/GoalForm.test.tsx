@@ -24,7 +24,7 @@ vi.mock('@/lib/accounts-context', () => ({
 import { createGoal, updateGoal } from '@/lib/goals';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import GoalForm from '@/components/GoalForm';
-import type { Account, AccountType, BudgetCategory, Goal } from '@/lib/types';
+import type { Account, AccountType, BudgetCategory, Goal, Label } from '@/lib/types';
 
 function account(_id: string, name: string, type: AccountType, isArchived = false): Account {
   return {
@@ -92,6 +92,20 @@ const linked: Goal = {
   linkedAccount: { accountId: 'a-sav', name: 'Rainy day' },
 };
 
+const bizLabel: Label = {
+  _id: 'l1',
+  householdId: 'h',
+  name: 'Etsy shop',
+  color: '#2f8a93',
+  isArchived: false,
+  createdAt: '',
+  updatedAt: '',
+};
+
+// Most tests ignore labels. Spread this into every render so the required
+// props are present.
+const labelProps = { labels: [] as Label[], onLabelCreated: vi.fn() };
+
 function accountOptions(): string[] {
   const select = screen.getByLabelText('Account');
   return Array.from(select.querySelectorAll('option')).map((o) => o.textContent ?? '');
@@ -109,7 +123,7 @@ describe('GoalForm', () => {
     const user = userEvent.setup();
     vi.mocked(createGoal).mockResolvedValue(existing);
     const onSaved = vi.fn();
-    render(<GoalForm categories={categories} onSaved={onSaved} onCancel={vi.fn()} />);
+    render(<GoalForm {...labelProps} categories={categories} onSaved={onSaved} onCancel={vi.fn()} />);
 
     await user.type(screen.getByLabelText('Name'), 'Pay off card');
     await user.selectOptions(screen.getByLabelText('Type'), 'debt');
@@ -130,7 +144,7 @@ describe('GoalForm', () => {
   it('includes a target date and category on create when set', async () => {
     const user = userEvent.setup();
     vi.mocked(createGoal).mockResolvedValue(existing);
-    render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+    render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
 
     await user.type(screen.getByLabelText('Name'), 'Car');
     await user.type(screen.getByLabelText('Target ($)'), '5000');
@@ -150,14 +164,14 @@ describe('GoalForm', () => {
   });
 
   it('hides archived categories from the picker', () => {
-    render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+    render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
     expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Old bucket' })).toBeNull();
   });
 
   it('rejects a zero target inline without calling the API', async () => {
     const user = userEvent.setup();
-    render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+    render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
     await user.type(screen.getByLabelText('Name'), 'Car');
     await user.type(screen.getByLabelText('Target ($)'), '0');
     await user.click(screen.getByRole('button', { name: 'Create' }));
@@ -169,7 +183,7 @@ describe('GoalForm', () => {
     'rejects an unparseable target %s with the decimals message',
     async (value) => {
       const user = userEvent.setup();
-      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
       await user.type(screen.getByLabelText('Name'), 'Car');
       await user.type(screen.getByLabelText('Target ($)'), value);
       await user.click(screen.getByRole('button', { name: 'Create' }));
@@ -185,7 +199,7 @@ describe('GoalForm', () => {
     const user = userEvent.setup();
     vi.mocked(createGoal).mockRejectedValue(new Error('Category not found'));
     const onSaved = vi.fn();
-    render(<GoalForm categories={categories} onSaved={onSaved} onCancel={vi.fn()} />);
+    render(<GoalForm {...labelProps} categories={categories} onSaved={onSaved} onCancel={vi.fn()} />);
     await user.type(screen.getByLabelText('Name'), 'Car');
     await user.type(screen.getByLabelText('Target ($)'), '10');
     await user.click(screen.getByRole('button', { name: 'Create' }));
@@ -201,7 +215,7 @@ describe('GoalForm', () => {
     vi.mocked(updateGoal).mockResolvedValue(updated);
     const onSaved = vi.fn();
     render(
-      <GoalForm goal={existing} categories={categories} onSaved={onSaved} onCancel={vi.fn()} />,
+      <GoalForm {...labelProps} goal={existing} categories={categories} onSaved={onSaved} onCancel={vi.fn()} />,
     );
 
     expect(screen.getByLabelText('Name')).toHaveValue('Car');
@@ -228,7 +242,7 @@ describe('GoalForm', () => {
     vi.mocked(updateGoal).mockRejectedValue(new Error('Goal not found'));
     const onSaved = vi.fn();
     render(
-      <GoalForm goal={existing} categories={categories} onSaved={onSaved} onCancel={vi.fn()} />,
+      <GoalForm {...labelProps} goal={existing} categories={categories} onSaved={onSaved} onCancel={vi.fn()} />,
     );
     await user.clear(screen.getByLabelText('Name'));
     await user.type(screen.getByLabelText('Name'), 'Truck');
@@ -242,7 +256,7 @@ describe('GoalForm', () => {
 
   it('hints when categories are unavailable and keeps the edit placeholder', () => {
     render(
-      <GoalForm
+      <GoalForm {...labelProps}
         goal={existing}
         categories={[]}
         categoriesUnavailable
@@ -263,7 +277,7 @@ describe('GoalForm', () => {
     const user = userEvent.setup();
     vi.mocked(updateGoal).mockResolvedValue(existing);
     render(
-      <GoalForm goal={existing} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+      <GoalForm {...labelProps} goal={existing} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
     );
     await user.clear(screen.getByLabelText('Name'));
     await user.type(screen.getByLabelText('Name'), 'New car');
@@ -281,7 +295,7 @@ describe('GoalForm', () => {
 
   it('keeps an archived category the goal already uses selectable', () => {
     render(
-      <GoalForm
+      <GoalForm {...labelProps}
         goal={{ ...existing, categoryId: 'c2' }}
         categories={categories}
         onSaved={vi.fn()}
@@ -295,7 +309,7 @@ describe('GoalForm', () => {
     const user = userEvent.setup();
     vi.mocked(updateGoal).mockResolvedValue({ ...existing, categoryId: null });
     render(
-      <GoalForm
+      <GoalForm {...labelProps}
         goal={{ ...existing, categoryId: 'gone' }}
         categories={categories}
         onSaved={vi.fn()}
@@ -319,7 +333,7 @@ describe('GoalForm', () => {
   describe('account link', () => {
     it('lists only unarchived accounts that fit the goal type', async () => {
       const user = userEvent.setup();
-      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
       expect(accountOptions()).toEqual(['None (manual)', 'Checking', 'Rainy day']);
 
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
@@ -329,7 +343,7 @@ describe('GoalForm', () => {
     it('sends accountId on create when an account is picked', async () => {
       const user = userEvent.setup();
       vi.mocked(createGoal).mockResolvedValue(linked);
-      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
       await user.type(screen.getByLabelText('Name'), 'Rainy day fund');
       await user.type(screen.getByLabelText('Target ($)'), '100');
       await user.selectOptions(screen.getByLabelText('Account'), 'a-sav');
@@ -348,7 +362,7 @@ describe('GoalForm', () => {
     it('omits accountId on create when None is picked', async () => {
       const user = userEvent.setup();
       vi.mocked(createGoal).mockResolvedValue(existing);
-      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
       await user.type(screen.getByLabelText('Name'), 'Car');
       await user.type(screen.getByLabelText('Target ($)'), '100');
       await user.selectOptions(screen.getByLabelText('Account'), 'a-chk');
@@ -363,7 +377,7 @@ describe('GoalForm', () => {
       const user = userEvent.setup();
       vi.mocked(updateGoal).mockResolvedValue({ ...linked, linkedAccount: null });
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       expect(screen.getByLabelText('Account')).toHaveValue('a-sav');
 
@@ -379,7 +393,7 @@ describe('GoalForm', () => {
       const user = userEvent.setup();
       vi.mocked(updateGoal).mockResolvedValue(linked);
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.clear(screen.getByLabelText('Name'));
       await user.type(screen.getByLabelText('Name'), 'Truck');
@@ -394,7 +408,7 @@ describe('GoalForm', () => {
       const user = userEvent.setup();
       vi.mocked(updateGoal).mockResolvedValue(linked);
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.selectOptions(screen.getByLabelText('Account'), 'a-chk');
       await user.click(screen.getByRole('button', { name: 'Update' }));
@@ -406,7 +420,7 @@ describe('GoalForm', () => {
 
     it('clears a checking selection when the type switches to debt', async () => {
       const user = userEvent.setup();
-      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
       await user.selectOptions(screen.getByLabelText('Account'), 'a-chk');
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
       expect(screen.getByLabelText('Account')).toHaveValue('');
@@ -416,7 +430,7 @@ describe('GoalForm', () => {
       const user = userEvent.setup();
       vi.mocked(updateGoal).mockResolvedValue(existing);
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
       await user.click(screen.getByRole('button', { name: 'Update' }));
@@ -430,7 +444,7 @@ describe('GoalForm', () => {
       const user = userEvent.setup();
       vi.mocked(updateGoal).mockResolvedValue(existing);
       render(
-        <GoalForm
+        <GoalForm {...labelProps}
           goal={{ ...existing, linkedAccount: { accountId: 'gone', name: 'Closed' } }}
           categories={categories}
           onSaved={vi.fn()}
@@ -451,7 +465,7 @@ describe('GoalForm', () => {
       accountsState.error = 'Network down';
       vi.mocked(updateGoal).mockResolvedValue(existing);
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
       await user.click(screen.getByRole('button', { name: 'Update' }));
@@ -467,7 +481,7 @@ describe('GoalForm', () => {
       accountsState.loading = true;
       vi.mocked(updateGoal).mockResolvedValue(existing);
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
       await user.click(screen.getByRole('button', { name: 'Update' }));
@@ -483,7 +497,7 @@ describe('GoalForm', () => {
       accountsState.error = 'Network down';
       vi.mocked(updateGoal).mockResolvedValue(existing);
       render(
-        <GoalForm goal={existing} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={existing} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
       await user.click(screen.getByRole('button', { name: 'Update' }));
@@ -497,7 +511,7 @@ describe('GoalForm', () => {
       const user = userEvent.setup();
       vi.mocked(updateGoal).mockResolvedValue(linked);
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       await user.selectOptions(screen.getByLabelText('Type'), 'debt');
       expect(screen.getByLabelText('Account')).toHaveValue('');
@@ -518,7 +532,7 @@ describe('GoalForm', () => {
       vi.mocked(updateGoal).mockResolvedValue(existing);
       // The account's type changed server-side to credit after the link.
       render(
-        <GoalForm
+        <GoalForm {...labelProps}
           goal={{ ...existing, linkedAccount: { accountId: 'a-cc', name: 'Visa' } }}
           categories={categories}
           onSaved={vi.fn()}
@@ -540,7 +554,7 @@ describe('GoalForm', () => {
       accountsState.loading = true;
       accountsState.accounts = [];
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       const select = screen.getByLabelText('Account');
       expect(select).toBeDisabled();
@@ -550,7 +564,7 @@ describe('GoalForm', () => {
 
     it('keeps an archived linked account as a disabled placeholder', () => {
       render(
-        <GoalForm
+        <GoalForm {...labelProps}
           goal={{ ...existing, linkedAccount: { accountId: 'a-old', name: 'Old savings' } }}
           categories={categories}
           onSaved={vi.fn()}
@@ -568,7 +582,7 @@ describe('GoalForm', () => {
       const user = userEvent.setup();
       vi.mocked(updateGoal).mockResolvedValue(existing);
       render(
-        <GoalForm
+        <GoalForm {...labelProps}
           goal={{ ...existing, linkedAccount: { accountId: 'gone', name: 'Closed' } }}
           categories={categories}
           onSaved={vi.fn()}
@@ -592,7 +606,7 @@ describe('GoalForm', () => {
       accountsState.accounts = [];
       accountsState.error = 'Network down';
       render(
-        <GoalForm goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
+        <GoalForm {...labelProps} goal={linked} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />,
       );
       expect(
         screen.getByText("Couldn't load accounts. You can link one later."),
@@ -606,7 +620,7 @@ describe('GoalForm', () => {
     it('shows a rejected linked create as a toast', async () => {
       const user = userEvent.setup();
       vi.mocked(createGoal).mockRejectedValue(new Error('Account does not fit goal'));
-      render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={vi.fn()} />);
       await user.type(screen.getByLabelText('Name'), 'Car');
       await user.type(screen.getByLabelText('Target ($)'), '100');
       await user.selectOptions(screen.getByLabelText('Account'), 'a-sav');
@@ -621,8 +635,99 @@ describe('GoalForm', () => {
   it('calls onCancel', async () => {
     const user = userEvent.setup();
     const onCancel = vi.fn();
-    render(<GoalForm categories={categories} onSaved={vi.fn()} onCancel={onCancel} />);
+    render(<GoalForm {...labelProps} categories={categories} onSaved={vi.fn()} onCancel={onCancel} />);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onCancel).toHaveBeenCalled();
+  });
+
+  describe('label', () => {
+    it('sends the picked labelId on create', async () => {
+      const user = userEvent.setup();
+      vi.mocked(createGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm
+          {...labelProps}
+          labels={[bizLabel]}
+          categories={categories}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+
+      await user.type(screen.getByLabelText('Name'), 'Kiln');
+      await user.type(screen.getByLabelText('Target ($)'), '800');
+      await user.click(screen.getByRole('radio', { name: 'Etsy shop' }));
+      await user.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() =>
+        expect(createGoal).toHaveBeenCalledWith({
+          name: 'Kiln',
+          type: 'savings',
+          targetCents: 80000,
+          labelId: 'l1',
+        }),
+      );
+    });
+
+    it('omits labelId on edit when the label is unchanged', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm
+          {...labelProps}
+          labels={[bizLabel]}
+          goal={{ ...existing, labelId: 'l1' }}
+          categories={categories}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+
+      await user.clear(screen.getByLabelText('Name'));
+      await user.type(screen.getByLabelText('Name'), 'Truck');
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(updateGoal).toHaveBeenCalledWith('g1', { name: 'Truck' }));
+    });
+
+    it('sends labelId null on edit when switched to Personal', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm
+          {...labelProps}
+          labels={[bizLabel]}
+          goal={{ ...existing, labelId: 'l1' }}
+          categories={categories}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+
+      await user.click(screen.getByRole('radio', { name: 'Personal' }));
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(updateGoal).toHaveBeenCalledWith('g1', { labelId: null }));
+    });
+
+    it('sends the new labelId on edit when a personal goal gets a label', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateGoal).mockResolvedValue(existing);
+      render(
+        <GoalForm
+          {...labelProps}
+          labels={[bizLabel]}
+          goal={existing}
+          categories={categories}
+          onSaved={vi.fn()}
+          onCancel={vi.fn()}
+        />,
+      );
+
+      await user.click(screen.getByRole('radio', { name: 'Etsy shop' }));
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(updateGoal).toHaveBeenCalledWith('g1', { labelId: 'l1' }));
+    });
   });
 });

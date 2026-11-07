@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SubscriptionCard from '../SubscriptionCard';
-import type { Subscription } from '@/lib/types';
+import type { Label, Subscription } from '@/lib/types';
 
 vi.mock('@/lib/api', () => ({
   apiFetch: vi.fn(),
@@ -295,6 +295,33 @@ describe('SubscriptionCard', () => {
     await waitFor(() => {
       expect(screen.queryByText('Inactive')).not.toBeInTheDocument();
       expect(showErrorToast).toHaveBeenCalledWith('Network error');
+    });
+  });
+
+  describe('label chip', () => {
+    const label: Label = {
+      _id: 'l1',
+      householdId: 'h',
+      name: 'Consulting',
+      color: '#2f8a93',
+      isArchived: false,
+      createdAt: '2025-01-01',
+      updatedAt: '2025-01-01',
+    };
+
+    it('shows the label name when the card gets a label', () => {
+      render(
+        <SubscriptionCard
+          subscription={makeSub({ labelId: 'l1' })}
+          label={label}
+        />,
+      );
+      expect(screen.getByText('Consulting')).toBeInTheDocument();
+    });
+
+    it('shows no chip for a personal subscription', () => {
+      render(<SubscriptionCard subscription={makeSub()} />);
+      expect(screen.queryByText('Consulting')).not.toBeInTheDocument();
     });
   });
 });

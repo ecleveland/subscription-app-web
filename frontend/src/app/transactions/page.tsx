@@ -9,13 +9,16 @@ import {
   type TransactionFilters,
 } from '@/lib/transactions';
 import { listCategories } from '@/lib/categories';
+import { listLabels, LABEL_FILTER_NONE, withLabel } from '@/lib/labels';
 import { formatCents, formatDate } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import TransactionForm from '@/components/TransactionForm';
 import CsvImportWizard from '@/components/CsvImportWizard';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import LabelChip from '@/components/LabelChip';
 import type {
   BudgetCategory,
+  Label,
   PaginationMeta,
   Transaction,
   TransactionType,
@@ -43,6 +46,7 @@ function TransactionsPageInner() {
     refresh: refreshAccounts,
   } = useAccounts();
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
+  const [labels, setLabels] = useState<Label[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,6 +61,8 @@ function TransactionsPageInner() {
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [type, setType] = useState<'' | TransactionType>('');
+  // Empty is all labels. LABEL_FILTER_NONE is Personal.
+  const [labelId, setLabelId] = useState('');
   // Derived from ?recurringId= (a schedule's "History" deep link, VEG-470) so
   // the URL is the single source of truth — a second History click that only
   // changes the query param re-applies the filter without a remount.
@@ -71,6 +77,11 @@ function TransactionsPageInner() {
   const categoryName = useMemo(
     () => new Map(categories.map((c) => [c._id, c.name])),
     [categories],
+  );
+  // Archived labels stay in the map so historical rows keep their chip.
+  const labelById = useMemo(
+    () => new Map(labels.map((l) => [l._id, l])),
+    [labels],
   );
   // Archived categories keep labeling their historical rows (the name map
   // above uses the full list) but are not offered for new activity.
@@ -101,11 +112,22 @@ function TransactionsPageInner() {
   }, []);
 
   useEffect(() => {
+    listLabels(true)
+      .then(setLabels)
+      .catch((err) =>
+        showErrorToast(
+          err instanceof Error ? err.message : 'Failed to load labels',
+        ),
+      );
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     const filters: TransactionFilters = { page, limit: PAGE_SIZE };
     if (accountId) filters.accountId = accountId;
     if (categoryId) filters.categoryId = categoryId;
     if (type) filters.type = type;
+    if (labelId) filters.labelId = labelId;
     if (recurringId) filters.recurringId = recurringId;
     listTransactions(filters)
       .then((res) => {
@@ -127,7 +149,7 @@ function TransactionsPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [page, accountId, categoryId, type, recurringId, reloadKey]);
+  }, [page, accountId, categoryId, type, labelId, recurringId, reloadKey]);
 
   async function afterMutation() {
     setShowCreate(false);
@@ -226,6 +248,8 @@ function TransactionsPageInner() {
             transaction={editing ?? undefined}
             accounts={accounts}
             categories={formCategories}
+            labels={labels}
+            onLabelCreated={(l) => setLabels((prev) => withLabel(prev, l))}
             onSaved={afterMutation}
             onCancel={() => {
               setShowCreate(false);
@@ -295,6 +319,23 @@ function TransactionsPageInner() {
           <option value="expense">Expense</option>
           <option value="transfer">Transfer</option>
         </select>
+        <select
+          aria-label="Filter by label"
+          value={labelId}
+          onChange={(e) => {
+            setPage(1);
+            setLabelId(e.target.value);
+          }}
+          className="input w-auto"
+        >
+          <option value="">All labels</option>
+          <option value={LABEL_FILTER_NONE}>Personal</option>
+          {labels.map((l) => (
+            <option key={l._id} value={l._id}>
+              {l.isArchived ? `${l.name} (archived)` : l.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {loading ? (
@@ -313,13 +354,16 @@ function TransactionsPageInner() {
               className="flex items-center justify-between border border-line rounded-md px-4 py-3 bg-surface"
             >
               <div className="min-w-0">
-                <p className="font-medium truncate">
-                  {t.type === 'transfer'
-                    ? `Transfer: ${accountName.get(t.accountId) ?? '—'} → ${
-                        accountName.get(t.transferAccountId ?? '') ?? '—'
-                      }`
-                    : t.payee || categoryName.get(t.categoryId ?? '') || '—'}
-                </p>
+                <div className="flex items-center gap-2 min-w-0">
+                  <p className="font-medium truncate">
+                    {t.type === 'transfer'
+                      ? `Transfer: ${accountName.get(t.accountId) ?? '—'} → ${
+                          accountName.get(t.transferAccountId ?? '') ?? '—'
+                        }`
+                      : t.payee || categoryName.get(t.categoryId ?? '') || '—'}
+                  </p>
+                  <LabelChip label={labelById.get(t.labelId ?? '')} />
+                </div>
                 <p className="text-xs text-muted">
                   {formatDate(t.date)} · {accountName.get(t.accountId) ?? '—'}
                   {t.type !== 'transfer' &&

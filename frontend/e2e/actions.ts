@@ -72,6 +72,8 @@ export interface NewTransaction {
   category: string;
   amount: string;
   payee: string;
+  /** When set, picks this label instead of the default Personal. */
+  label?: string;
 }
 
 /** Record an expense or income through the /transactions form and wait for its
@@ -89,6 +91,20 @@ export async function addTransaction(page: Page, tx: NewTransaction): Promise<vo
   await page
     .getByLabel('Category', { exact: true })
     .selectOption({ label: tx.category });
+  if (tx.label) {
+    // The picker shows radio buttons for a household with one active label
+    // and a select for more. Other specs share the E2E database and may have
+    // added labels, so handle both. Waiting on either control also waits out
+    // the label fetch, during which only the Personal radio exists.
+    const radio = page.getByRole('radio', { name: tx.label, exact: true });
+    const select = page.getByRole('combobox', { name: 'Label', exact: true });
+    await expect(radio.or(select)).toBeVisible();
+    if (await radio.count()) {
+      await radio.click();
+    } else {
+      await select.selectOption({ label: tx.label });
+    }
+  }
   await page.getByLabel('Amount ($)').fill(tx.amount);
   await page.getByLabel('Payee').fill(tx.payee);
   await page.getByRole('button', { name: 'Add', exact: true }).click();

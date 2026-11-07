@@ -12,12 +12,15 @@ import {
   type RecurringFilters,
 } from '@/lib/recurring';
 import { listCategories } from '@/lib/categories';
+import { listLabels, withLabel } from '@/lib/labels';
 import { formatDate } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import RecurringForm from '@/components/RecurringForm';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import LabelChip from '@/components/LabelChip';
 import type {
   BudgetCategory,
+  Label,
   RecurringTransaction,
   RecurringType,
 } from '@/lib/types';
@@ -37,6 +40,7 @@ export default function RecurringPage() {
     refresh: refreshAccounts,
   } = useAccounts();
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
+  const [labels, setLabels] = useState<Label[]>([]);
   const [recurring, setRecurring] = useState<RecurringTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -59,6 +63,11 @@ export default function RecurringPage() {
     () => new Map(categories.map((c) => [c._id, c.name])),
     [categories],
   );
+  // Archived labels stay in the map so a schedule keeps its chip.
+  const labelById = useMemo(
+    () => new Map(labels.map((l) => [l._id, l])),
+    [labels],
+  );
   const activeCategories = useMemo(
     () => categories.filter((c) => !c.isArchived),
     [categories],
@@ -77,6 +86,16 @@ export default function RecurringPage() {
       .catch((err) =>
         showErrorToast(
           err instanceof Error ? err.message : 'Failed to load categories',
+        ),
+      );
+  }, []);
+
+  useEffect(() => {
+    listLabels(true)
+      .then(setLabels)
+      .catch((err) =>
+        showErrorToast(
+          err instanceof Error ? err.message : 'Failed to load labels',
         ),
       );
   }, []);
@@ -176,6 +195,8 @@ export default function RecurringPage() {
             recurring={editing ?? undefined}
             accounts={accounts}
             categories={formCategories}
+            labels={labels}
+            onLabelCreated={(l) => setLabels((prev) => withLabel(prev, l))}
             onSaved={afterMutation}
             onCancel={() => {
               setShowCreate(false);
@@ -272,12 +293,15 @@ export default function RecurringPage() {
               className="flex items-center justify-between border border-line rounded-md px-4 py-3 bg-surface"
             >
               <div className="min-w-0">
-                <p className="font-medium truncate">
-                  {r.payee}
-                  <span className="ml-2 text-xs font-normal text-muted">
-                    {r.type === 'income' ? 'Income' : 'Bill'}
-                  </span>
-                </p>
+                <div className="flex items-center gap-2 min-w-0">
+                  <p className="font-medium truncate">
+                    {r.payee}
+                    <span className="ml-2 text-xs font-normal text-muted">
+                      {r.type === 'income' ? 'Income' : 'Bill'}
+                    </span>
+                  </p>
+                  <LabelChip label={labelById.get(r.labelId ?? '')} />
+                </div>
                 <p className="text-xs text-muted">
                   {cadenceLabel(r.cadence)} · next {formatDate(r.nextDate)}
                   {r.categoryId &&
