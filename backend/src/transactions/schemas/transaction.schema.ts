@@ -9,6 +9,31 @@ export enum TransactionType {
   TRANSFER = 'transfer',
 }
 
+export enum ReimbursementStatus {
+  OWED = 'owed',
+  REIMBURSED = 'reimbursed',
+}
+
+// Whether a business expense paid from personal money has been paid back
+// (VEG-700). Declared above Transaction because its @Prop decorator reads
+// ReimbursementSchema when the class is defined.
+@Schema({ _id: false })
+export class Reimbursement {
+  @Prop({ required: true, enum: ReimbursementStatus })
+  status: ReimbursementStatus;
+
+  // When the money came back. Present only when status is reimbursed.
+  @Prop()
+  reimbursedAt?: Date;
+
+  // The income transaction that paid the expense back. Optional even when
+  // reimbursed, and unset when that income is deleted.
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Transaction' })
+  reimbursedByTransactionId?: MongooseSchema.Types.ObjectId;
+}
+
+export const ReimbursementSchema = SchemaFactory.createForClass(Reimbursement);
+
 // The atomic ledger unit (per budgeting.md). One-off entries today; also the
 // materialized output of recurring schedules later (Phase 4). All money is
 // integer cents — `amountCents` is always a positive magnitude; the sign of its
@@ -93,6 +118,12 @@ export class Transaction {
   // business view. TransactionsService enforces both rules.
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Label' })
   labelId?: MongooseSchema.Types.ObjectId;
+
+  // Absent means not reimbursable. Only a labeled expense carries one, and
+  // TransactionsService enforces that. RecurringTransaction never carries one
+  // (VEG-700).
+  @Prop({ type: ReimbursementSchema })
+  reimbursement?: Reimbursement;
 }
 
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);

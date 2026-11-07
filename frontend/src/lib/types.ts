@@ -159,6 +159,14 @@ export interface Label {
 
 export type TransactionType = 'income' | 'expense' | 'transfer';
 
+export type ReimbursementStatus = 'owed' | 'reimbursed';
+
+export interface Reimbursement {
+  status: ReimbursementStatus;
+  reimbursedAt?: string;
+  reimbursedByTransactionId?: string | null;
+}
+
 export interface Transaction {
   _id: string;
   householdId: string;
@@ -176,6 +184,8 @@ export interface Transaction {
   recurringId?: string;
   // Null or absent means personal.
   labelId?: string | null;
+  // Null or absent means not reimbursable.
+  reimbursement?: Reimbursement | null;
   createdAt: string;
   updatedAt: string;
 }

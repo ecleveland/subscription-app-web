@@ -16,6 +16,7 @@ import TransactionForm from '@/components/TransactionForm';
 import CsvImportWizard from '@/components/CsvImportWizard';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LabelChip from '@/components/LabelChip';
+import ReimbursementMarker from '@/components/ReimbursementMarker';
 import type {
   BudgetCategory,
   Label,
@@ -363,6 +364,7 @@ function TransactionsPageInner() {
                       : t.payee || categoryName.get(t.categoryId ?? '') || '—'}
                   </p>
                   <LabelChip label={labelById.get(t.labelId ?? '')} />
+                  <ReimbursementMarker reimbursement={t.reimbursement} />
                 </div>
                 <p className="text-xs text-muted">
                   {formatDate(t.date)} · {accountName.get(t.accountId) ?? '—'}

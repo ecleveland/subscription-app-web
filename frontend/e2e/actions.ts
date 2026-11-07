@@ -74,6 +74,8 @@ export interface NewTransaction {
   payee: string;
   /** When set, picks this label instead of the default Personal. */
   label?: string;
+  /** When set with a label, ticks "I'll be reimbursed for this". */
+  reimbursable?: boolean;
 }
 
 /** Record an expense or income through the /transactions form and wait for its
@@ -104,6 +106,9 @@ export async function addTransaction(page: Page, tx: NewTransaction): Promise<vo
     } else {
       await select.selectOption({ label: tx.label });
     }
+  }
+  if (tx.reimbursable) {
+    await page.getByLabel("I'll be reimbursed for this").check();
   }
   await page.getByLabel('Amount ($)').fill(tx.amount);
   await page.getByLabel('Payee').fill(tx.payee);
