@@ -255,7 +255,7 @@ export default function TransactionForm({
             />
             I&apos;ll be reimbursed for this
           </label>
-          {transaction?.reimbursement?.status === 'reimbursed' && (
+          {reimbursable && transaction?.reimbursement?.status === 'reimbursed' && (
             <span className="text-xs text-muted">Reimbursed</span>
           )}
         </div>

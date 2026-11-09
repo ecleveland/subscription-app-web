@@ -7,6 +7,7 @@ import {
   IsDateString,
   IsArray,
   IsBoolean,
+  IsObject,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -110,6 +111,7 @@ export class CreateTransactionDto {
       'expense is not reimbursable',
   })
   @ValidateIfNotNullish
+  @IsObject()
   @ValidateNested()
   @Type(() => ReimbursementDto)
   reimbursement?: ReimbursementDto | null;

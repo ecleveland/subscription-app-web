@@ -1089,6 +1089,99 @@ describe('Transactions (e2e)', () => {
       expect(cleared.body.labelId).toBeUndefined();
     });
 
+    it.each([
+      ['an array', []],
+      ['an array holding a block', [{ status: 'owed' }]],
+    ])('rejects %s as the block with 400', async (_name, reimbursement) => {
+      await postExpense({ reimbursement }).expect(400);
+    });
+
+    describe('malformed block values', () => {
+      const cases: [string, Record<string, unknown>][] = [
+        ['an unknown status', { status: 'bogus' }],
+        [
+          'a reimbursedAt that is not a date',
+          { status: 'reimbursed', reimbursedAt: 'not-a-date' },
+        ],
+        [
+          'a link that is not an id',
+          {
+            status: 'reimbursed',
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: 'nope',
+          },
+        ],
+        ['an empty block with no status', {}],
+      ];
+
+      it.each(cases)('POST rejects %s with 400', async (_name, block) => {
+        await postExpense({ reimbursement: block }).expect(400);
+      });
+
+      it.each(cases)('PATCH rejects %s with 400', async (_name, block) => {
+        const created = await postExpense({
+          reimbursement: { status: 'owed' },
+        }).expect(201);
+
+        await patch(created.body._id, { reimbursement: block }).expect(400);
+      });
+    });
+
+    // An income and a labeled expense it paid back, linked.
+    async function linkedPair(): Promise<{
+      expenseId: string;
+      incomeId: string;
+    }> {
+      const income = await post(tokenA, {
+        accountId: account,
+        type: 'income',
+        amountCents: 2500,
+        date: '2026-09-15',
+        categoryId: incomeCatA,
+      }).expect(201);
+      const expense = await postExpense({
+        reimbursement: {
+          status: 'reimbursed',
+          reimbursedAt: '2026-09-15',
+          reimbursedByTransactionId: income.body._id,
+        },
+      }).expect(201);
+      return { expenseId: expense.body._id, incomeId: income.body._id };
+    }
+
+    function getTxn(id: string) {
+      return request(app.getHttpServer())
+        .get(`/api/transactions/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+    }
+
+    it('an amount-only edit leaves a linked block unchanged', async () => {
+      const { expenseId, incomeId } = await linkedPair();
+
+      await patch(expenseId, { amountCents: 2600 }).expect(200);
+
+      const res = await getTxn(expenseId);
+      expect(res.body.amountCents).toBe(2600);
+      expect(res.body.reimbursement.status).toBe('reimbursed');
+      expect(res.body.reimbursement.reimbursedAt).toMatch(/^2026-09-15/);
+      expect(res.body.reimbursement.reimbursedByTransactionId).toBe(incomeId);
+    });
+
+    it('retyping the linked income leaves the expense reimbursed with no link', async () => {
+      const { expenseId, incomeId } = await linkedPair();
+
+      await patch(incomeId, {
+        type: 'expense',
+        categoryId: expenseCatA,
+      }).expect(200);
+
+      const res = await getTxn(expenseId);
+      expect(res.body.reimbursement.status).toBe('reimbursed');
+      expect(res.body.reimbursement.reimbursedAt).toMatch(/^2026-09-15/);
+      expect(res.body.reimbursement.reimbursedByTransactionId).toBeUndefined();
+    });
+
     describe('linked income', () => {
       let expenseId: string;
       let incomeId: string;

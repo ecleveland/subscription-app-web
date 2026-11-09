@@ -1977,7 +1977,8 @@ describe('TransactionsService', () => {
     });
 
     it('update touching only amountCents keeps the block', async () => {
-      const doc = blockedDoc({ status: ReimbursementStatus.OWED });
+      const stored = { status: ReimbursementStatus.OWED };
+      const doc = blockedDoc(stored);
       mockModel.findById.mockReturnValue(createChainable(doc));
 
       const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
@@ -1985,21 +1986,18 @@ describe('TransactionsService', () => {
       });
 
       expect(saved.amountCents).toBe(5000);
-      expect(saved.reimbursement).toEqual({
-        status: ReimbursementStatus.OWED,
-        reimbursedAt: undefined,
-        reimbursedByTransactionId: undefined,
-      });
+      expect(saved.reimbursement).toBe(stored);
     });
 
     it('update leaves an untouched linked block alone without looking up the link', async () => {
-      // The linked income was later switched to an expense. Edits that do not
-      // resend the block must still work.
-      const doc = blockedDoc({
+      // A linked row that is no longer an income must not block edits that
+      // leave the block out. The stored block is never reassigned.
+      const stored = {
         status: ReimbursementStatus.REIMBURSED,
         reimbursedAt: new Date('2026-09-15'),
         reimbursedByTransactionId: new Types.ObjectId(INCOME_TXN_ID),
-      });
+      };
+      const doc = blockedDoc(stored);
       mockModel.findById
         .mockReturnValueOnce(createChainable(doc))
         .mockReturnValueOnce(
@@ -2012,11 +2010,7 @@ describe('TransactionsService', () => {
 
       expect(mockModel.findById).toHaveBeenCalledTimes(1);
       expect(saved.amountCents).toBe(5000);
-      expect(saved.reimbursement).toEqual({
-        status: ReimbursementStatus.REIMBURSED,
-        reimbursedAt: new Date('2026-09-15'),
-        reimbursedByTransactionId: new Types.ObjectId(INCOME_TXN_ID),
-      });
+      expect(saved.reimbursement).toBe(stored);
     });
 
     it('update rejects a block that links to the transaction itself', async () => {
@@ -2085,22 +2079,79 @@ describe('TransactionsService', () => {
       );
     });
 
-    it('remove of an expense also unsets links to it', async () => {
-      // An income can be retyped to an expense after an expense linked to it,
-      // so every delete clears links to the deleted row.
-      const expense = txnDoc();
-      mockModel.findById.mockReturnValue(createChainable(expense));
+    it('remove of an expense does not touch other transactions', async () => {
+      // Retyping an income already unsets links to it, so only an income
+      // can be the target of a link.
+      mockModel.findById.mockReturnValue(createChainable(txnDoc()));
 
       await service.remove(HOUSEHOLD_ID, TXN_ID);
+
+      expect(mockModel.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('remove reverses the balance before unsetting links, and rethrows a failed unset', async () => {
+      const error = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      mockModel.findById.mockReturnValue(createChainable(incomeDoc()));
+      const failing = createChainable();
+      failing.exec = jest.fn().mockRejectedValue(new Error('mongo down'));
+      mockModel.updateMany.mockReturnValue(failing);
+
+      await expect(service.remove(HOUSEHOLD_ID, INCOME_TXN_ID)).rejects.toThrow(
+        'mongo down',
+      );
+
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        ACC_A,
+        -4200,
+      );
+      expect(
+        accountsService.applyBalanceDelta.mock.invocationCallOrder[0],
+      ).toBeLessThan(mockModel.updateMany.mock.invocationCallOrder[0]);
+      expect(error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          householdId: HOUSEHOLD_ID,
+          transactionId: INCOME_TXN_ID,
+        }),
+        expect.stringMatching(/mongo down/),
+      );
+    });
+
+    it('update retyping an income to an expense unsets links to it', async () => {
+      const income = incomeDoc();
+      mockModel.findById.mockReturnValue(createChainable(income));
+
+      await service.update(HOUSEHOLD_ID, INCOME_TXN_ID, {
+        type: TransactionType.EXPENSE,
+      });
 
       expect(mockModel.updateMany).toHaveBeenCalledTimes(1);
       expect(mockModel.updateMany).toHaveBeenCalledWith(
         {
           householdId: new Types.ObjectId(HOUSEHOLD_ID),
-          'reimbursement.reimbursedByTransactionId': expense._id,
+          'reimbursement.reimbursedByTransactionId': income._id,
         },
         { $unset: { 'reimbursement.reimbursedByTransactionId': 1 } },
       );
+      expect(income.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('update of an income that stays income does not unset links', async () => {
+      mockModel.findById.mockReturnValue(createChainable(incomeDoc()));
+
+      await service.update(HOUSEHOLD_ID, INCOME_TXN_ID, { amountCents: 5000 });
+
+      expect(mockModel.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('update of an expense does not unset links', async () => {
+      mockModel.findById.mockReturnValue(createChainable(txnDoc()));
+
+      await service.update(HOUSEHOLD_ID, TXN_ID, { amountCents: 5000 });
+
+      expect(mockModel.updateMany).not.toHaveBeenCalled();
     });
   });
 });

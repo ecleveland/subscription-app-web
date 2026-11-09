@@ -338,6 +338,52 @@ describe('TransactionForm', () => {
       expect(vi.mocked(createTransaction).mock.calls[0][0]).not.toHaveProperty('reimbursement');
     });
 
+    it('omits reimbursement on create when a ticked expense switches to Personal', async () => {
+      const user = userEvent.setup();
+      vi.mocked(createTransaction).mockResolvedValue({} as never);
+      renderForm({ labels: [bizLabel] });
+
+      await fillExpense(user);
+      await user.click(screen.getByRole('radio', { name: 'Etsy shop' }));
+      await user.click(screen.getByLabelText(box));
+      await user.click(screen.getByRole('radio', { name: 'Personal' }));
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+
+      await waitFor(() => expect(createTransaction).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(createTransaction).mock.calls[0][0]).not.toHaveProperty('reimbursement');
+    });
+
+    it('omits reimbursement on create when a ticked expense switches to income', async () => {
+      const user = userEvent.setup();
+      vi.mocked(createTransaction).mockResolvedValue({} as never);
+      renderForm({ labels: [bizLabel] });
+
+      await user.click(screen.getByRole('radio', { name: 'Etsy shop' }));
+      await user.click(screen.getByLabelText(box));
+      await user.selectOptions(screen.getByLabelText('Type'), 'income');
+      await user.selectOptions(screen.getByLabelText('Category'), 'c2');
+      await user.type(screen.getByLabelText('Amount ($)'), '12');
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+
+      await waitFor(() => expect(createTransaction).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(createTransaction).mock.calls[0][0]).not.toHaveProperty('reimbursement');
+    });
+
+    it('sends status owed when an edit ticks the box on a labeled expense', async () => {
+      const user = userEvent.setup();
+      vi.mocked(updateTransaction).mockResolvedValue({} as never);
+      renderForm({ labels: [bizLabel], transaction: labeledTxn });
+
+      expect(screen.getByLabelText(box)).not.toBeChecked();
+      await user.click(screen.getByLabelText(box));
+      await user.click(screen.getByRole('button', { name: 'Update' }));
+
+      await waitFor(() => expect(updateTransaction).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(updateTransaction).mock.calls[0][1].reimbursement).toEqual({
+        status: 'owed',
+      });
+    });
+
     it('sends reimbursement null when an edit unticks an owed transaction', async () => {
       const user = userEvent.setup();
       vi.mocked(updateTransaction).mockResolvedValue({} as never);
@@ -408,6 +454,20 @@ describe('TransactionForm', () => {
 
       await waitFor(() => expect(updateTransaction).toHaveBeenCalledTimes(1));
       expect(vi.mocked(updateTransaction).mock.calls[0][1]).not.toHaveProperty('reimbursement');
+    });
+
+    it('hides the Reimbursed note while the box is unticked', async () => {
+      const user = userEvent.setup();
+      renderForm({
+        labels: [bizLabel],
+        transaction: { ...labeledTxn, reimbursement: { status: 'reimbursed' } },
+      });
+
+      expect(screen.getByText('Reimbursed')).toBeInTheDocument();
+      await user.click(screen.getByLabelText(box));
+      expect(screen.queryByText('Reimbursed')).toBeNull();
+      await user.click(screen.getByLabelText(box));
+      expect(screen.getByText('Reimbursed')).toBeInTheDocument();
     });
   });
 });
