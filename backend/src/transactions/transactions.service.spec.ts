@@ -8,7 +8,11 @@ import {
 import { getModelToken } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { TransactionsService } from './transactions.service';
-import { Transaction, TransactionType } from './schemas/transaction.schema';
+import {
+  ReimbursementStatus,
+  Transaction,
+  TransactionType,
+} from './schemas/transaction.schema';
 import { AccountsService } from '../accounts/accounts.service';
 import { CategoriesService } from '../categories/categories.service';
 import { LabelsService } from '../labels/labels.service';
@@ -23,6 +27,7 @@ const TXN_ID = '507f191e810c19729de860f5';
 const OTHER_HOUSEHOLD_ID = '507f191e810c19729de860eb';
 const LABEL_ID = '507f191e810c19729de86101';
 const OTHER_LABEL_ID = '507f191e810c19729de86102';
+const INCOME_TXN_ID = '507f191e810c19729de86103';
 
 function createChainable(resolvedValue: any = null) {
   const chain: any = {};
@@ -84,6 +89,9 @@ describe('TransactionsService', () => {
     mockModel.deleteOne = jest
       .fn()
       .mockReturnValue(createChainable({ deletedCount: 1 }));
+    mockModel.updateMany = jest
+      .fn()
+      .mockReturnValue(createChainable({ modifiedCount: 0 }));
     // Echo the inserted docs back so importTransactions derives its imported
     // count and balance delta from what "persisted".
     mockModel.insertMany = jest
@@ -1646,6 +1654,504 @@ describe('TransactionsService', () => {
       });
 
       expect(mockModel.mock.calls[0][0].labelId).toBeUndefined();
+    });
+  });
+
+  describe('reimbursement (VEG-700)', () => {
+    const labeledExpense = {
+      accountId: ACC_A,
+      date: '2026-09-01',
+      amountCents: 1200,
+      type: TransactionType.EXPENSE,
+      categoryId: CAT_ID,
+      labelId: LABEL_ID,
+    };
+
+    // The income that paid an expense back, as findById returns it.
+    function incomeDoc(overrides: Record<string, any> = {}) {
+      return txnDoc({
+        _id: new Types.ObjectId(INCOME_TXN_ID),
+        type: TransactionType.INCOME,
+        ...overrides,
+      });
+    }
+
+    // A labeled expense that already carries a block.
+    function blockedDoc(reimbursement: Record<string, any>) {
+      return txnDoc({ labelId: new Types.ObjectId(LABEL_ID), reimbursement });
+    }
+
+    it('create persists an owed block on a labeled expense', async () => {
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...labeledExpense,
+        reimbursement: { status: ReimbursementStatus.OWED },
+      });
+
+      expect(mockModel.mock.calls[0][0].reimbursement).toEqual({
+        status: ReimbursementStatus.OWED,
+        reimbursedAt: undefined,
+        reimbursedByTransactionId: undefined,
+      });
+      expect(mockModel.findById).not.toHaveBeenCalled();
+    });
+
+    it('create leaves the block unset when reimbursement is null', async () => {
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...labeledExpense,
+        reimbursement: null,
+      });
+
+      expect(mockModel.mock.calls[0][0].reimbursement).toBeUndefined();
+    });
+
+    it('create rejects a block on an expense without a label', async () => {
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...labeledExpense,
+          labelId: undefined,
+          reimbursement: { status: ReimbursementStatus.OWED },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Only a labeled expense can be marked reimbursable. Add a label first',
+        ),
+      );
+      expect(txnSave).not.toHaveBeenCalled();
+    });
+
+    it('create rejects a block on a labeled income', async () => {
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...labeledExpense,
+          type: TransactionType.INCOME,
+          reimbursement: { status: ReimbursementStatus.OWED },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException('Only an expense can be marked reimbursable'),
+      );
+      expect(txnSave).not.toHaveBeenCalled();
+    });
+
+    it('create rejects a block on a transfer', async () => {
+      // A transfer cannot carry a label, so the label rule fires first.
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          accountId: ACC_A,
+          date: '2026-09-01',
+          amountCents: 1200,
+          type: TransactionType.TRANSFER,
+          transferAccountId: ACC_B,
+          reimbursement: { status: ReimbursementStatus.OWED },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Only a labeled expense can be marked reimbursable. Add a label first',
+        ),
+      );
+      expect(txnSave).not.toHaveBeenCalled();
+    });
+
+    it('create rejects reimbursed without reimbursedAt', async () => {
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...labeledExpense,
+          reimbursement: { status: ReimbursementStatus.REIMBURSED },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'reimbursedAt is required when status is reimbursed',
+        ),
+      );
+    });
+
+    it('create rejects owed with reimbursedAt', async () => {
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...labeledExpense,
+          reimbursement: {
+            status: ReimbursementStatus.OWED,
+            reimbursedAt: '2026-09-15',
+          },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'reimbursedAt and reimbursedByTransactionId must be absent when status is owed',
+        ),
+      );
+    });
+
+    it('create rejects owed with a link', async () => {
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...labeledExpense,
+          reimbursement: {
+            status: ReimbursementStatus.OWED,
+            reimbursedByTransactionId: INCOME_TXN_ID,
+          },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'reimbursedAt and reimbursedByTransactionId must be absent when status is owed',
+        ),
+      );
+      expect(mockModel.findById).not.toHaveBeenCalled();
+    });
+
+    it('create rejects a link outside the household with 400', async () => {
+      mockModel.findById.mockReturnValue(
+        createChainable(
+          incomeDoc({ householdId: new Types.ObjectId(OTHER_HOUSEHOLD_ID) }),
+        ),
+      );
+
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...labeledExpense,
+          reimbursement: {
+            status: ReimbursementStatus.REIMBURSED,
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: INCOME_TXN_ID,
+          },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'reimbursedByTransactionId does not reference a transaction in this household',
+        ),
+      );
+      expect(txnSave).not.toHaveBeenCalled();
+    });
+
+    it('create rejects a link to an expense with 400', async () => {
+      mockModel.findById.mockReturnValue(
+        createChainable(incomeDoc({ type: TransactionType.EXPENSE })),
+      );
+
+      await expect(
+        service.create(HOUSEHOLD_ID, MEMBER_ID, {
+          ...labeledExpense,
+          reimbursement: {
+            status: ReimbursementStatus.REIMBURSED,
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: INCOME_TXN_ID,
+          },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'reimbursedByTransactionId must reference an income transaction',
+        ),
+      );
+      expect(txnSave).not.toHaveBeenCalled();
+    });
+
+    it('create persists a link to an income as an ObjectId with reimbursedAt as a Date', async () => {
+      mockModel.findById.mockReturnValue(createChainable(incomeDoc()));
+
+      await service.create(HOUSEHOLD_ID, MEMBER_ID, {
+        ...labeledExpense,
+        reimbursement: {
+          status: ReimbursementStatus.REIMBURSED,
+          reimbursedAt: '2026-09-15',
+          reimbursedByTransactionId: INCOME_TXN_ID,
+        },
+      });
+
+      expect(mockModel.findById).toHaveBeenCalledWith(INCOME_TXN_ID);
+      expect(mockModel.mock.calls[0][0].reimbursement).toEqual({
+        status: ReimbursementStatus.REIMBURSED,
+        reimbursedAt: new Date('2026-09-15'),
+        reimbursedByTransactionId: new Types.ObjectId(INCOME_TXN_ID),
+      });
+    });
+
+    it('update rejects removing the label while a block is present', async () => {
+      const doc = blockedDoc({ status: ReimbursementStatus.OWED });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, { labelId: null }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Clear the reimbursement before removing the label',
+        ),
+      );
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update rejects a switch to transfer while a block is present', async () => {
+      // The switch also drops the label, but the type is the change the
+      // client made, so the type message applies.
+      const doc = blockedDoc({ status: ReimbursementStatus.OWED });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, {
+          type: TransactionType.TRANSFER,
+          transferAccountId: ACC_B,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Clear the reimbursement before changing the type',
+        ),
+      );
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update rejects a switch to income while a block is present', async () => {
+      const doc = blockedDoc({ status: ReimbursementStatus.OWED });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, { type: TransactionType.INCOME }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Clear the reimbursement before changing the type',
+        ),
+      );
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update clears the label and the block when the patch sends both as null', async () => {
+      const doc = blockedDoc({ status: ReimbursementStatus.OWED });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        labelId: null,
+        reimbursement: null,
+      });
+
+      expect(saved.labelId).toBeUndefined();
+      expect(saved.reimbursement).toBeUndefined();
+      expect(doc.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('update to owed on a reimbursed transaction stores only the status', async () => {
+      const doc = blockedDoc({
+        status: ReimbursementStatus.REIMBURSED,
+        reimbursedAt: new Date('2026-09-15'),
+        reimbursedByTransactionId: new Types.ObjectId(INCOME_TXN_ID),
+      });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        reimbursement: { status: ReimbursementStatus.OWED },
+      });
+
+      expect(saved.reimbursement).toEqual({
+        status: ReimbursementStatus.OWED,
+        reimbursedAt: undefined,
+        reimbursedByTransactionId: undefined,
+      });
+    });
+
+    it('update links an income and stores reimbursedAt as a Date', async () => {
+      const doc = blockedDoc({ status: ReimbursementStatus.OWED });
+      mockModel.findById
+        .mockReturnValueOnce(createChainable(doc))
+        .mockReturnValueOnce(createChainable(incomeDoc()));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        reimbursement: {
+          status: ReimbursementStatus.REIMBURSED,
+          reimbursedAt: '2026-09-15',
+          reimbursedByTransactionId: INCOME_TXN_ID,
+        },
+      });
+
+      expect(saved.reimbursement).toEqual({
+        status: ReimbursementStatus.REIMBURSED,
+        reimbursedAt: new Date('2026-09-15'),
+        reimbursedByTransactionId: new Types.ObjectId(INCOME_TXN_ID),
+      });
+    });
+
+    it('update with reimbursement null clears the block', async () => {
+      const doc = blockedDoc({ status: ReimbursementStatus.OWED });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        reimbursement: null,
+      });
+
+      expect(saved.reimbursement).toBeUndefined();
+      expect(saved.labelId).toEqual(new Types.ObjectId(LABEL_ID));
+    });
+
+    it('update touching only amountCents keeps the block', async () => {
+      const stored = { status: ReimbursementStatus.OWED };
+      const doc = blockedDoc(stored);
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        amountCents: 5000,
+      });
+
+      expect(saved.amountCents).toBe(5000);
+      expect(saved.reimbursement).toBe(stored);
+    });
+
+    it('update leaves an untouched linked block alone without looking up the link', async () => {
+      // A linked row that is no longer an income must not block edits that
+      // leave the block out. The stored block is never reassigned.
+      const stored = {
+        status: ReimbursementStatus.REIMBURSED,
+        reimbursedAt: new Date('2026-09-15'),
+        reimbursedByTransactionId: new Types.ObjectId(INCOME_TXN_ID),
+      };
+      const doc = blockedDoc(stored);
+      mockModel.findById
+        .mockReturnValueOnce(createChainable(doc))
+        .mockReturnValueOnce(
+          createChainable(incomeDoc({ type: TransactionType.EXPENSE })),
+        );
+
+      const saved = await service.update(HOUSEHOLD_ID, TXN_ID, {
+        amountCents: 5000,
+      });
+
+      expect(mockModel.findById).toHaveBeenCalledTimes(1);
+      expect(saved.amountCents).toBe(5000);
+      expect(saved.reimbursement).toBe(stored);
+    });
+
+    it('update rejects a block that links to the transaction itself', async () => {
+      // The stored row is still income when the link is checked, so only the
+      // id comparison catches a row that names itself.
+      const doc = txnDoc({
+        type: TransactionType.INCOME,
+        labelId: new Types.ObjectId(LABEL_ID),
+      });
+      mockModel.findById.mockReturnValue(createChainable(doc));
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, {
+          type: TransactionType.EXPENSE,
+          reimbursement: {
+            status: ReimbursementStatus.REIMBURSED,
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: TXN_ID,
+          },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'reimbursedByTransactionId cannot reference the transaction itself',
+        ),
+      );
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('update rejects a resent block that links to an expense', async () => {
+      const doc = blockedDoc({ status: ReimbursementStatus.OWED });
+      mockModel.findById
+        .mockReturnValueOnce(createChainable(doc))
+        .mockReturnValueOnce(
+          createChainable(incomeDoc({ type: TransactionType.EXPENSE })),
+        );
+
+      await expect(
+        service.update(HOUSEHOLD_ID, TXN_ID, {
+          reimbursement: {
+            status: ReimbursementStatus.REIMBURSED,
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: INCOME_TXN_ID,
+          },
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'reimbursedByTransactionId must reference an income transaction',
+        ),
+      );
+      expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('remove of an income unsets the link on expenses it reimbursed', async () => {
+      const income = incomeDoc();
+      mockModel.findById.mockReturnValue(createChainable(income));
+
+      await service.remove(HOUSEHOLD_ID, INCOME_TXN_ID);
+
+      expect(mockModel.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockModel.updateMany).toHaveBeenCalledWith(
+        {
+          householdId: new Types.ObjectId(HOUSEHOLD_ID),
+          'reimbursement.reimbursedByTransactionId': income._id,
+        },
+        { $unset: { 'reimbursement.reimbursedByTransactionId': 1 } },
+      );
+    });
+
+    it('remove of an expense does not touch other transactions', async () => {
+      // Retyping an income already unsets links to it, so only an income
+      // can be the target of a link.
+      mockModel.findById.mockReturnValue(createChainable(txnDoc()));
+
+      await service.remove(HOUSEHOLD_ID, TXN_ID);
+
+      expect(mockModel.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('remove reverses the balance before unsetting links, and rethrows a failed unset', async () => {
+      const error = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      mockModel.findById.mockReturnValue(createChainable(incomeDoc()));
+      const failing = createChainable();
+      failing.exec = jest.fn().mockRejectedValue(new Error('mongo down'));
+      mockModel.updateMany.mockReturnValue(failing);
+
+      await expect(service.remove(HOUSEHOLD_ID, INCOME_TXN_ID)).rejects.toThrow(
+        'mongo down',
+      );
+
+      expect(accountsService.applyBalanceDelta).toHaveBeenCalledWith(
+        HOUSEHOLD_ID,
+        ACC_A,
+        -4200,
+      );
+      expect(
+        accountsService.applyBalanceDelta.mock.invocationCallOrder[0],
+      ).toBeLessThan(mockModel.updateMany.mock.invocationCallOrder[0]);
+      expect(error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          householdId: HOUSEHOLD_ID,
+          transactionId: INCOME_TXN_ID,
+        }),
+        expect.stringMatching(/mongo down/),
+      );
+    });
+
+    it('update retyping an income to an expense unsets links to it', async () => {
+      const income = incomeDoc();
+      mockModel.findById.mockReturnValue(createChainable(income));
+
+      await service.update(HOUSEHOLD_ID, INCOME_TXN_ID, {
+        type: TransactionType.EXPENSE,
+      });
+
+      expect(mockModel.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockModel.updateMany).toHaveBeenCalledWith(
+        {
+          householdId: new Types.ObjectId(HOUSEHOLD_ID),
+          'reimbursement.reimbursedByTransactionId': income._id,
+        },
+        { $unset: { 'reimbursement.reimbursedByTransactionId': 1 } },
+      );
+      expect(income.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('update of an income that stays income does not unset links', async () => {
+      mockModel.findById.mockReturnValue(createChainable(incomeDoc()));
+
+      await service.update(HOUSEHOLD_ID, INCOME_TXN_ID, { amountCents: 5000 });
+
+      expect(mockModel.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('update of an expense does not unset links', async () => {
+      mockModel.findById.mockReturnValue(createChainable(txnDoc()));
+
+      await service.update(HOUSEHOLD_ID, TXN_ID, { amountCents: 5000 });
+
+      expect(mockModel.updateMany).not.toHaveBeenCalled();
     });
   });
 });

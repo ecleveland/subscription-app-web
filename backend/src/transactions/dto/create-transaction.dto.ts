@@ -7,11 +7,15 @@ import {
   IsDateString,
   IsArray,
   IsBoolean,
+  IsObject,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TransactionType } from '../schemas/transaction.schema';
 import { ValidateIfNotNullish } from '../../common/validation/validate-if-not-nullish';
+import { ReimbursementDto } from './reimbursement.dto';
 
 export class CreateTransactionDto {
   @ApiProperty({
@@ -95,4 +99,20 @@ export class CreateTransactionDto {
   @ValidateIfNotNullish
   @IsMongoId()
   labelId?: string | null;
+
+  // Null means not reimbursable. On create it is the same as omitting the
+  // field. On update (PartialType) null clears the block, undefined leaves it
+  // alone and an object replaces the whole block.
+  @ApiPropertyOptional({
+    type: ReimbursementDto,
+    nullable: true,
+    description:
+      'Reimbursement state of a labeled expense; null or omit when the ' +
+      'expense is not reimbursable',
+  })
+  @ValidateIfNotNullish
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ReimbursementDto)
+  reimbursement?: ReimbursementDto | null;
 }

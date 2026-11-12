@@ -426,6 +426,31 @@ describe('TransactionsPage', () => {
       expect(within(personalRow).queryByText('Etsy shop')).toBeNull();
     });
 
+    it('marks owed and reimbursed rows and leaves a personal row unmarked', async () => {
+      mockList([
+        { ...txn, _id: 't1', payee: 'Kiln parts', labelId: 'l1', reimbursement: { status: 'owed' } },
+        {
+          ...txn,
+          _id: 't2',
+          payee: 'Glaze order',
+          labelId: 'l1',
+          reimbursement: { status: 'reimbursed', reimbursedAt: '2026-06-10T00:00:00.000Z' },
+        },
+        { ...txn, _id: 't3', payee: 'Groceries run' },
+      ]);
+      render(<TransactionsPage />);
+
+      const owedRow = (await screen.findByText('Kiln parts')).closest('li')!;
+      expect(within(owedRow).getByText('Owed')).toBeInTheDocument();
+      expect(within(owedRow).queryByText('Reimbursed')).toBeNull();
+      const reimbursedRow = screen.getByText('Glaze order').closest('li')!;
+      expect(within(reimbursedRow).getByText('Reimbursed')).toBeInTheDocument();
+      expect(within(reimbursedRow).queryByText('Owed')).toBeNull();
+      const personalRow = screen.getByText('Groceries run').closest('li')!;
+      expect(within(personalRow).queryByText('Owed')).toBeNull();
+      expect(within(personalRow).queryByText('Reimbursed')).toBeNull();
+    });
+
     it('passes the labels to the form', async () => {
       mockList([]);
       const user = userEvent.setup();

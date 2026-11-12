@@ -986,4 +986,318 @@ describe('Transactions (e2e)', () => {
         .expect(400);
     });
   });
+
+  describe('reimbursement (VEG-700)', () => {
+    let label: string;
+    let account: string;
+
+    function post(token: string, body: Record<string, unknown>) {
+      return request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body);
+    }
+
+    function postExpense(body: Record<string, unknown>) {
+      return post(tokenA, {
+        accountId: account,
+        type: 'expense',
+        amountCents: 2500,
+        date: '2026-09-01',
+        categoryId: expenseCatA,
+        labelId: label,
+        ...body,
+      });
+    }
+
+    function patch(id: string, body: Record<string, unknown>) {
+      return request(app.getHttpServer())
+        .patch(`/api/transactions/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send(body);
+    }
+
+    beforeAll(async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Consulting', color: '#996633' })
+        .expect(201);
+      label = res.body._id;
+      // A dedicated account keeps these rows, and the income delete below,
+      // off the balances other blocks assert on.
+      account = await createAccount(app, tokenA, {
+        name: 'Reimbursement Checking',
+        type: 'checking',
+      });
+    });
+
+    it('saves a labeled expense as owed', async () => {
+      const res = await postExpense({
+        reimbursement: { status: 'owed' },
+      }).expect(201);
+      expect(res.body.reimbursement.status).toBe('owed');
+    });
+
+    it('rejects a block on an unlabeled expense with 400', async () => {
+      const res = await postExpense({
+        labelId: undefined,
+        reimbursement: { status: 'owed' },
+      }).expect(400);
+      expect(res.body.message).toBe(
+        'Only a labeled expense can be marked reimbursable. Add a label first',
+      );
+    });
+
+    it('rejects a block on a labeled income with 400', async () => {
+      const res = await postExpense({
+        type: 'income',
+        categoryId: incomeCatA,
+        reimbursement: { status: 'owed' },
+      }).expect(400);
+      expect(res.body.message).toBe(
+        'Only an expense can be marked reimbursable',
+      );
+    });
+
+    it('rejects owed with reimbursedAt with 400', async () => {
+      const res = await postExpense({
+        reimbursement: { status: 'owed', reimbursedAt: '2026-09-15' },
+      }).expect(400);
+      expect(res.body.message).toBe(
+        'reimbursedAt and reimbursedByTransactionId must be absent when status is owed',
+      );
+    });
+
+    it('rejects removing the label until the same patch clears the block', async () => {
+      const created = await postExpense({
+        reimbursement: { status: 'owed' },
+      }).expect(201);
+
+      const rejected = await patch(created.body._id, { labelId: null }).expect(
+        400,
+      );
+      expect(rejected.body.message).toBe(
+        'Clear the reimbursement before removing the label',
+      );
+
+      const cleared = await patch(created.body._id, {
+        labelId: null,
+        reimbursement: null,
+      }).expect(200);
+      expect(cleared.body.reimbursement).toBeUndefined();
+      expect(cleared.body.labelId).toBeUndefined();
+    });
+
+    it.each([
+      ['an array', []],
+      ['an array holding a block', [{ status: 'owed' }]],
+    ])('rejects %s as the block with 400', async (_name, reimbursement) => {
+      await postExpense({ reimbursement }).expect(400);
+    });
+
+    describe('malformed block values', () => {
+      const cases: [string, Record<string, unknown>][] = [
+        ['an unknown status', { status: 'bogus' }],
+        [
+          'a reimbursedAt that is not a date',
+          { status: 'reimbursed', reimbursedAt: 'not-a-date' },
+        ],
+        [
+          'a link that is not an id',
+          {
+            status: 'reimbursed',
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: 'nope',
+          },
+        ],
+        ['an empty block with no status', {}],
+      ];
+
+      it.each(cases)('POST rejects %s with 400', async (_name, block) => {
+        await postExpense({ reimbursement: block }).expect(400);
+      });
+
+      it.each(cases)('PATCH rejects %s with 400', async (_name, block) => {
+        const created = await postExpense({
+          reimbursement: { status: 'owed' },
+        }).expect(201);
+
+        await patch(created.body._id, { reimbursement: block }).expect(400);
+      });
+    });
+
+    // An income and a labeled expense it paid back, linked.
+    async function linkedPair(): Promise<{
+      expenseId: string;
+      incomeId: string;
+    }> {
+      const income = await post(tokenA, {
+        accountId: account,
+        type: 'income',
+        amountCents: 2500,
+        date: '2026-09-15',
+        categoryId: incomeCatA,
+      }).expect(201);
+      const expense = await postExpense({
+        reimbursement: {
+          status: 'reimbursed',
+          reimbursedAt: '2026-09-15',
+          reimbursedByTransactionId: income.body._id,
+        },
+      }).expect(201);
+      return { expenseId: expense.body._id, incomeId: income.body._id };
+    }
+
+    function getTxn(id: string) {
+      return request(app.getHttpServer())
+        .get(`/api/transactions/${id}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+    }
+
+    it('an amount-only edit leaves a linked block unchanged', async () => {
+      const { expenseId, incomeId } = await linkedPair();
+
+      await patch(expenseId, { amountCents: 2600 }).expect(200);
+
+      const res = await getTxn(expenseId);
+      expect(res.body.amountCents).toBe(2600);
+      expect(res.body.reimbursement.status).toBe('reimbursed');
+      expect(res.body.reimbursement.reimbursedAt).toMatch(/^2026-09-15/);
+      expect(res.body.reimbursement.reimbursedByTransactionId).toBe(incomeId);
+    });
+
+    it('retyping the linked income leaves the expense reimbursed with no link', async () => {
+      const { expenseId, incomeId } = await linkedPair();
+
+      await patch(incomeId, {
+        type: 'expense',
+        categoryId: expenseCatA,
+      }).expect(200);
+
+      const res = await getTxn(expenseId);
+      expect(res.body.reimbursement.status).toBe('reimbursed');
+      expect(res.body.reimbursement.reimbursedAt).toMatch(/^2026-09-15/);
+      expect(res.body.reimbursement.reimbursedByTransactionId).toBeUndefined();
+    });
+
+    describe('linked income', () => {
+      let expenseId: string;
+      let incomeId: string;
+
+      beforeAll(async () => {
+        const expense = await postExpense({
+          reimbursement: { status: 'owed' },
+        }).expect(201);
+        expenseId = expense.body._id;
+        const income = await post(tokenA, {
+          accountId: account,
+          type: 'income',
+          amountCents: 2500,
+          date: '2026-09-15',
+          categoryId: incomeCatA,
+          payee: 'Client payment',
+        }).expect(201);
+        incomeId = income.body._id;
+      });
+
+      it('links the expense to the income that paid it back', async () => {
+        const res = await patch(expenseId, {
+          reimbursement: {
+            status: 'reimbursed',
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: incomeId,
+          },
+        }).expect(200);
+        expect(res.body.reimbursement.status).toBe('reimbursed');
+        expect(res.body.reimbursement.reimbursedAt).toMatch(/^2026-09-15/);
+        expect(res.body.reimbursement.reimbursedByTransactionId).toBe(incomeId);
+      });
+
+      it('rejects a link to another expense with 400', async () => {
+        const other = await postExpense({}).expect(201);
+
+        const res = await patch(expenseId, {
+          reimbursement: {
+            status: 'reimbursed',
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: other.body._id,
+          },
+        }).expect(400);
+        expect(res.body.message).toBe(
+          'reimbursedByTransactionId must reference an income transaction',
+        );
+      });
+
+      it("rejects a link to another household's transaction with 400", async () => {
+        const foreign = await post(tokenB, {
+          accountId: bAccount,
+          type: 'expense',
+          amountCents: 2500,
+          date: '2026-09-15',
+          categoryId: bCategory,
+        }).expect(201);
+
+        const res = await patch(expenseId, {
+          reimbursement: {
+            status: 'reimbursed',
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: foreign.body._id,
+          },
+        }).expect(400);
+        expect(res.body.message).toBe(
+          'reimbursedByTransactionId does not reference a transaction in this household',
+        );
+      });
+
+      it('rejects a transaction that links to itself with 400', async () => {
+        const income = await post(tokenA, {
+          accountId: account,
+          type: 'income',
+          amountCents: 2500,
+          date: '2026-09-15',
+          categoryId: incomeCatA,
+          labelId: label,
+        }).expect(201);
+
+        const res = await patch(income.body._id, {
+          type: 'expense',
+          categoryId: expenseCatA,
+          reimbursement: {
+            status: 'reimbursed',
+            reimbursedAt: '2026-09-15',
+            reimbursedByTransactionId: income.body._id,
+          },
+        }).expect(400);
+        expect(res.body.message).toBe(
+          'reimbursedByTransactionId cannot reference the transaction itself',
+        );
+      });
+
+      it('deleting the income leaves the expense reimbursed with no link', async () => {
+        await request(app.getHttpServer())
+          .delete(`/api/transactions/${incomeId}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(204);
+
+        const res = await request(app.getHttpServer())
+          .get(`/api/transactions/${expenseId}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(200);
+        expect(res.body.reimbursement.status).toBe('reimbursed');
+        expect(res.body.reimbursement.reimbursedAt).toMatch(/^2026-09-15/);
+        expect(
+          res.body.reimbursement.reimbursedByTransactionId,
+        ).toBeUndefined();
+      });
+
+      it('undo sets the expense back to owed with no date and no link', async () => {
+        const res = await patch(expenseId, {
+          reimbursement: { status: 'owed' },
+        }).expect(200);
+        expect(res.body.reimbursement).toEqual({ status: 'owed' });
+      });
+    });
+  });
 });

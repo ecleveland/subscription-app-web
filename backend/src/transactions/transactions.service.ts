@@ -7,11 +7,14 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import {
+  Reimbursement,
+  ReimbursementStatus,
   Transaction,
   TransactionDocument,
   TransactionType,
 } from './schemas/transaction.schema';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
+import { ReimbursementDto } from './dto/reimbursement.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { QueryTransactionDto } from './dto/query-transaction.dto';
 import { ImportTransactionsDto } from './dto/import-transactions.dto';
@@ -126,6 +129,13 @@ export class TransactionsService {
     if (labelId) {
       await this.labelsService.assertAssignable(householdId, labelId);
     }
+    const reimbursement = dto.reimbursement ?? undefined;
+    await this.assertReimbursementValid(
+      householdId,
+      resolved.type,
+      labelId,
+      reimbursement,
+    );
 
     const created = await new this.transactionModel({
       householdId: new Types.ObjectId(householdId),
@@ -137,6 +147,7 @@ export class TransactionsService {
         ? new Types.ObjectId(resolved.transferAccountId)
         : undefined,
       labelId: labelId ? new Types.ObjectId(labelId) : undefined,
+      reimbursement: this.toStoredReimbursement(reimbursement),
       memberId: memberId ? new Types.ObjectId(memberId) : undefined,
       type: resolved.type,
       amountCents: resolved.amountCents,
@@ -646,6 +657,37 @@ export class TransactionsService {
             ? new Types.ObjectId(dto.labelId)
             : undefined;
 
+    // A patch that leaves reimbursement out keeps the stored block as it is.
+    // Its rules were checked when it was sent, so only the changes this patch
+    // makes to the type or label are checked here. Rather than drop the block
+    // silently, the client must clear it in the same request, because it
+    // records money owed or already paid back. The type comes first. A
+    // switch to transfer also drops the label, but the type is the change
+    // the client asked for.
+    const blockSent = dto.reimbursement !== undefined;
+    if (!blockSent && existing.reimbursement) {
+      if (merged.type !== TransactionType.EXPENSE) {
+        throw new BadRequestException(
+          'Clear the reimbursement before changing the type',
+        );
+      }
+      if (!nextLabelId) {
+        throw new BadRequestException(
+          'Clear the reimbursement before removing the label',
+        );
+      }
+    }
+    const sentBlock = dto.reimbursement ?? undefined;
+    if (blockSent) {
+      await this.assertReimbursementValid(
+        householdId,
+        merged.type,
+        nextLabelId?.toString(),
+        sentBlock,
+        existing._id.toString(),
+      );
+    }
+
     existing.type = merged.type;
     existing.accountId = new Types.ObjectId(
       merged.accountId,
@@ -658,6 +700,9 @@ export class TransactionsService {
       ? new Types.ObjectId(merged.transferAccountId)
       : undefined) as unknown as typeof existing.transferAccountId;
     existing.labelId = nextLabelId as unknown as typeof existing.labelId;
+    if (blockSent) {
+      existing.reimbursement = this.toStoredReimbursement(sentBlock);
+    }
     if (dto.date !== undefined) existing.date = new Date(dto.date);
     if (dto.payee !== undefined) existing.payee = dto.payee;
     if (dto.notes !== undefined) existing.notes = dto.notes;
@@ -673,6 +718,15 @@ export class TransactionsService {
       id,
     );
 
+    // Only an income can pay an expense back, so a row that stops being one
+    // drops the links to it. The linked expenses stay reimbursed.
+    if (
+      before.type === TransactionType.INCOME &&
+      merged.type !== TransactionType.INCOME
+    ) {
+      await this.unsetLinksTo(householdId, existing);
+    }
+
     this.logger.log({ householdId, transactionId: id }, 'Transaction updated');
     return saved;
   }
@@ -687,6 +741,12 @@ export class TransactionsService {
 
     // Reverse the deleted transaction's effect on its account balance(s).
     await this.syncBalances(householdId, this.balanceDeltas(before), [], id);
+
+    // Only an income can be linked, because update() unsets the links to an
+    // income that is retyped. The linked expenses stay reimbursed.
+    if (existing.type === TransactionType.INCOME) {
+      await this.unsetLinksTo(householdId, existing);
+    }
     this.logger.log({ householdId, transactionId: id }, 'Transaction deleted');
   }
 
@@ -985,6 +1045,122 @@ export class TransactionsService {
   ): void {
     if (labelId && type === TransactionType.TRANSFER) {
       throw new BadRequestException('A transfer cannot carry a label');
+    }
+  }
+
+  // The reimbursement rules (VEG-700), checked against the transaction as it
+  // will be saved. Standalone so the VEG-699 bulk route can reuse it. Label
+  // and type come first, then the shape for the status, then the link
+  // lookup, so a client sees the cheapest fix first. selfId is the row being
+  // updated, absent on create. The link's amount is not compared, because
+  // one income can pay back several expenses or only part of one.
+  private async assertReimbursementValid(
+    householdId: string,
+    type: TransactionType,
+    labelId: string | undefined,
+    block: ReimbursementDto | undefined,
+    selfId?: string,
+  ): Promise<void> {
+    if (!block) {
+      return;
+    }
+    if (!labelId) {
+      throw new BadRequestException(
+        'Only a labeled expense can be marked reimbursable. Add a label first',
+      );
+    }
+    if (type !== TransactionType.EXPENSE) {
+      throw new BadRequestException(
+        'Only an expense can be marked reimbursable',
+      );
+    }
+    if (block.status === ReimbursementStatus.REIMBURSED) {
+      if (!block.reimbursedAt) {
+        throw new BadRequestException(
+          'reimbursedAt is required when status is reimbursed',
+        );
+      }
+    } else if (block.reimbursedAt || block.reimbursedByTransactionId) {
+      throw new BadRequestException(
+        'reimbursedAt and reimbursedByTransactionId must be absent when status is owed',
+      );
+    }
+    if (!block.reimbursedByTransactionId) {
+      return;
+    }
+    // The lookup below would find the stored row, which may still be income
+    // while this request turns it into an expense.
+    if (
+      selfId !== undefined &&
+      block.reimbursedByTransactionId.toLowerCase() === selfId.toLowerCase()
+    ) {
+      throw new BadRequestException(
+        'reimbursedByTransactionId cannot reference the transaction itself',
+      );
+    }
+
+    let linked: TransactionDocument;
+    try {
+      linked = await this.findOne(householdId, block.reimbursedByTransactionId);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new BadRequestException(
+          'reimbursedByTransactionId does not reference a transaction in this household',
+        );
+      }
+      throw error;
+    }
+    if (linked.type !== TransactionType.INCOME) {
+      throw new BadRequestException(
+        'reimbursedByTransactionId must reference an income transaction',
+      );
+    }
+  }
+
+  // The stored form of a validated block. Undefined clears the field.
+  private toStoredReimbursement(
+    block: ReimbursementDto | undefined,
+  ): Reimbursement | undefined {
+    if (!block) {
+      return undefined;
+    }
+    return {
+      status: block.status,
+      reimbursedAt: block.reimbursedAt
+        ? new Date(block.reimbursedAt)
+        : undefined,
+      reimbursedByTransactionId: (block.reimbursedByTransactionId
+        ? new Types.ObjectId(block.reimbursedByTransactionId)
+        : undefined) as unknown as Reimbursement['reimbursedByTransactionId'],
+    };
+  }
+
+  // Unset the link on every expense that the given income paid back. Runs
+  // after the row and its balances are written, so a failure here leaves a
+  // dangling link but no balance drift. Logged like syncBalances so the
+  // failure is greppable, then rethrown.
+  private async unsetLinksTo(
+    householdId: string,
+    income: TransactionDocument,
+  ): Promise<void> {
+    try {
+      await this.transactionModel
+        .updateMany(
+          {
+            householdId: new Types.ObjectId(householdId),
+            'reimbursement.reimbursedByTransactionId': income._id,
+          } as Record<string, unknown>,
+          { $unset: { 'reimbursement.reimbursedByTransactionId': 1 } },
+        )
+        .exec();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { householdId, transactionId: income._id.toString() },
+        `Unsetting reimbursement links failed after the transaction was ` +
+          `written; expenses may still link to it: ${message}`,
+      );
+      throw error;
     }
   }
 
