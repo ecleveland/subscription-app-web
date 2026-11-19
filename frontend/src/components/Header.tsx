@@ -5,10 +5,17 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useHousehold } from '@/lib/household-context';
+import { useLabels } from '@/lib/labels-context';
 import ThemeToggle from '@/components/ThemeToggle';
 import NotificationBell from '@/components/NotificationBell';
 
-type NavItem = { href: string; label: string; adminOnly?: boolean };
+type NavItem = {
+  href: string;
+  label: string;
+  adminOnly?: boolean;
+  // Shown only once the household has at least one label.
+  needsLabels?: boolean;
+};
 type NavGroup = { title: string; items: NavItem[] };
 
 const NAV_GROUPS: NavGroup[] = [
@@ -24,6 +31,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/recurring', label: 'Bills' },
       { href: '/budget', label: 'Budget' },
       { href: '/goals', label: 'Goals' },
+      { href: '/business', label: 'Business', needsLabels: true },
     ],
   },
   {
@@ -53,6 +61,7 @@ function isActive(pathname: string | null, href: string): boolean {
 export default function Header() {
   const { isAuthenticated, isAdmin, logout } = useAuth();
   const { household } = useHousehold();
+  const { labels } = useLabels();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -110,7 +119,11 @@ export default function Header() {
 
         <nav className="flex-1 space-y-5 px-3 py-4 md:px-3">
           {NAV_GROUPS.map((group) => {
-            const items = group.items.filter((item) => !item.adminOnly || isAdmin);
+            const items = group.items.filter(
+              (item) =>
+                (!item.adminOnly || isAdmin) &&
+                (!item.needsLabels || labels.length > 0),
+            );
             return (
               <div key={group.title}>
                 <p className="eyebrow mb-1.5 px-2.5">{group.title}</p>

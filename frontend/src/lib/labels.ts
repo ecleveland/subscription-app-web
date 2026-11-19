@@ -5,6 +5,9 @@ import type { Label } from './types';
 // label, so there is no Personal record to filter by id.
 export const LABEL_FILTER_NONE = 'none';
 
+// Query value for "records with any label", the whole business side.
+export const LABEL_FILTER_ANY = 'any';
+
 // Personal is the absence of a label, so a label with that name would read as
 // two Personal choices in every picker.
 export const RESERVED_LABEL_NAME = 'Personal';

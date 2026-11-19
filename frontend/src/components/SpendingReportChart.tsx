@@ -24,8 +24,12 @@ interface Row {
 
 export default function SpendingReportChart({
   report,
+  showPlanned = true,
 }: {
   report: SpendingReport;
+  // False leaves out the planned bar and column, for spend with no budget
+  // behind it.
+  showPlanned?: boolean;
 }) {
   // Keep the backend's order (actual descending). Uncategorized goes last
   // because it is a catch-all, not a category the user can budget for.
@@ -76,7 +80,9 @@ export default function SpendingReportChart({
               categorical axis, and a thin bar still reads as "how far
               spend got against plan" at a glance. Rows with no budget
               (plannedCents null) get no planned bar. */}
-          <Bar dataKey="plannedCents" name="Planned" fill="#7c766a" barSize={6} radius={[0, 3, 3, 0]} />
+          {showPlanned && (
+            <Bar dataKey="plannedCents" name="Planned" fill="#7c766a" barSize={6} radius={[0, 3, 3, 0]} />
+          )}
         </BarChart>
       </ResponsiveContainer>
       <p className="mt-2 text-sm font-medium text-ink">
@@ -89,7 +95,7 @@ export default function SpendingReportChart({
           <tr>
             <th scope="col">Category</th>
             <th scope="col">Spent</th>
-            <th scope="col">Planned</th>
+            {showPlanned && <th scope="col">Planned</th>}
           </tr>
         </thead>
         <tbody>
@@ -97,11 +103,13 @@ export default function SpendingReportChart({
             <tr key={r.key}>
               <th scope="row">{r.name}</th>
               <td>{formatCents(r.actualCents)}</td>
-              <td>
-                {r.plannedCents === undefined
-                  ? 'No budget'
-                  : formatCents(r.plannedCents)}
-              </td>
+              {showPlanned && (
+                <td>
+                  {r.plannedCents === undefined
+                    ? 'No budget'
+                    : formatCents(r.plannedCents)}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

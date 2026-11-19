@@ -16,6 +16,11 @@ vi.mock('@/lib/labels', () => ({
   listLabels: vi.fn().mockResolvedValue([]),
 }));
 
+// The tile fetches its own report; its behavior has its own test file.
+vi.mock('@/components/BusinessTile', () => ({
+  default: () => <div>BusinessTileStub</div>,
+}));
+
 import { apiFetch } from '@/lib/api';
 import { listLabels } from '@/lib/labels';
 import DashboardPage from '../page';
@@ -337,5 +342,36 @@ describe('DashboardPage labels', () => {
 
     expect(await screen.findByText('Consulting')).toBeInTheDocument();
     expect(listLabels).toHaveBeenCalledWith(true);
+  });
+
+  it('shows the Business tile when the household has a label', async () => {
+    vi.mocked(listLabels).mockResolvedValueOnce([
+      {
+        _id: 'l1',
+        householdId: 'h',
+        name: 'Consulting',
+        color: '#2f8a93',
+        isArchived: false,
+        createdAt: '2025-01-01',
+        updatedAt: '2025-01-01',
+      },
+    ]);
+    vi.mocked(apiFetch).mockResolvedValue(makeEnvelope());
+
+    render(<DashboardPage />);
+
+    expect(await screen.findByText('BusinessTileStub')).toBeInTheDocument();
+  });
+
+  it('hides the Business tile when the household has no labels', async () => {
+    vi.mocked(listLabels).mockResolvedValueOnce([]);
+    vi.mocked(apiFetch).mockResolvedValue(makeEnvelope());
+
+    render(<DashboardPage />);
+
+    await screen.findByText('Dashboard');
+    await waitFor(() => expect(listLabels).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText('BusinessTileStub')).not.toBeInTheDocument();
   });
 });

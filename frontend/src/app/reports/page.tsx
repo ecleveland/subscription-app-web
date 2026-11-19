@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useAccounts } from '@/lib/accounts-context';
-import { useReport, type ReportState } from '@/lib/use-report';
+import { useLabels } from '@/lib/labels-context';
+import { LABEL_FILTER_ANY, LABEL_FILTER_NONE } from '@/lib/labels';
+import { useReport } from '@/lib/use-report';
 import {
   getCashFlow,
   getSpending,
@@ -25,6 +27,12 @@ import NetWorthChart from '@/components/NetWorthChart';
 import CategoryBreakdownChart from '@/components/CategoryBreakdownChart';
 import TopSubscriptionsList from '@/components/TopSubscriptionsList';
 import SpendingByCategoryChart from '@/components/SpendingByCategoryChart';
+import {
+  ReportSection,
+  ReportBody,
+  cardClass,
+  linkButtonClass,
+} from '@/components/ReportSection';
 
 // UTC-framed like the budget page, to match how the backend buckets
 // transactions into months.
@@ -43,67 +51,8 @@ function validateRange(from: string, to: string): string | null {
   return null;
 }
 
-const cardClass =
-  'bg-surface border border-line rounded-md p-4';
 const monthInputClass =
   'border border-line-strong rounded-md px-3 py-1.5 text-sm bg-surface text-ink';
-const linkButtonClass =
-  'mt-3 inline-block btn-primary';
-
-function ReportSection({
-  id,
-  title,
-  controls,
-  children,
-}: {
-  id: string;
-  title: string;
-  controls?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section aria-labelledby={id} className="mb-10">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <h2
-          id={id}
-          className="section-title"
-        >
-          {title}
-        </h2>
-        {controls}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-// Loading, error and empty handling shared by the three report sections.
-function ReportBody<T>({
-  state,
-  loadingText,
-  isEmpty,
-  empty,
-  children,
-}: {
-  state: ReportState<T>;
-  loadingText: string;
-  isEmpty: (data: T) => boolean;
-  empty: ReactNode;
-  children: (data: T) => ReactNode;
-}) {
-  if (state.error) {
-    return <p className="text-sm text-danger">{state.error}</p>;
-  }
-  if (state.loading || state.data === null) {
-    return <p className="text-muted">{loadingText}</p>;
-  }
-  if (isEmpty(state.data)) {
-    return (
-      <div className={`${cardClass} text-center py-8`}>{empty}</div>
-    );
-  }
-  return <div className={cardClass}>{children(state.data)}</div>;
-}
 
 export default function ReportsPage() {
   const { isAuthenticated } = useAuth();
@@ -112,6 +61,7 @@ export default function ReportsPage() {
     loading: accountsLoading,
     error: accountsError,
   } = useAccounts();
+  const { labels } = useLabels();
 
   const [initial] = useState(defaultRange);
   const [fromInput, setFromInput] = useState(initial.from);
@@ -120,6 +70,10 @@ export default function ReportsPage() {
   // The last valid range. An invalid edit leaves the charts on this one.
   const [range, setRange] = useState(initial);
   const [month, setMonth] = useState(currentMonth);
+  // Empty is everything. LABEL_FILTER_NONE is Personal, LABEL_FILTER_ANY is
+  // every label.
+  const [labelId, setLabelId] = useState('');
+  const labelParam = labelId || undefined;
 
   const updateRange = (from: string, to: string) => {
     setFromInput(from);
@@ -127,26 +81,28 @@ export default function ReportsPage() {
     if (validateRange(from, to) === null) setRange({ from, to });
   };
 
-  const rangeKey = isAuthenticated ? `${range.from}..${range.to}` : null;
+  const rangeKey = isAuthenticated
+    ? `${range.from}..${range.to}|${labelId}`
+    : null;
 
   const monthValid = isValidMonth(month);
 
   const cashFlow = useReport<CashFlowReport>(
     'Cash flow',
     rangeKey,
-    () => getCashFlow(range.from, range.to),
+    () => getCashFlow(range.from, range.to, labelParam),
     'Failed to load cash flow',
   );
   const netWorth = useReport<NetWorthReport>(
     'Net worth',
     rangeKey,
-    () => getNetWorth(range.from, range.to),
+    () => getNetWorth(range.from, range.to, labelParam),
     'Failed to load net worth',
   );
   const spending = useReport<SpendingReport>(
     'Spending by category',
-    isAuthenticated && monthValid ? month : null,
-    () => getSpending(month),
+    isAuthenticated && monthValid ? `${month}|${labelId}` : null,
+    () => getSpending(month, labelParam),
     'Failed to load spending',
   );
   const subscriptions = useReport<Subscription[]>(
@@ -196,6 +152,24 @@ export default function ReportsPage() {
               className={monthInputClass}
             />
           </label>
+          <label className="flex flex-col gap-1 text-sm text-ink-2">
+            Label
+            <select
+              aria-label="Filter by label"
+              value={labelId}
+              onChange={(e) => setLabelId(e.target.value)}
+              className={monthInputClass}
+            >
+              <option value="">Everything</option>
+              <option value={LABEL_FILTER_NONE}>Personal</option>
+              <option value={LABEL_FILTER_ANY}>All business</option>
+              {labels.map((l) => (
+                <option key={l._id} value={l._id}>
+                  {l.isArchived ? `${l.name} (archived)` : l.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         {rangeError && (
           <p role="alert" className="mt-2 text-sm text-danger">
@@ -203,7 +177,8 @@ export default function ReportsPage() {
           </p>
         )}
         <p className="mt-2 text-xs text-muted">
-          Cash flow and net worth use this range.
+          Cash flow and net worth use this range. All three use the label
+          filter.
         </p>
       </section>
 

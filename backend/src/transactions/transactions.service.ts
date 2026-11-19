@@ -361,11 +361,15 @@ export class TransactionsService {
    * `[start, end)` range (the budget layer owns "YYYY-MM" → range), so the match
    * is timezone-stable. Transfers are excluded (no category, net-zero to the
    * budget). `_id` ObjectIds are stringified so callers key a plain Map safely.
+   * `extraMatch` adds conditions to the match, such as the spending report's
+   * label filter. Its values must already be ObjectIds, because aggregation
+   * does not cast.
    */
   async aggregateMonthlyActualsByCategory(
     householdId: string,
     start: Date,
     end: Date,
+    extraMatch: Record<string, unknown> = {},
   ): Promise<MonthlyCategoryActual[]> {
     const pipeline: PipelineStage[] = [
       {
@@ -375,6 +379,7 @@ export class TransactionsService {
             $in: [TransactionType.INCOME, TransactionType.EXPENSE],
           },
           date: { $gte: start, $lt: end },
+          ...extraMatch,
         },
       },
       {
@@ -469,14 +474,21 @@ export class TransactionsService {
    * so the net worth report and reconciliation agree on every sign. Both match
    * stages carry the date cutoff, so a transfer's two legs always land in the
    * same month. Returns account id, then "YYYY-MM", then delta cents.
+   * `extraMatch` adds conditions to both match stages, such as the net worth
+   * report's label filter, with values already cast to ObjectIds. Transfers
+   * never carry a label, so a label id filter drops them and 'none' keeps
+   * them. Opening balances are not ledger rows, so the caller counts them
+   * household-wide whatever the filter.
    */
   async sumLedgerDeltasByAccountAndMonth(
     householdId: string,
     before: Date,
+    extraMatch: Record<string, unknown> = {},
   ): Promise<Map<string, Map<string, number>>> {
     const match: Record<string, unknown> = {
       householdId: new Types.ObjectId(householdId),
       date: { $lt: before },
+      ...extraMatch,
     };
     const pipeline: PipelineStage[] = [
       ...this.signedDeltaStages(match, true),

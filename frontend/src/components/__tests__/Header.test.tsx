@@ -16,8 +16,14 @@ vi.mock('@/lib/household-context', () => ({
   useHousehold: () => householdState,
 }));
 
+let labelsState: { labels: unknown[] };
+vi.mock('@/lib/labels-context', () => ({
+  useLabels: () => labelsState,
+}));
+
 beforeEach(() => {
   householdState = { household: null };
+  labelsState = { labels: [] };
 });
 
 // Mock ThemeToggle since it depends on ThemeProvider
@@ -212,5 +218,35 @@ describe('Header', () => {
 
     await user.click(toggleBtn);
     expect(toggleBtn).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('links to the Business page when the household has a label', () => {
+    authState = {
+      isAuthenticated: true,
+      user: { userId: '1', username: 'test', role: 'user' },
+      isAdmin: false,
+      logout: mockLogout,
+    };
+    labelsState = { labels: [{ _id: 'l1', name: 'Etsy shop' }] };
+
+    render(<Header />);
+
+    expect(screen.getByRole('link', { name: 'Business' })).toHaveAttribute(
+      'href',
+      '/business',
+    );
+  });
+
+  it('hides the Business link when the household has no labels', () => {
+    authState = {
+      isAuthenticated: true,
+      user: { userId: '1', username: 'test', role: 'user' },
+      isAdmin: false,
+      logout: mockLogout,
+    };
+
+    render(<Header />);
+
+    expect(screen.queryByRole('link', { name: 'Business' })).not.toBeInTheDocument();
   });
 });

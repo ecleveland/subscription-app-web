@@ -74,4 +74,19 @@ describe('SpendingReportChart', () => {
     render(<SpendingReportChart report={report()} />);
     expect(screen.getByText('Total spent: $550.00')).toBeInTheDocument();
   });
+
+  it('drops the Planned column when showPlanned is false', () => {
+    render(<SpendingReportChart report={report()} showPlanned={false} />);
+    const table = screen.getByRole('table', { name: 'Spending by category' });
+    expect(within(table).queryByRole('columnheader', { name: 'Planned' })).toBeNull();
+    expect(within(table).queryByText('No budget')).toBeNull();
+    expect(within(table).queryByText('$500.00')).toBeNull();
+    expect(within(table).getByText('$450.00')).toBeInTheDocument();
+  });
+
+  it('shows the Planned column by default', () => {
+    render(<SpendingReportChart report={report()} />);
+    const table = screen.getByRole('table', { name: 'Spending by category' });
+    expect(within(table).getByRole('columnheader', { name: 'Planned' })).toBeInTheDocument();
+  });
 });

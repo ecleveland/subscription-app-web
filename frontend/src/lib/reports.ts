@@ -1,5 +1,6 @@
 import { apiFetch } from './api';
 import { shiftMonth } from './budget';
+import { formatCents } from './utils';
 import type { AccountType } from './types';
 
 // Mirrors backend/src/reports/interfaces/*.ts. All money is integer cents;
@@ -57,20 +58,99 @@ export interface NetWorthReport {
   months: NetWorthMonth[];
 }
 
+export interface BusinessMonth {
+  month: string; // "YYYY-MM"
+  expenseCents: number;
+  incomeCents: number;
+  // The part of expenseCents, dated that month, that is already reimbursed.
+  reimbursedCents: number;
+}
+
+export interface BusinessReimbursementRow {
+  id: string; // the expense transaction id
+  date: string;
+  payee: string | null;
+  amountCents: number;
+  categoryId: string | null;
+  labelId: string;
+  reimbursedAt?: string;
+  reimbursedByTransactionId?: string | null;
+}
+
+export interface BusinessReimbursements {
+  owedCents: number;
+  owedCount: number;
+  reimbursedCents: number;
+  owed: BusinessReimbursementRow[]; // oldest first
+  reimbursed: BusinessReimbursementRow[]; // newest first
+}
+
+export interface BusinessReport {
+  from: string;
+  to: string;
+  // Null when the report covers every label.
+  labelId: string | null;
+  // Zero-filled over the range, oldest first.
+  months: BusinessMonth[];
+  // Same rows as the spending report. plannedCents is always null.
+  categories: SpendingCategoryRow[];
+  uncategorizedCents: number;
+  totalCents: number;
+  reimbursements: BusinessReimbursements;
+}
+
 // The backend rejects a cash-flow or net-worth range longer than this
 // (inclusive of both ends) with a 400.
 export const MAX_REPORT_MONTHS = 36;
 
-export function getCashFlow(from: string, to: string): Promise<CashFlowReport> {
-  return apiFetch<CashFlowReport>(`/reports/cash-flow?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+// labelId is a label id, LABEL_FILTER_NONE or LABEL_FILTER_ANY. Empty or
+// absent means no label filter. Values go through encodeURIComponent so a
+// stray "&" cannot add a query parameter.
+function withLabel(path: string, labelId?: string): string {
+  return labelId ? `${path}&labelId=${encodeURIComponent(labelId)}` : path;
 }
 
-export function getSpending(month: string): Promise<SpendingReport> {
-  return apiFetch<SpendingReport>(`/reports/spending?month=${encodeURIComponent(month)}`);
+function rangePath(route: string, from: string, to: string): string {
+  return `/reports/${route}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
 }
 
-export function getNetWorth(from: string, to: string): Promise<NetWorthReport> {
-  return apiFetch<NetWorthReport>(`/reports/net-worth?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+export function getCashFlow(
+  from: string,
+  to: string,
+  labelId?: string,
+): Promise<CashFlowReport> {
+  return apiFetch<CashFlowReport>(withLabel(rangePath('cash-flow', from, to), labelId));
+}
+
+export function getSpending(
+  month: string,
+  labelId?: string,
+): Promise<SpendingReport> {
+  return apiFetch<SpendingReport>(
+    withLabel(`/reports/spending?month=${encodeURIComponent(month)}`, labelId),
+  );
+}
+
+export function getNetWorth(
+  from: string,
+  to: string,
+  labelId?: string,
+): Promise<NetWorthReport> {
+  return apiFetch<NetWorthReport>(withLabel(rangePath('net-worth', from, to), labelId));
+}
+
+// No labelId covers every label.
+export function getBusinessReport(
+  from: string,
+  to: string,
+  labelId?: string,
+): Promise<BusinessReport> {
+  return apiFetch<BusinessReport>(withLabel(rangePath('business', from, to), labelId));
+}
+
+// A month-over-month change: "+$120.00" for a rise, "-$40.00" for a drop.
+export function formatSignedCents(cents: number): string {
+  return cents > 0 ? `+${formatCents(cents)}` : formatCents(cents);
 }
 
 // Same pattern the backend validates against. Safari renders

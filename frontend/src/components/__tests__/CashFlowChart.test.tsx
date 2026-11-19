@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import CashFlowChart from '../CashFlowChart';
 
 // Recharts uses ResizeObserver internally
@@ -30,5 +31,19 @@ describe('CashFlowChart', () => {
     expect(within(rows[1]).getByText('$3,200.00')).toBeInTheDocument();
     expect(within(rows[1]).getByText('$1,800.00')).toBeInTheDocument();
     expect(within(rows[2]).getByText('-$123.45')).toBeInTheDocument();
+  });
+
+  it('turns each month into a button that reports the month when given onMonthClick', async () => {
+    const onMonthClick = vi.fn();
+    render(<CashFlowChart months={months} onMonthClick={onMonthClick} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Oct 2026' }));
+
+    expect(onMonthClick).toHaveBeenCalledWith('2026-10');
+  });
+
+  it('renders plain month headers without onMonthClick', () => {
+    render(<CashFlowChart months={months} />);
+    expect(screen.queryByRole('button', { name: 'Sep 2026' })).not.toBeInTheDocument();
   });
 });

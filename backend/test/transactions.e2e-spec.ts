@@ -979,6 +979,22 @@ describe('Transactions (e2e)', () => {
       expect(byLabel.body.meta.total).toBe(byLabel.body.data.length);
     });
 
+    it('?labelId=any returns only labeled rows', async () => {
+      const labeled = await postExpense({ labelId: labelA }).expect(201);
+      const unlabeled = await postExpense({}).expect(201);
+
+      const res = await request(app.getHttpServer())
+        .get('/api/transactions?labelId=any&limit=0')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const ids = res.body.data.map((t: { _id: string }) => t._id);
+      expect(ids).toContain(labeled.body._id);
+      expect(ids).not.toContain(unlabeled.body._id);
+      expect(
+        res.body.data.every((t: { labelId?: string }) => Boolean(t.labelId)),
+      ).toBe(true);
+    });
+
     it('rejects a malformed labelId filter with 400', async () => {
       await request(app.getHttpServer())
         .get('/api/transactions?labelId=personal')

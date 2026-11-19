@@ -1145,6 +1145,25 @@ describe('TransactionsService', () => {
       );
       warn.mockRestore();
     });
+
+    it('adds an extra match condition to the household, type and date match', async () => {
+      const extra = { labelId: null };
+
+      await service.aggregateMonthlyActualsByCategory(
+        HOUSEHOLD_ID,
+        start,
+        end,
+        extra,
+      );
+
+      const pipeline = mockModel.aggregate.mock.calls[0][0];
+      expect(pipeline[0].$match).toEqual({
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        type: { $in: [TransactionType.INCOME, TransactionType.EXPENSE] },
+        date: { $gte: start, $lt: end },
+        labelId: null,
+      });
+    });
   });
 
   describe('sumLedgerDeltasByAccount', () => {
@@ -1372,6 +1391,31 @@ describe('TransactionsService', () => {
         expect.objectContaining({ householdId: HOUSEHOLD_ID }),
         expect.stringMatching(/null account id/),
       );
+    });
+
+    it('adds an extra match condition to both the source and the transfer destination legs', async () => {
+      const labelIds = [new Types.ObjectId(LABEL_ID)];
+      mockModel.aggregate.mockReturnValue(createChainable([]));
+
+      await service.sumLedgerDeltasByAccountAndMonth(HOUSEHOLD_ID, BEFORE, {
+        labelId: { $in: labelIds },
+      });
+
+      const pipeline = mockModel.aggregate.mock.calls[0][0];
+      expect(stage(pipeline, '$match').$match).toEqual({
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        date: { $lt: BEFORE },
+        labelId: { $in: labelIds },
+      });
+      expect(
+        stage(pipeline, '$unionWith').$unionWith.pipeline[0].$match,
+      ).toEqual({
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+        date: { $lt: BEFORE },
+        labelId: { $in: labelIds },
+        type: TransactionType.TRANSFER,
+        transferAccountId: { $ne: null },
+      });
     });
   });
 
@@ -1613,6 +1657,13 @@ describe('TransactionsService', () => {
 
       const filter = mockModel.find.mock.calls[0][0];
       expect(filter).toHaveProperty('labelId', null);
+    });
+
+    it("findAll with labelId 'any' filters on a labelId that is not null", async () => {
+      await service.findAll(HOUSEHOLD_ID, { labelId: 'any' });
+
+      const filter = mockModel.find.mock.calls[0][0];
+      expect(filter.labelId).toEqual({ $ne: null });
     });
 
     it('findAll with a label id filters on that ObjectId', async () => {
