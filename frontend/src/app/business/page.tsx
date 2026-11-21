@@ -105,7 +105,7 @@ function ThisMonth({ months }: { months: BusinessMonth[] }) {
 
 export default function BusinessPage() {
   const { isAuthenticated } = useAuth();
-  const { labels, loading: labelsLoading } = useLabels();
+  const { labels, loading: labelsLoading, error: labelsError } = useLabels();
   const router = useRouter();
 
   // Empty is every label.
@@ -122,6 +122,9 @@ export default function BusinessPage() {
   );
 
   const hasLabels = labels.length > 0;
+  // A failed refetch keeps the last-known labels, and those are enough to
+  // run the report. A failed first load leaves no labels to go on.
+  const canLoad = isAuthenticated && hasLabels;
   const labelById = useMemo(
     () => new Map(labels.map((l) => [l._id, l])),
     [labels],
@@ -129,7 +132,7 @@ export default function BusinessPage() {
 
   const report = useReport<BusinessReport>(
     'Business',
-    isAuthenticated && hasLabels
+    canLoad
       ? `${range.from}..${range.to}|${labelId}|${reloadKey}`
       : null,
     () => getBusinessReport(range.from, range.to, labelId || undefined),
@@ -138,7 +141,7 @@ export default function BusinessPage() {
 
   // Archived categories included, so older expenses keep their names.
   useEffect(() => {
-    if (!isAuthenticated || !hasLabels) return;
+    if (!canLoad) return;
     let cancelled = false;
     listCategories(true)
       .then((cs) => {
@@ -152,7 +155,7 @@ export default function BusinessPage() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, hasLabels]);
+  }, [canLoad]);
 
   function changeLabel(id: string) {
     setLabelId(id);
@@ -211,8 +214,14 @@ export default function BusinessPage() {
     if (failedIds.length > 0) {
       showErrorToast(`${failedIds.length} of ${ids.length} failed: ${message}`);
     }
-    // The failed ones stay selected, ready for another try.
-    setSelected(new Set(failedIds));
+    // Drop only what was marked. Failed rows and rows checked for a later
+    // bulk action stay selected.
+    const failed = new Set(failedIds);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) if (!failed.has(id)) next.delete(id);
+      return next;
+    });
     closeDialog();
     setReloadKey((k) => k + 1);
   }
@@ -227,7 +236,9 @@ export default function BusinessPage() {
     }
   }
 
-  const noLabels = !labelsLoading && !hasLabels;
+  // A failed load says nothing about whether labels exist, so only a
+  // successful load that came back empty gets the empty state.
+  const noLabels = !labelsLoading && !hasLabels && labelsError === null;
 
   return (
     <main className="max-w-5xl mx-auto px-4 py-8 md:px-8 md:py-10">
@@ -250,6 +261,12 @@ export default function BusinessPage() {
         )}
       </div>
 
+      {labelsError && (
+        <p className="mb-6 text-sm text-danger">
+          Couldn&apos;t load labels: {labelsError}
+        </p>
+      )}
+
       {noLabels ? (
         <div className={`${cardClass} text-center py-8`}>
           <p className="text-muted">
@@ -260,7 +277,8 @@ export default function BusinessPage() {
           </Link>
         </div>
       ) : !hasLabels ? (
-        <p className="text-muted">Loading labels…</p>
+        // With an error there is nothing to load. The message above says why.
+        labelsError ? null : <p className="text-muted">Loading labels…</p>
       ) : (
         <>
           <ReportSection id="business-this-month" title="This month">
@@ -404,7 +422,7 @@ function Reimbursements({
     <div>
       <p className="text-sm text-ink-2">
         Outstanding:{' '}
-        <span data-testid="outstanding-total" className="num font-semibold text-ink">
+        <span className="num font-semibold text-ink">
           {formatCents(owedCents)}
         </span>{' '}
         across {expenses(owedCount)}

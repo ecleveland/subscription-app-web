@@ -515,6 +515,28 @@ describe('TransactionsPage', () => {
       expect(filter).toHaveValue('l1');
     });
 
+    it('survives a malformed dateFrom and still offers Clear', async () => {
+      searchParamsState = new URLSearchParams('labelId=any&dateFrom=abc');
+      mockList([txn]);
+      render(<TransactionsPage />);
+
+      await screen.findByText('-$42.00');
+      expect(screen.getByText('Showing a custom range')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Clear' })).toHaveAttribute(
+        'href',
+        '/transactions?labelId=any',
+      );
+    });
+
+    it('falls back to the custom range text for an out-of-range month', async () => {
+      searchParamsState = new URLSearchParams('dateFrom=2026-13-01');
+      mockList([txn]);
+      render(<TransactionsPage />);
+
+      await screen.findByText('-$42.00');
+      expect(screen.getByText('Showing a custom range')).toBeInTheDocument();
+    });
+
     it('shows no month banner without dates in the URL', async () => {
       mockList([txn]);
       render(<TransactionsPage />);

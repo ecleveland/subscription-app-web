@@ -17,6 +17,7 @@ import {
   withLabel,
 } from '@/lib/labels';
 import { formatMonth } from '@/lib/budget';
+import { isValidMonth } from '@/lib/reports';
 import { formatCents, formatDate } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import TransactionForm from '@/components/TransactionForm';
@@ -81,6 +82,7 @@ function TransactionsPageInner() {
   // A month from the Business page chart, read from the URL like recurringId.
   const dateFrom = searchParams.get('dateFrom') ?? '';
   const dateTo = searchParams.get('dateTo') ?? '';
+  const urlMonth = (dateFrom || dateTo).slice(0, 7);
   // Clear, back and forward change the URL without a remount. When the
   // label or month in the URL changes, take its label and start from page 1.
   // Adjusting state during render avoids fetching once with the stale page.
@@ -265,7 +267,13 @@ function TransactionsPageInner() {
 
       {(dateFrom || dateTo) && (
         <p className="flex items-center justify-between gap-3 mb-4 px-4 py-2 rounded-md bg-accent-soft text-sm text-accent">
-          <span>Showing {formatMonth((dateFrom || dateTo).slice(0, 7))}</span>
+          <span>
+            {/* The URL can carry anything. formatMonth throws on a month
+                that is not YYYY-MM, so only a valid one gets a name. */}
+            {isValidMonth(urlMonth)
+              ? `Showing ${formatMonth(urlMonth)}`
+              : 'Showing a custom range'}
+          </span>
           <Link
             href={labelId ? `/transactions?labelId=${encodeURIComponent(labelId)}` : '/transactions'}
             className="font-medium hover:underline whitespace-nowrap"

@@ -572,8 +572,32 @@ describe('TransactionsService', () => {
       expect(filter.type).toBe(TransactionType.EXPENSE);
       expect(filter.cleared).toBe(false);
       expect(filter.date.$gte).toBeInstanceOf(Date);
-      expect(filter.date.$lte).toBeInstanceOf(Date);
+      expect(filter.date.$lt).toBeInstanceOf(Date);
       expect(res.meta.total).toBe(1);
+    });
+
+    it('treats a date-only dateTo as the whole UTC day, ending before the next midnight', async () => {
+      await service.findAll(HOUSEHOLD_ID, {
+        dateFrom: '2026-02-01',
+        dateTo: '2026-02-28',
+      });
+
+      const filter = mockModel.find.mock.calls[0][0];
+      expect(filter.date).toEqual({
+        $gte: new Date('2026-02-01T00:00:00.000Z'),
+        $lt: new Date('2026-03-01T00:00:00.000Z'),
+      });
+    });
+
+    it('keeps a dateTo with a time as an inclusive bound at that instant', async () => {
+      await service.findAll(HOUSEHOLD_ID, {
+        dateTo: '2026-02-28T12:30:00.000Z',
+      });
+
+      const filter = mockModel.find.mock.calls[0][0];
+      expect(filter.date).toEqual({
+        $lte: new Date('2026-02-28T12:30:00.000Z'),
+      });
     });
 
     it('computes pagination metadata for a multi-page result', async () => {

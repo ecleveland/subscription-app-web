@@ -58,8 +58,12 @@ test.describe('Business page', () => {
       thisMonth.getByRole('group', { name: 'Spend', exact: true }),
     ).toContainText('$55.00');
 
-    const outstanding = page.getByTestId('outstanding-total');
-    await expect(outstanding).toHaveText('$55.00');
+    // getByText resolves to the innermost element whose text matches: the
+    // "Outstanding: $55.00 across 1 expense" line.
+    const outstanding = page
+      .getByRole('region', { name: 'Reimbursements' })
+      .getByText(/^Outstanding:/);
+    await expect(outstanding).toContainText('Outstanding: $55.00');
 
     const owed = page.getByRole('list', { name: 'Owed reimbursements' });
     await owed
@@ -72,7 +76,7 @@ test.describe('Business page', () => {
       .getByRole('button', { name: 'Mark reimbursed' })
       .click();
 
-    await expect(outstanding).toHaveText('$0.00');
+    await expect(outstanding).toContainText('Outstanding: $0.00');
     await expect(owed.getByText(payee)).toHaveCount(0);
     await expect(
       page.getByRole('list', { name: 'Reimbursed expenses' }),

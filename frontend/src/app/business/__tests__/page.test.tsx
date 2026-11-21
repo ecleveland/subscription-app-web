@@ -13,7 +13,7 @@ vi.mock('@/lib/transactions', () => ({
   listTransactions: vi.fn(),
 }));
 vi.mock('@/lib/categories', () => ({ listCategories: vi.fn() }));
-let labelsState: { labels: unknown[]; loading: boolean };
+let labelsState: { labels: unknown[]; loading: boolean; error: string | null };
 vi.mock('@/lib/labels-context', () => ({ useLabels: () => labelsState }));
 let authState = { isAuthenticated: true };
 vi.mock('@/lib/auth-context', () => ({ useAuth: () => authState }));
@@ -145,6 +145,10 @@ function section(name: string): HTMLElement {
   return screen.getByRole('region', { name });
 }
 
+function outstanding(): HTMLElement {
+  return within(section('Reimbursements')).getByText(/^Outstanding:/);
+}
+
 async function renderLoaded() {
   render(<BusinessPage />);
   await within(section('Reimbursements')).findByText('Kiln parts');
@@ -162,7 +166,7 @@ beforeEach(() => {
   vi.mocked(showSuccessToast).mockReset();
   mockPush.mockReset();
   authState = { isAuthenticated: true };
-  labelsState = { labels, loading: false };
+  labelsState = { labels, loading: false, error: null };
 });
 
 describe('BusinessPage', () => {
@@ -298,8 +302,7 @@ describe('BusinessPage', () => {
       await renderLoaded();
       const block = section('Reimbursements');
 
-      expect(within(block).getByTestId('outstanding-total')).toHaveTextContent('$75.00');
-      expect(within(block).getByText(/across 2 expenses/)).toBeInTheDocument();
+      expect(outstanding()).toHaveTextContent('Outstanding: $75.00 across 2 expenses');
 
       const owed = within(block).getByRole('list', { name: 'Owed reimbursements' });
       const rows = within(owed).getAllByRole('listitem');
@@ -415,7 +418,7 @@ describe('BusinessPage', () => {
 
       const block = section('Reimbursements');
       await waitFor(() =>
-        expect(within(block).getByTestId('outstanding-total')).toHaveTextContent('$20.00'),
+        expect(outstanding()).toHaveTextContent('Outstanding: $20.00 across 1 expense'),
       );
       expect(
         within(within(block).getByRole('list', { name: 'Owed reimbursements' })).queryByText(
@@ -462,6 +465,48 @@ describe('BusinessPage', () => {
 
       expect(screen.queryByRole('button', { name: 'Mark 1 reimbursed' })).toBeNull();
       expect(within(section('Reimbursements')).getByLabelText('Select Kiln parts')).not.toBeChecked();
+    });
+
+    it('keeps the other checked rows selected after marking one row by its own button', async () => {
+      const base = makeReport();
+      vi.mocked(getBusinessReport).mockResolvedValue({
+        ...base,
+        reimbursements: {
+          ...base.reimbursements,
+          owed: [
+            ...base.reimbursements.owed,
+            owedRow({ id: 't4', payee: 'Clay order', amountCents: 1500 }),
+          ],
+        },
+      });
+      const user = userEvent.setup();
+      await renderLoaded();
+      const block = section('Reimbursements');
+
+      await user.click(within(block).getByLabelText('Select Kiln parts'));
+      await user.click(within(block).getByLabelText('Select expense'));
+      const clayRow = within(
+        within(block).getByRole('list', { name: 'Owed reimbursements' }),
+      )
+        .getByText('Clay order')
+        .closest('li')!;
+      await user.click(within(clayRow).getByRole('button', { name: 'Mark reimbursed' }));
+      await user.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark reimbursed' }),
+      );
+
+      await waitFor(() =>
+        expect(setReimbursement).toHaveBeenCalledWith('t4', {
+          status: 'reimbursed',
+          reimbursedAt: today,
+        }),
+      );
+      await waitFor(() => expect(showSuccessToast).toHaveBeenCalled());
+      await within(section('Reimbursements')).findByText('Clay order');
+      const after = section('Reimbursements');
+      expect(within(after).getByLabelText('Select Kiln parts')).toBeChecked();
+      expect(within(after).getByLabelText('Select expense')).toBeChecked();
+      expect(screen.getByRole('button', { name: 'Mark 2 reimbursed' })).toBeInTheDocument();
     });
 
     it('marks a reimbursed expense as owed again', async () => {
@@ -530,7 +575,7 @@ describe('BusinessPage', () => {
   });
 
   it('shows an empty state and fetches nothing without labels', async () => {
-    labelsState = { labels: [], loading: false };
+    labelsState = { labels: [], loading: false, error: null };
     render(<BusinessPage />);
 
     expect(
@@ -545,8 +590,30 @@ describe('BusinessPage', () => {
     expect(listCategories).not.toHaveBeenCalled();
   });
 
+  it('shows the labels error instead of the empty state and fetches nothing', async () => {
+    labelsState = { labels: [], loading: false, error: 'Labels down' };
+    render(<BusinessPage />);
+
+    expect(screen.getByText("Couldn't load labels: Labels down")).toBeInTheDocument();
+    expect(screen.queryByText(/No labels yet/)).not.toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getBusinessReport).not.toHaveBeenCalled();
+    expect(listCategories).not.toHaveBeenCalled();
+  });
+
+  it('keeps the select and the report when labels are known, with the error above them', async () => {
+    labelsState = { labels, loading: false, error: 'Labels down' };
+    render(<BusinessPage />);
+
+    expect(screen.getByText("Couldn't load labels: Labels down")).toBeInTheDocument();
+    expect(screen.getByLabelText('Business label')).toBeInTheDocument();
+    await within(section('Reimbursements')).findByText('Kiln parts');
+    expect(getBusinessReport).toHaveBeenCalledWith('2025-12', '2026-11', undefined);
+    expect(listCategories).toHaveBeenCalled();
+  });
+
   it('waits for labels before deciding the page is empty', () => {
-    labelsState = { labels: [], loading: true };
+    labelsState = { labels: [], loading: true, error: null };
     render(<BusinessPage />);
 
     expect(screen.queryByText(/No labels yet/)).not.toBeInTheDocument();

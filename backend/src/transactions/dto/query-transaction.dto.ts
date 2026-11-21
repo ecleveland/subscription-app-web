@@ -56,7 +56,8 @@ export class QueryTransactionDto {
   dateFrom?: string;
 
   @ApiPropertyOptional({
-    description: 'Only transactions on/before this date (ISO 8601)',
+    description:
+      'Only transactions on or before this date (ISO 8601). A date-only value such as 2026-02-28 covers that whole UTC day.',
   })
   @IsOptional()
   @IsDateString()

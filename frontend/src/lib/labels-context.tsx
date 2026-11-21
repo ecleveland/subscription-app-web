@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -25,13 +26,20 @@ interface LabelsContextType {
 const LabelsContext = createContext<LabelsContextType | null>(null);
 
 export function LabelsProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isHydrated } = useAuth();
   const pathname = usePathname();
   const [labels, setLabels] = useState<Label[]>([]);
+  // True until the first fetch after auth hydrates settles, so consumers
+  // never read "loaded, no labels" from the pre-hydration signed-out default.
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Each call takes a number. Only the latest call writes state, so a fetch
+  // still in flight at logout, or overtaken by a newer one, is dropped.
+  const latestRequest = useRef(0);
 
   const refresh = useCallback(async () => {
+    const request = ++latestRequest.current;
+    if (!isHydrated) return;
     if (!isAuthenticated) {
       setLabels([]);
       setError(null);
@@ -41,14 +49,17 @@ export function LabelsProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      setLabels(await listLabels(true));
+      const next = await listLabels(true);
+      if (request === latestRequest.current) setLabels(next);
     } catch (err) {
       // Keep last-known labels on a transient failure.
-      setError(err instanceof Error ? err.message : 'Failed to load labels');
+      if (request === latestRequest.current) {
+        setError(err instanceof Error ? err.message : 'Failed to load labels');
+      }
     } finally {
-      setLoading(false);
+      if (request === latestRequest.current) setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isHydrated]);
 
   // Pages create labels through their own calls, so refetch on navigation.
   // That is how the Business nav item appears after the first label is made

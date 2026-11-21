@@ -16,14 +16,14 @@ vi.mock('@/lib/household-context', () => ({
   useHousehold: () => householdState,
 }));
 
-let labelsState: { labels: unknown[] };
+let labelsState: { labels: unknown[]; error: string | null };
 vi.mock('@/lib/labels-context', () => ({
   useLabels: () => labelsState,
 }));
 
 beforeEach(() => {
   householdState = { household: null };
-  labelsState = { labels: [] };
+  labelsState = { labels: [], error: null };
 });
 
 // Mock ThemeToggle since it depends on ThemeProvider
@@ -227,7 +227,7 @@ describe('Header', () => {
       isAdmin: false,
       logout: mockLogout,
     };
-    labelsState = { labels: [{ _id: 'l1', name: 'Etsy shop' }] };
+    labelsState = { labels: [{ _id: 'l1', name: 'Etsy shop' }], error: null };
 
     render(<Header />);
 
@@ -248,5 +248,22 @@ describe('Header', () => {
     render(<Header />);
 
     expect(screen.queryByRole('link', { name: 'Business' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the Business link when labels failed to load', () => {
+    authState = {
+      isAuthenticated: true,
+      user: { userId: '1', username: 'test', role: 'user' },
+      isAdmin: false,
+      logout: mockLogout,
+    };
+    labelsState = { labels: [], error: 'Labels down' };
+
+    render(<Header />);
+
+    expect(screen.getByRole('link', { name: 'Business' })).toHaveAttribute(
+      'href',
+      '/business',
+    );
   });
 });

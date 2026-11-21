@@ -99,6 +99,9 @@ export interface MaterializeResult {
   transactionId?: string;
 }
 
+// A YYYY-MM-DD value with no time part.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 @Injectable()
 export class TransactionsService {
   private readonly logger = new Logger(TransactionsService.name);
@@ -326,7 +329,18 @@ export class TransactionsService {
     if (query.dateFrom || query.dateTo) {
       const range: Record<string, Date> = {};
       if (query.dateFrom) range.$gte = new Date(query.dateFrom);
-      if (query.dateTo) range.$lte = new Date(query.dateTo);
+      if (query.dateTo) {
+        // A date-only dateTo means the whole UTC day, so a transaction stored
+        // later that day, as a datetime or a CSV import, still matches. A
+        // dateTo with a time is an inclusive bound at that instant.
+        if (DATE_ONLY.test(query.dateTo)) {
+          const nextDay = new Date(`${query.dateTo}T00:00:00.000Z`);
+          nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+          range.$lt = nextDay;
+        } else {
+          range.$lte = new Date(query.dateTo);
+        }
+      }
       filter.date = range;
     }
 

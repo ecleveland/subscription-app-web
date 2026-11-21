@@ -13,7 +13,8 @@ type NavItem = {
   href: string;
   label: string;
   adminOnly?: boolean;
-  // Shown only once the household has at least one label.
+  // Hidden only when labels loaded and the household has none. A failed
+  // load keeps it, so the page can show the error.
   needsLabels?: boolean;
 };
 type NavGroup = { title: string; items: NavItem[] };
@@ -61,7 +62,7 @@ function isActive(pathname: string | null, href: string): boolean {
 export default function Header() {
   const { isAuthenticated, isAdmin, logout } = useAuth();
   const { household } = useHousehold();
-  const { labels } = useLabels();
+  const { labels, error: labelsError } = useLabels();
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -122,7 +123,7 @@ export default function Header() {
             const items = group.items.filter(
               (item) =>
                 (!item.adminOnly || isAdmin) &&
-                (!item.needsLabels || labels.length > 0),
+                (!item.needsLabels || labels.length > 0 || labelsError !== null),
             );
             return (
               <div key={group.title}>
