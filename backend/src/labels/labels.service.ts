@@ -24,6 +24,7 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { RemoveLabelOutcomeDto } from './dto/remove-label-outcome.dto';
 import { asConflictIfDuplicate } from '../common/mongo-errors';
+import { LABEL_FILTER_ANY, LABEL_FILTER_NONE } from './dto/label-filter';
 
 const DUPLICATE_NAME_MESSAGE =
   'A label with this name already exists in this household (possibly archived)';
@@ -245,6 +246,90 @@ export class LabelsService {
       return;
     }
     await this.assertAssignable(householdId, next);
+  }
+
+  /**
+   * A label id plus every label beneath it through parentId, for reports that
+   * roll a business up over its sub-labels. Reads the household's labels once,
+   * archived included, because archived labels keep their records. A visited
+   * set ends the walk on a parentId loop. A label outside the household comes
+   * back alone so a filter on it matches nothing, and a malformed id gives an
+   * empty list.
+   */
+  async labelIdsWithDescendants(
+    householdId: string,
+    labelId: string,
+  ): Promise<Types.ObjectId[]> {
+    if (!Types.ObjectId.isValid(labelId)) {
+      return [];
+    }
+    const rootId = new Types.ObjectId(labelId);
+    const labels = await this.labelModel
+      .find({
+        householdId: new Types.ObjectId(householdId),
+      } as Record<string, unknown>)
+      .exec();
+
+    const children = new Map<string, Types.ObjectId[]>();
+    let found = false;
+    for (const label of labels) {
+      if (label._id.equals(rootId)) {
+        found = true;
+      }
+      const parentId = label.parentId as unknown as Types.ObjectId | undefined;
+      if (!parentId) {
+        continue;
+      }
+      const key = parentId.toHexString();
+      const siblings = children.get(key) ?? [];
+      siblings.push(label._id);
+      children.set(key, siblings);
+    }
+    if (!found) {
+      return [rootId];
+    }
+
+    const ids: Types.ObjectId[] = [];
+    const visited = new Set<string>();
+    const queue = [rootId];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      const key = id.toHexString();
+      if (visited.has(key)) {
+        continue;
+      }
+      visited.add(key);
+      ids.push(id);
+      queue.push(...(children.get(key) ?? []));
+    }
+    return ids;
+  }
+
+  /**
+   * The extra $match condition a report adds for its labelId query param.
+   * Nothing for no param, unlabeled records for 'none', labeled records for
+   * 'any', and otherwise the label with every sub-label. The values are
+   * ObjectIds and null, so the condition works in an aggregation, which does
+   * not cast.
+   */
+  async reportLabelMatch(
+    householdId: string,
+    labelId?: string,
+  ): Promise<Record<string, unknown>> {
+    if (!labelId) {
+      return {};
+    }
+    if (labelId === LABEL_FILTER_NONE) {
+      return { labelId: null };
+    }
+    if (labelId === LABEL_FILTER_ANY) {
+      return { labelId: { $ne: null } };
+    }
+    return {
+      labelId: {
+        $in: await this.labelIdsWithDescendants(householdId, labelId),
+      },
+    };
   }
 
   // Resolve a client-supplied parentId to an active label in the household, or

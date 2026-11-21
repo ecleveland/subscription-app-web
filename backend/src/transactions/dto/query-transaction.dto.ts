@@ -37,7 +37,7 @@ export class QueryTransactionDto {
 
   @ApiPropertyOptional({
     description:
-      "Filter by business label: a label id, or 'none' for personal records",
+      "Filter by business label: a label id, 'none' for personal records, or 'any' for every labeled record",
   })
   @IsOptional()
   @Matches(LABEL_FILTER_PATTERN, { message: LABEL_FILTER_MESSAGE })
@@ -56,7 +56,8 @@ export class QueryTransactionDto {
   dateFrom?: string;
 
   @ApiPropertyOptional({
-    description: 'Only transactions on/before this date (ISO 8601)',
+    description:
+      'Only transactions on or before this date (ISO 8601). A date-only value such as 2026-02-28 covers that whole UTC day.',
   })
   @IsOptional()
   @IsDateString()

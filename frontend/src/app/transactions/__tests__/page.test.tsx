@@ -359,6 +359,194 @@ describe('TransactionsPage', () => {
     );
   });
 
+  describe('Business page deep link', () => {
+    it('seeds the label and month from the URL and links back without the month', async () => {
+      searchParamsState = new URLSearchParams(
+        'labelId=any&dateFrom=2026-10-01&dateTo=2026-10-31',
+      );
+      mockList([txn]);
+      render(<TransactionsPage />);
+
+      await screen.findByText('-$42.00');
+      expect(vi.mocked(listTransactions).mock.calls[0][0]).toMatchObject({
+        labelId: 'any',
+        dateFrom: '2026-10-01',
+        dateTo: '2026-10-31',
+        page: 1,
+      });
+      expect(screen.getByLabelText('Filter by label')).toHaveValue('any');
+      expect(screen.getByText(/Showing October 2026/)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Clear' })).toHaveAttribute(
+        'href',
+        '/transactions?labelId=any',
+      );
+    });
+
+    it('clears to the bare list when the link carried no label', async () => {
+      searchParamsState = new URLSearchParams(
+        'dateFrom=2026-10-01&dateTo=2026-10-31',
+      );
+      mockList([txn]);
+      render(<TransactionsPage />);
+
+      await screen.findByText('-$42.00');
+      expect(screen.getByRole('link', { name: 'Clear' })).toHaveAttribute(
+        'href',
+        '/transactions',
+      );
+    });
+
+    it('re-applies the month when the URL changes without a remount', async () => {
+      searchParamsState = new URLSearchParams(
+        'dateFrom=2026-10-01&dateTo=2026-10-31',
+      );
+      mockList([txn]);
+      const { rerender } = render(<TransactionsPage />);
+      await screen.findByText('-$42.00');
+
+      searchParamsState = new URLSearchParams(
+        'dateFrom=2026-09-01&dateTo=2026-09-30',
+      );
+      rerender(<TransactionsPage />);
+
+      await waitFor(() =>
+        expect(vi.mocked(listTransactions).mock.calls.at(-1)?.[0]).toMatchObject({
+          dateFrom: '2026-09-01',
+          dateTo: '2026-09-30',
+        }),
+      );
+    });
+
+    function mockPages(totalPages: number) {
+      vi.mocked(listTransactions).mockImplementation(async (filters = {}) => ({
+        data: [txn],
+        meta: {
+          total: totalPages * 20,
+          page: filters.page ?? 1,
+          limit: 20,
+          totalPages,
+          hasNextPage: (filters.page ?? 1) < totalPages,
+        },
+      }));
+    }
+
+    async function goToPage3(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByText('Page 1 of 5');
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      await screen.findByText('Page 2 of 5');
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      await screen.findByText('Page 3 of 5');
+    }
+
+    it('drops the month and returns to page 1 when Clear changes the URL', async () => {
+      searchParamsState = new URLSearchParams(
+        'labelId=any&dateFrom=2026-10-01&dateTo=2026-10-31',
+      );
+      mockPages(5);
+      const user = userEvent.setup();
+      const { rerender } = render(<TransactionsPage />);
+      await goToPage3(user);
+
+      // Clear navigates to ?labelId=any. Same route, so no remount.
+      searchParamsState = new URLSearchParams('labelId=any');
+      rerender(<TransactionsPage />);
+
+      await waitFor(() => {
+        const last = vi.mocked(listTransactions).mock.calls.at(-1)?.[0];
+        expect(last).toMatchObject({ labelId: 'any', page: 1 });
+        expect(last?.dateFrom).toBeUndefined();
+        expect(last?.dateTo).toBeUndefined();
+      });
+      expect(screen.queryByText(/Showing October 2026/)).not.toBeInTheDocument();
+    });
+
+    it('follows a new labelId in the URL and returns to page 1', async () => {
+      searchParamsState = new URLSearchParams('labelId=l1');
+      mockPages(5);
+      const user = userEvent.setup();
+      const { rerender } = render(<TransactionsPage />);
+      await goToPage3(user);
+
+      // Browser back to a link that carried a different label.
+      searchParamsState = new URLSearchParams('labelId=any');
+      rerender(<TransactionsPage />);
+
+      await waitFor(() =>
+        expect(vi.mocked(listTransactions).mock.calls.at(-1)?.[0]).toMatchObject({
+          labelId: 'any',
+          page: 1,
+        }),
+      );
+      expect(screen.getByLabelText('Filter by label')).toHaveValue('any');
+    });
+
+    it('drops the label when the URL no longer carries one', async () => {
+      searchParamsState = new URLSearchParams('labelId=any');
+      mockList([txn]);
+      const { rerender } = render(<TransactionsPage />);
+      await screen.findByText('-$42.00');
+
+      searchParamsState = new URLSearchParams();
+      rerender(<TransactionsPage />);
+
+      await waitFor(() =>
+        expect(vi.mocked(listTransactions).mock.calls.at(-1)?.[0]?.labelId).toBeUndefined(),
+      );
+      expect(screen.getByLabelText('Filter by label')).toHaveValue('');
+    });
+
+    it('keeps a label picked in the select while the URL stays the same', async () => {
+      searchParamsState = new URLSearchParams('labelId=any');
+      mockList([txn]);
+      const user = userEvent.setup();
+      const { rerender } = render(<TransactionsPage />);
+      await screen.findByText('-$42.00');
+      const filter = screen.getByLabelText('Filter by label');
+      await within(filter).findByRole('option', { name: 'Etsy shop' });
+
+      await user.selectOptions(filter, 'l1');
+      rerender(<TransactionsPage />);
+
+      await waitFor(() =>
+        expect(vi.mocked(listTransactions).mock.calls.at(-1)?.[0]).toMatchObject({
+          labelId: 'l1',
+        }),
+      );
+      expect(filter).toHaveValue('l1');
+    });
+
+    it('survives a malformed dateFrom and still offers Clear', async () => {
+      searchParamsState = new URLSearchParams('labelId=any&dateFrom=abc');
+      mockList([txn]);
+      render(<TransactionsPage />);
+
+      await screen.findByText('-$42.00');
+      expect(screen.getByText('Showing a custom range')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Clear' })).toHaveAttribute(
+        'href',
+        '/transactions?labelId=any',
+      );
+    });
+
+    it('falls back to the custom range text for an out-of-range month', async () => {
+      searchParamsState = new URLSearchParams('dateFrom=2026-13-01');
+      mockList([txn]);
+      render(<TransactionsPage />);
+
+      await screen.findByText('-$42.00');
+      expect(screen.getByText('Showing a custom range')).toBeInTheDocument();
+    });
+
+    it('shows no month banner without dates in the URL', async () => {
+      mockList([txn]);
+      render(<TransactionsPage />);
+
+      await screen.findByText('-$42.00');
+      expect(screen.queryByText(/^Showing /)).not.toBeInTheDocument();
+      expect(vi.mocked(listTransactions).mock.calls[0][0]?.dateFrom).toBeUndefined();
+    });
+  });
+
   it('deletes a transaction through the confirm dialog', async () => {
     mockList([txn]);
     vi.mocked(deleteTransaction).mockResolvedValue(undefined);
@@ -393,6 +581,23 @@ describe('TransactionsPage', () => {
       expect(
         within(filter).getByRole('option', { name: 'Old gig (archived)' }),
       ).toBeInTheDocument();
+    });
+
+    it('offers Any business label after Personal and filters by it', async () => {
+      mockList([txn]);
+      const user = userEvent.setup();
+      render(<TransactionsPage />);
+      await screen.findByText('-$42.00');
+      const filter = screen.getByLabelText('Filter by label');
+      await within(filter).findByRole('option', { name: 'Etsy shop' });
+
+      const names = within(filter)
+        .getAllByRole('option')
+        .map((o) => o.textContent);
+      expect(names.slice(0, 3)).toEqual(['All labels', 'Personal', 'Any business label']);
+
+      await user.selectOptions(filter, 'any');
+      await waitFor(() => expect(lastFilters()).toMatchObject({ labelId: 'any', page: 1 }));
     });
 
     it('filters by Personal, by a label, and back to all labels', async () => {

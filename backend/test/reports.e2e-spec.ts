@@ -832,4 +832,418 @@ describe('Reports (e2e)', () => {
       ]);
     });
   });
+
+  describe('label filters and business report (VEG-701)', () => {
+    let parentLabel: string;
+    let childLabel: string;
+    let labelAccount: string;
+    let ownedId: string;
+    let reimbursedId: string;
+
+    type BusinessBody = {
+      from: string;
+      to: string;
+      labelId: string | null;
+      months: {
+        month: string;
+        expenseCents: number;
+        incomeCents: number;
+        reimbursedCents: number;
+      }[];
+      categories: {
+        categoryId: string;
+        actualCents: number;
+        plannedCents: number | null;
+      }[];
+      uncategorizedCents: number;
+      totalCents: number;
+      reimbursements: {
+        owedCents: number;
+        owedCount: number;
+        reimbursedCents: number;
+        owed: Record<string, unknown>[];
+        reimbursed: Record<string, unknown>[];
+      };
+    };
+
+    function report(
+      path: string,
+      token: string,
+      query: Record<string, string>,
+    ) {
+      return request(app.getHttpServer())
+        .get(`/api/reports/${path}`)
+        .query(query)
+        .set('Authorization', `Bearer ${token}`);
+    }
+
+    async function createLabel(
+      name: string,
+      parentId?: string,
+    ): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post('/api/labels')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ name, color: '#336699', parentId })
+        .expect(201);
+      return res.body._id;
+    }
+
+    async function createLabeledTxn(
+      body: Record<string, unknown>,
+    ): Promise<string> {
+      const res = await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ accountId: labelAccount, ...body })
+        .expect(201);
+      return res.body._id;
+    }
+
+    beforeAll(async () => {
+      parentLabel = await createLabel('Consulting');
+      childLabel = await createLabel('Consulting Travel', parentLabel);
+      // A dedicated account so the net worth case can read its balance.
+      labelAccount = await createAccount(tokenA, {
+        name: 'Label Checking',
+        type: 'checking',
+        balanceCents: 100000,
+      });
+      const expenseA = await categoryFor(tokenA, false);
+      const incomeA = await categoryFor(tokenA, true);
+      const expense = (amountCents: number, date: string) => ({
+        type: 'expense',
+        amountCents,
+        date,
+        categoryId: expenseA,
+      });
+
+      // July 2026 is free of every other fixture in household A.
+      await createLabeledTxn({
+        ...expense(10000, '2026-07-05'),
+        labelId: parentLabel,
+      });
+      await createLabeledTxn({
+        ...expense(2500, '2026-07-08'),
+        labelId: childLabel,
+      });
+      await createLabeledTxn(expense(4000, '2026-07-09'));
+      reimbursedId = await createLabeledTxn({
+        ...expense(3000, '2026-07-10'),
+        labelId: parentLabel,
+        reimbursement: { status: 'owed' },
+      });
+      await request(app.getHttpServer())
+        .patch(`/api/transactions/${reimbursedId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          reimbursement: { status: 'reimbursed', reimbursedAt: '2026-07-20' },
+        })
+        .expect(200);
+      ownedId = await createLabeledTxn({
+        ...expense(1500, '2026-07-15'),
+        labelId: parentLabel,
+        reimbursement: { status: 'owed' },
+      });
+      await createLabeledTxn({
+        type: 'income',
+        amountCents: 50000,
+        date: '2026-07-25',
+        categoryId: incomeA,
+        labelId: parentLabel,
+      });
+    });
+
+    it('cash flow for the parent label includes its child label', async () => {
+      const res = await report('cash-flow', tokenA, {
+        from: '2026-07',
+        to: '2026-07',
+        labelId: parentLabel,
+      }).expect(200);
+      expect(res.body.months).toEqual([
+        {
+          month: '2026-07',
+          incomeCents: 50000,
+          expenseCents: 17000,
+          netCents: 33000,
+        },
+      ]);
+    });
+
+    it("cash flow with 'none' leaves out every labeled transaction", async () => {
+      const res = await report('cash-flow', tokenA, {
+        from: '2026-07',
+        to: '2026-07',
+        labelId: 'none',
+      }).expect(200);
+      expect(res.body.months).toEqual([
+        {
+          month: '2026-07',
+          incomeCents: 0,
+          expenseCents: 4000,
+          netCents: -4000,
+        },
+      ]);
+    });
+
+    it('rejects a malformed labelId on spending with 400', async () => {
+      await report('spending', tokenA, {
+        month: '2026-07',
+        labelId: 'junk',
+      }).expect(400);
+    });
+
+    it('rejects a malformed labelId on net worth with 400', async () => {
+      await report('net-worth', tokenA, {
+        from: '2026-07',
+        to: '2026-07',
+        labelId: 'junk',
+      }).expect(400);
+    });
+
+    it('rejects a malformed labelId on cash flow with 400', async () => {
+      await report('cash-flow', tokenA, {
+        from: '2026-07',
+        to: '2026-07',
+        labelId: 'junk',
+      }).expect(400);
+    });
+
+    it('spending for the parent label returns only labeled spend', async () => {
+      const res = await report('spending', tokenA, {
+        month: '2026-07',
+        labelId: parentLabel,
+      }).expect(200);
+      expect(res.body.totalCents).toBe(17000);
+      expect(res.body.uncategorizedCents).toBe(0);
+      expect(
+        res.body.categories.reduce(
+          (n: number, c: { actualCents: number }) => n + c.actualCents,
+          0,
+        ),
+      ).toBe(17000);
+    });
+
+    it("net worth with 'none' leaves the labeled deltas out of the balance", async () => {
+      const balanceIn = async (query: Record<string, string>) => {
+        const res = await report('net-worth', tokenA, {
+          from: '2026-07',
+          to: '2026-07',
+          ...query,
+        }).expect(200);
+        return res.body.months[0].accounts.find(
+          (a: { accountId: string }) => a.accountId === labelAccount,
+        )?.balanceCents;
+      };
+
+      // Opening 100000 less the 4000 personal expense.
+      expect(await balanceIn({ labelId: 'none' })).toBe(96000);
+      // Every row: 100000 - 4000 - 17000 + 50000.
+      expect(await balanceIn({})).toBe(129000);
+    });
+
+    it('business report for the parent label totals months, categories and reimbursements', async () => {
+      const res = await report('business', tokenA, {
+        from: '2026-06',
+        to: '2026-08',
+        labelId: parentLabel,
+      }).expect(200);
+      const body = res.body as BusinessBody;
+
+      expect(body.from).toBe('2026-06');
+      expect(body.to).toBe('2026-08');
+      expect(body.labelId).toBe(parentLabel);
+      expect(body.months).toEqual([
+        {
+          month: '2026-06',
+          expenseCents: 0,
+          incomeCents: 0,
+          reimbursedCents: 0,
+        },
+        {
+          month: '2026-07',
+          expenseCents: 17000,
+          incomeCents: 50000,
+          reimbursedCents: 3000,
+        },
+        {
+          month: '2026-08',
+          expenseCents: 0,
+          incomeCents: 0,
+          reimbursedCents: 0,
+        },
+      ]);
+      expect(body.totalCents).toBe(17000);
+      expect(
+        body.categories.reduce((n, c) => n + c.actualCents, 0) +
+          body.uncategorizedCents,
+      ).toBe(17000);
+      expect(body.categories.every((c) => c.plannedCents === null)).toBe(true);
+      expect(body.reimbursements).toMatchObject({
+        owedCents: 1500,
+        owedCount: 1,
+        reimbursedCents: 3000,
+      });
+      expect(body.reimbursements.owed).toEqual([
+        expect.objectContaining({
+          id: ownedId,
+          date: '2026-07-15T00:00:00.000Z',
+          amountCents: 1500,
+          labelId: parentLabel,
+        }),
+      ]);
+      expect(body.reimbursements.reimbursed).toEqual([
+        expect.objectContaining({
+          id: reimbursedId,
+          amountCents: 3000,
+          reimbursedAt: '2026-07-20T00:00:00.000Z',
+          reimbursedByTransactionId: null,
+        }),
+      ]);
+    });
+
+    it('business report keeps an expense owed from before the range outstanding, but not one already reimbursed', async () => {
+      const res = await report('business', tokenA, {
+        from: '2026-08',
+        to: '2026-08',
+        labelId: parentLabel,
+      }).expect(200);
+      const body = res.body as BusinessBody;
+
+      // The July owed expense is still outstanding in August.
+      expect(body.reimbursements.owedCents).toBe(1500);
+      expect(body.reimbursements.owedCount).toBe(1);
+      expect(body.reimbursements.owed).toEqual([
+        expect.objectContaining({
+          id: ownedId,
+          date: '2026-07-15T00:00:00.000Z',
+          amountCents: 1500,
+        }),
+      ]);
+      // The July reimbursed expense belongs to July only.
+      expect(body.reimbursements.reimbursedCents).toBe(0);
+      expect(body.reimbursements.reimbursed).toEqual([]);
+      // Months, categories and totals stay inside August.
+      expect(body.months).toEqual([
+        {
+          month: '2026-08',
+          expenseCents: 0,
+          incomeCents: 0,
+          reimbursedCents: 0,
+        },
+      ]);
+      expect(body.categories).toEqual([]);
+      expect(body.totalCents).toBe(0);
+    });
+
+    it('business report leaves out an owed expense dated after the range', async () => {
+      const res = await report('business', tokenA, {
+        from: '2026-06',
+        to: '2026-06',
+        labelId: parentLabel,
+      }).expect(200);
+      const body = res.body as BusinessBody;
+
+      expect(body.reimbursements.owedCents).toBe(0);
+      expect(body.reimbursements.owedCount).toBe(0);
+      expect(body.reimbursements.owed).toEqual([]);
+    });
+
+    it('business report with no labelId covers every label, here the same as the parent', async () => {
+      const all = await report('business', tokenA, {
+        from: '2026-06',
+        to: '2026-08',
+      }).expect(200);
+      const parent = await report('business', tokenA, {
+        from: '2026-06',
+        to: '2026-08',
+        labelId: parentLabel,
+      }).expect(200);
+
+      expect(all.body.labelId).toBeNull();
+      expect({ ...all.body, labelId: parentLabel }).toEqual(parent.body);
+    });
+
+    it('business report for the child label covers only the child', async () => {
+      const res = await report('business', tokenA, {
+        from: '2026-07',
+        to: '2026-07',
+        labelId: childLabel,
+      }).expect(200);
+      const body = res.body as BusinessBody;
+
+      expect(body.months).toEqual([
+        {
+          month: '2026-07',
+          expenseCents: 2500,
+          incomeCents: 0,
+          reimbursedCents: 0,
+        },
+      ]);
+      expect(body.totalCents).toBe(2500);
+      expect(body.reimbursements).toEqual({
+        owedCents: 0,
+        owedCount: 0,
+        reimbursedCents: 0,
+        owed: [],
+        reimbursed: [],
+      });
+    });
+
+    it('gives household B zeros and empty lists', async () => {
+      const res = await report('business', tokenB, {
+        from: '2026-07',
+        to: '2026-07',
+      }).expect(200);
+      expect(res.body).toEqual({
+        from: '2026-07',
+        to: '2026-07',
+        labelId: null,
+        months: [
+          {
+            month: '2026-07',
+            expenseCents: 0,
+            incomeCents: 0,
+            reimbursedCents: 0,
+          },
+        ],
+        categories: [],
+        uncategorizedCents: 0,
+        totalCents: 0,
+        reimbursements: {
+          owedCents: 0,
+          owedCount: 0,
+          reimbursedCents: 0,
+          owed: [],
+          reimbursed: [],
+        },
+      });
+    });
+
+    it("gives household B nothing for household A's label", async () => {
+      const res = await report('business', tokenB, {
+        from: '2026-07',
+        to: '2026-07',
+        labelId: parentLabel,
+      }).expect(200);
+      expect(res.body.totalCents).toBe(0);
+      expect(res.body.months[0].incomeCents).toBe(0);
+    });
+
+    it.each([
+      ['a missing from', { to: '2026-07' }],
+      ["labelId 'none'", { from: '2026-07', to: '2026-07', labelId: 'none' }],
+      ['a malformed labelId', { from: '2026-07', to: '2026-07', labelId: 'x' }],
+    ])('rejects %s on the business report with 400', async (_name, query) => {
+      await report('business', tokenA, query as Record<string, string>).expect(
+        400,
+      );
+    });
+
+    it('requires authentication for the business report', async () => {
+      await request(app.getHttpServer())
+        .get('/api/reports/business?from=2026-07&to=2026-07')
+        .expect(401);
+    });
+  });
 });

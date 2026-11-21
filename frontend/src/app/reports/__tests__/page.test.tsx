@@ -16,6 +16,8 @@ let accountsState: {
   error: string | null;
 };
 vi.mock('@/lib/accounts-context', () => ({ useAccounts: () => accountsState }));
+let labelsState: { labels: unknown[] };
+vi.mock('@/lib/labels-context', () => ({ useLabels: () => labelsState }));
 vi.mock('@/lib/api', () => ({ apiFetch: vi.fn() }));
 let authState = { isAuthenticated: true };
 vi.mock('@/lib/auth-context', () => ({ useAuth: () => authState }));
@@ -130,6 +132,12 @@ beforeEach(() => {
   vi.mocked(showErrorToast).mockReset();
   vi.mocked(defaultRange).mockClear();
   authState = { isAuthenticated: true };
+  labelsState = {
+    labels: [
+      { _id: 'l1', name: 'Etsy shop', isArchived: false },
+      { _id: 'l2', name: 'Old gig', isArchived: true },
+    ],
+  };
   accountsState = {
     accounts: [{ _id: 'a1', name: 'Checking' }],
     loading: false,
@@ -149,9 +157,9 @@ describe('ReportsPage', () => {
     await waitFor(() =>
       expect(within(section('Cash flow')).getByText('Sep 2026')).toBeInTheDocument(),
     );
-    expect(getCashFlow).toHaveBeenCalledWith(from, to);
-    expect(getNetWorth).toHaveBeenCalledWith(from, to);
-    expect(getSpending).toHaveBeenCalledWith(currentMonth);
+    expect(getCashFlow).toHaveBeenCalledWith(from, to, undefined);
+    expect(getNetWorth).toHaveBeenCalledWith(from, to, undefined);
+    expect(getSpending).toHaveBeenCalledWith(currentMonth, undefined);
     expect(apiFetch).toHaveBeenCalledWith('/subscriptions?limit=0');
 
     await waitFor(() =>
@@ -315,7 +323,7 @@ describe('ReportsPage', () => {
     });
 
     await waitFor(() =>
-      expect(getCashFlow).toHaveBeenLastCalledWith(shiftMonth(to, -35), to),
+      expect(getCashFlow).toHaveBeenLastCalledWith(shiftMonth(to, -35), to, undefined),
     );
     expect(
       screen.queryByText(`Range must not exceed ${MAX_REPORT_MONTHS} months`),
@@ -348,7 +356,7 @@ describe('ReportsPage', () => {
     });
 
     await waitFor(() =>
-      expect(getSpending).toHaveBeenLastCalledWith(previous),
+      expect(getSpending).toHaveBeenLastCalledWith(previous, undefined),
     );
   });
 
@@ -541,5 +549,83 @@ describe('ReportsPage', () => {
       }),
     );
     expect(within(cash).getByText('Aug 2026')).toBeInTheDocument();
+  });
+
+  describe('label filter', () => {
+    it('offers Everything, Personal and each label with archived ones flagged', () => {
+      render(<ReportsPage />);
+      const select = screen.getByLabelText('Filter by label');
+      const options = within(select).getAllByRole('option');
+      expect(options.map((o) => o.textContent)).toEqual([
+        'Everything',
+        'Personal',
+        'All business',
+        'Etsy shop',
+        'Old gig (archived)',
+      ]);
+      expect(select).toHaveValue('');
+    });
+
+    it('sends no label by default', async () => {
+      render(<ReportsPage />);
+      await waitFor(() => expect(getCashFlow).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(getSpending).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(getCashFlow).mock.calls[0][2]).toBeUndefined();
+      expect(vi.mocked(getNetWorth).mock.calls[0][2]).toBeUndefined();
+      expect(vi.mocked(getSpending).mock.calls[0][1]).toBeUndefined();
+    });
+
+    it('refetches all three reports with the chosen label', async () => {
+      render(<ReportsPage />);
+      await waitFor(() => expect(getCashFlow).toHaveBeenCalledTimes(1));
+      const { from, to } = defaultRange();
+
+      fireEvent.change(screen.getByLabelText('Filter by label'), {
+        target: { value: 'l1' },
+      });
+
+      await waitFor(() =>
+        expect(getCashFlow).toHaveBeenLastCalledWith(from, to, 'l1'),
+      );
+      await waitFor(() =>
+        expect(getNetWorth).toHaveBeenLastCalledWith(from, to, 'l1'),
+      );
+      await waitFor(() =>
+        expect(getSpending).toHaveBeenLastCalledWith(currentMonth, 'l1'),
+      );
+    });
+
+    it('sends any to all three reports for All business', async () => {
+      render(<ReportsPage />);
+      await waitFor(() => expect(getCashFlow).toHaveBeenCalledTimes(1));
+      const { from, to } = defaultRange();
+
+      fireEvent.change(screen.getByLabelText('Filter by label'), {
+        target: { value: 'any' },
+      });
+
+      await waitFor(() =>
+        expect(getCashFlow).toHaveBeenLastCalledWith(from, to, 'any'),
+      );
+      await waitFor(() =>
+        expect(getNetWorth).toHaveBeenLastCalledWith(from, to, 'any'),
+      );
+      await waitFor(() =>
+        expect(getSpending).toHaveBeenLastCalledWith(currentMonth, 'any'),
+      );
+    });
+
+    it('sends none for Personal', async () => {
+      render(<ReportsPage />);
+      await waitFor(() => expect(getCashFlow).toHaveBeenCalledTimes(1));
+
+      fireEvent.change(screen.getByLabelText('Filter by label'), {
+        target: { value: 'none' },
+      });
+
+      await waitFor(() =>
+        expect(vi.mocked(getCashFlow).mock.calls.at(-1)?.[2]).toBe('none'),
+      );
+    });
   });
 });

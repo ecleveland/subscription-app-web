@@ -31,7 +31,7 @@ export class QueryRecurringDto {
 
   @ApiPropertyOptional({
     description:
-      "Filter by business label: a label id, or 'none' for personal records",
+      "Filter by business label: a label id, 'none' for personal records, or 'any' for every labeled record",
   })
   @IsOptional()
   @Matches(LABEL_FILTER_PATTERN, { message: LABEL_FILTER_MESSAGE })

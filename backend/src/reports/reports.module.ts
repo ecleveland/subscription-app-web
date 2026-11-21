@@ -11,13 +11,16 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { BudgetsModule } from '../budgets/budgets.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { AccountsModule } from '../accounts/accounts.module';
+import { LabelsModule } from '../labels/labels.module';
 
 // Phase 5 reports (VEG-582 onward). Read-only. Cash flow aggregates the
 // Transaction collection directly. Spending reuses the per-category actuals
 // from TransactionsService, planned amounts from BudgetsService, and names
 // from CategoriesService so it matches the budget view. Net worth reads the
 // account list from AccountsService and the monthly ledger deltas from
-// TransactionsService. None of those modules import ReportsModule, so the
+// TransactionsService. LabelsService turns a labelId into the extra match
+// every report applies, and the business report (VEG-701) reads the ledger
+// directly like cash flow. None of those modules import ReportsModule, so the
 // graph stays acyclic. HouseholdsModule provides the HouseholdGuard.
 @Module({
   imports: [
@@ -29,6 +32,7 @@ import { AccountsModule } from '../accounts/accounts.module';
     BudgetsModule,
     CategoriesModule,
     AccountsModule,
+    LabelsModule,
   ],
   controllers: [ReportsController],
   providers: [ReportsService],

@@ -19,13 +19,29 @@ import {
 import { formatCents } from '@/lib/utils';
 import ReportTooltip from './ReportTooltip';
 
-export default function CashFlowChart({ months }: { months: CashFlowMonth[] }) {
+export default function CashFlowChart({
+  months,
+  onMonthClick,
+}: {
+  months: CashFlowMonth[];
+  // When set, clicking a month on the chart or in the table reports its
+  // "YYYY-MM" key.
+  onMonthClick?: (month: string) => void;
+}) {
+  const barCursor = onMonthClick ? 'pointer' : undefined;
   return (
     <div>
       <ResponsiveContainer width="100%" height={300}>
         <ComposedChart
           data={months}
           margin={{ left: 10, right: 10, top: 5, bottom: 5 }}
+          onClick={
+            onMonthClick
+              ? (state) => {
+                  if (state?.activeLabel) onMonthClick(String(state.activeLabel));
+                }
+              : undefined
+          }
         >
           <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-gray-700" />
           <XAxis
@@ -42,8 +58,8 @@ export default function CashFlowChart({ months }: { months: CashFlowMonth[] }) {
           />
           <Tooltip content={<ReportTooltip formatLabel={formatShortMonth} />} />
           <Legend />
-          <Bar dataKey="incomeCents" name="Income" fill="#1f6b47" radius={[4, 4, 0, 0]} />
-          <Bar dataKey="expenseCents" name="Expenses" fill="#b2433a" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="incomeCents" name="Income" fill="#1f6b47" radius={[4, 4, 0, 0]} cursor={barCursor} />
+          <Bar dataKey="expenseCents" name="Expenses" fill="#b2433a" radius={[4, 4, 0, 0]} cursor={barCursor} />
           <Line
             type="monotone"
             dataKey="netCents"
@@ -68,7 +84,15 @@ export default function CashFlowChart({ months }: { months: CashFlowMonth[] }) {
         <tbody>
           {months.map((m) => (
             <tr key={m.month}>
-              <th scope="row">{formatShortMonth(m.month)}</th>
+              <th scope="row">
+                {onMonthClick ? (
+                  <button type="button" onClick={() => onMonthClick(m.month)}>
+                    {formatShortMonth(m.month)}
+                  </button>
+                ) : (
+                  formatShortMonth(m.month)
+                )}
+              </th>
               <td>{formatCents(m.incomeCents)}</td>
               <td>{formatCents(m.expenseCents)}</td>
               <td>{formatCents(m.netCents)}</td>

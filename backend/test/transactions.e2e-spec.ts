@@ -355,6 +355,37 @@ describe('Transactions (e2e)', () => {
       }
     });
 
+    it('includes a transaction later in the day when dateTo is that date', async () => {
+      // A dedicated account keeps the query exact and off other balances.
+      const accountId = await createAccount(app, tokenA, {
+        name: 'Date Range Checking',
+        type: 'checking',
+      });
+      const created = await request(app.getHttpServer())
+        .post('/api/transactions')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          accountId,
+          type: 'expense',
+          amountCents: 700,
+          date: '2026-02-28T15:00:00.000Z',
+          categoryId: expenseCatA,
+        })
+        .expect(201);
+
+      const idsFor = async (dateTo: string): Promise<string[]> => {
+        const res = await request(app.getHttpServer())
+          .get('/api/transactions')
+          .query({ accountId, dateFrom: '2026-02-01', dateTo })
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(200);
+        return res.body.data.map((t: { _id: string }) => t._id);
+      };
+
+      expect(await idsFor('2026-02-28')).toEqual([created.body._id]);
+      expect(await idsFor('2026-02-27')).toEqual([]);
+    });
+
     it('filters by cleared, reading the raw string so "false" is not coerced truthy', async () => {
       // Seed one cleared and one uncleared transaction on a fresh account, then
       // scope each query to it so the assertions are exact (not vacuous). The
@@ -977,6 +1008,22 @@ describe('Transactions (e2e)', () => {
         ),
       ).toBe(true);
       expect(byLabel.body.meta.total).toBe(byLabel.body.data.length);
+    });
+
+    it('?labelId=any returns only labeled rows', async () => {
+      const labeled = await postExpense({ labelId: labelA }).expect(201);
+      const unlabeled = await postExpense({}).expect(201);
+
+      const res = await request(app.getHttpServer())
+        .get('/api/transactions?labelId=any&limit=0')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const ids = res.body.data.map((t: { _id: string }) => t._id);
+      expect(ids).toContain(labeled.body._id);
+      expect(ids).not.toContain(unlabeled.body._id);
+      expect(
+        res.body.data.every((t: { labelId?: string }) => Boolean(t.labelId)),
+      ).toBe(true);
     });
 
     it('rejects a malformed labelId filter with 400', async () => {
