@@ -9,6 +9,7 @@ import { downloadSubscriptionsCsv } from '@/lib/csv';
 import { listLabels } from '@/lib/labels';
 import { Label, Subscription, PaginatedResponse, PaginationMeta, BulkAction, BulkOperationResult } from '@/lib/types';
 import DashboardSummary from '@/components/DashboardSummary';
+import BusinessTile from '@/components/BusinessTile';
 import SearchInput from '@/components/SearchInput';
 import SubscriptionList from '@/components/SubscriptionList';
 import Pagination from '@/components/Pagination';
@@ -255,6 +256,7 @@ export default function DashboardPage() {
         <Link href="/subscriptions/new" className="btn-primary">+ Add subscription</Link>
       </div>
       <DashboardSummary subscriptions={allSubscriptions} />
+      {labels.length > 0 && <BusinessTile />}
       <SearchInput value={searchTerm} onChange={handleSearchChange} />
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">

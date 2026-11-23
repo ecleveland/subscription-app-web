@@ -21,11 +21,22 @@ export interface TransactionFilters {
   dateFrom?: string;
   dateTo?: string;
   cleared?: boolean;
-  // A label id, or LABEL_FILTER_NONE for personal records.
+  // A label id, LABEL_FILTER_NONE for personal records or LABEL_FILTER_ANY
+  // for every labeled record.
   labelId?: string;
   page?: number;
   limit?: number;
 }
+
+// Owed marks an expense reimbursable. Reimbursed records the day the money
+// came back and, optionally, the income transaction that paid it.
+export type ReimbursementInput =
+  | { status: 'owed' }
+  | {
+      status: 'reimbursed';
+      reimbursedAt: string;
+      reimbursedByTransactionId?: string;
+    };
 
 export interface TransactionInput {
   accountId: string;
@@ -40,7 +51,7 @@ export interface TransactionInput {
   // Null clears the label, which makes the record personal.
   labelId?: string | null;
   // Null clears the reimbursement block on edit.
-  reimbursement?: { status: 'owed' } | null;
+  reimbursement?: ReimbursementInput | null;
 }
 
 function toQuery(filters: TransactionFilters): string {
@@ -79,6 +90,13 @@ export function updateTransaction(
     method: 'PATCH',
     body: JSON.stringify(data),
   });
+}
+
+export function setReimbursement(
+  id: string,
+  block: ReimbursementInput,
+): Promise<Transaction> {
+  return updateTransaction(id, { reimbursement: block });
 }
 
 export function deleteTransaction(id: string): Promise<void> {

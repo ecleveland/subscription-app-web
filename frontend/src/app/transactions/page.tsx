@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAccounts } from '@/lib/accounts-context';
 import {
@@ -9,7 +10,14 @@ import {
   type TransactionFilters,
 } from '@/lib/transactions';
 import { listCategories } from '@/lib/categories';
-import { listLabels, LABEL_FILTER_NONE, withLabel } from '@/lib/labels';
+import {
+  listLabels,
+  LABEL_FILTER_ANY,
+  LABEL_FILTER_NONE,
+  withLabel,
+} from '@/lib/labels';
+import { formatMonth } from '@/lib/budget';
+import { isValidMonth } from '@/lib/reports';
 import { formatCents, formatDate } from '@/lib/utils';
 import { showErrorToast, showSuccessToast } from '@/lib/toast';
 import TransactionForm from '@/components/TransactionForm';
@@ -62,12 +70,29 @@ function TransactionsPageInner() {
   const [accountId, setAccountId] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [type, setType] = useState<'' | TransactionType>('');
-  // Empty is all labels. LABEL_FILTER_NONE is Personal.
-  const [labelId, setLabelId] = useState('');
+  // Empty is all labels. LABEL_FILTER_NONE is Personal, LABEL_FILTER_ANY is
+  // every label. The Business page's month links seed it through ?labelId=,
+  // and the select changes it without touching the URL.
+  const urlLabelId = searchParams.get('labelId') ?? '';
+  const [labelId, setLabelId] = useState(urlLabelId);
   // Derived from ?recurringId= (a schedule's "History" deep link, VEG-470) so
   // the URL is the single source of truth — a second History click that only
   // changes the query param re-applies the filter without a remount.
   const recurringId = searchParams.get('recurringId') ?? '';
+  // A month from the Business page chart, read from the URL like recurringId.
+  const dateFrom = searchParams.get('dateFrom') ?? '';
+  const dateTo = searchParams.get('dateTo') ?? '';
+  const urlMonth = (dateFrom || dateTo).slice(0, 7);
+  // Clear, back and forward change the URL without a remount. When the
+  // label or month in the URL changes, take its label and start from page 1.
+  // Adjusting state during render avoids fetching once with the stale page.
+  const urlFilters = `${urlLabelId}|${dateFrom}|${dateTo}`;
+  const [seenUrlFilters, setSeenUrlFilters] = useState(urlFilters);
+  if (seenUrlFilters !== urlFilters) {
+    setSeenUrlFilters(urlFilters);
+    setLabelId(urlLabelId);
+    setPage(1);
+  }
   // Bumped to force a re-fetch after a mutation.
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -130,6 +155,8 @@ function TransactionsPageInner() {
     if (type) filters.type = type;
     if (labelId) filters.labelId = labelId;
     if (recurringId) filters.recurringId = recurringId;
+    if (dateFrom) filters.dateFrom = dateFrom;
+    if (dateTo) filters.dateTo = dateTo;
     listTransactions(filters)
       .then((res) => {
         if (cancelled) return;
@@ -150,7 +177,17 @@ function TransactionsPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [page, accountId, categoryId, type, labelId, recurringId, reloadKey]);
+  }, [
+    page,
+    accountId,
+    categoryId,
+    type,
+    labelId,
+    recurringId,
+    dateFrom,
+    dateTo,
+    reloadKey,
+  ]);
 
   async function afterMutation() {
     setShowCreate(false);
@@ -226,6 +263,24 @@ function TransactionsPageInner() {
             Clear filter
           </button>
         </div>
+      )}
+
+      {(dateFrom || dateTo) && (
+        <p className="flex items-center justify-between gap-3 mb-4 px-4 py-2 rounded-md bg-accent-soft text-sm text-accent">
+          <span>
+            {/* The URL can carry anything. formatMonth throws on a month
+                that is not YYYY-MM, so only a valid one gets a name. */}
+            {isValidMonth(urlMonth)
+              ? `Showing ${formatMonth(urlMonth)}`
+              : 'Showing a custom range'}
+          </span>
+          <Link
+            href={labelId ? `/transactions?labelId=${encodeURIComponent(labelId)}` : '/transactions'}
+            className="font-medium hover:underline whitespace-nowrap"
+          >
+            Clear
+          </Link>
+        </p>
       )}
 
       {accountsError && (
@@ -331,6 +386,7 @@ function TransactionsPageInner() {
         >
           <option value="">All labels</option>
           <option value={LABEL_FILTER_NONE}>Personal</option>
+          <option value={LABEL_FILTER_ANY}>Any business label</option>
           {labels.map((l) => (
             <option key={l._id} value={l._id}>
               {l.isArchived ? `${l.name} (archived)` : l.name}

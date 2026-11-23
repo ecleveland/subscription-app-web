@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { HouseholdProvider } from "@/lib/household-context";
 import { AccountsProvider } from "@/lib/accounts-context";
+import { LabelsProvider } from "@/lib/labels-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import Header from "@/components/Header";
 import ToastProvider from "@/components/ToastProvider";
@@ -51,10 +52,12 @@ export default function RootLayout({
           <AuthProvider>
             <HouseholdProvider>
               <AccountsProvider>
-                <div className="min-h-screen md:flex">
-                  <Header />
-                  <main className="min-w-0 flex-1">{children}</main>
-                </div>
+                <LabelsProvider>
+                  <div className="min-h-screen md:flex">
+                    <Header />
+                    <main className="min-w-0 flex-1">{children}</main>
+                  </div>
+                </LabelsProvider>
               </AccountsProvider>
             </HouseholdProvider>
           </AuthProvider>

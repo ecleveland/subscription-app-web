@@ -12,6 +12,7 @@ import { BudgetsService } from '../budgets/budgets.service';
 import { CategoriesService } from '../categories/categories.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { AccountType } from '../accounts/schemas/account.schema';
+import { LabelsService } from '../labels/labels.service';
 
 type Row = {
   _id: { month: string; type: TransactionType };
@@ -21,12 +22,13 @@ type Row = {
 describe('ReportsService', () => {
   const householdId = new Types.ObjectId().toString();
   let service: ReportsService;
-  let transactionModel: { aggregate: jest.Mock };
+  let transactionModel: { aggregate: jest.Mock; find: jest.Mock };
   let transactionsService: {
     aggregateMonthlyActualsByCategory: jest.Mock;
     sumLedgerDeltasByAccountAndMonth: jest.Mock;
   };
   let accountsService: { findAll: jest.Mock };
+  let labelsService: { reportLabelMatch: jest.Mock };
   let budgetsService: { getPlannedByCategory: jest.Mock };
   let categoriesService: {
     listCategories: jest.Mock;
@@ -44,9 +46,25 @@ describe('ReportsService', () => {
     return transactionModel.aggregate.mock.calls[0][0];
   }
 
+  // The query chain the business report reads its reimbursement rows with.
+  function findChain(docs: unknown[]) {
+    const chain = {
+      select: jest.fn(),
+      sort: jest.fn(),
+      exec: jest.fn().mockResolvedValue(docs),
+    };
+    chain.select.mockReturnValue(chain);
+    chain.sort.mockReturnValue(chain);
+    return chain;
+  }
+
   beforeEach(async () => {
-    transactionModel = { aggregate: jest.fn() };
+    transactionModel = {
+      aggregate: jest.fn(),
+      find: jest.fn().mockReturnValue(findChain([])),
+    };
     mockRows([]);
+    labelsService = { reportLabelMatch: jest.fn().mockResolvedValue({}) };
     transactionsService = {
       aggregateMonthlyActualsByCategory: jest.fn().mockResolvedValue([]),
       sumLedgerDeltasByAccountAndMonth: jest.fn().mockResolvedValue(new Map()),
@@ -70,6 +88,7 @@ describe('ReportsService', () => {
         { provide: BudgetsService, useValue: budgetsService },
         { provide: CategoriesService, useValue: categoriesService },
         { provide: AccountsService, useValue: accountsService },
+        { provide: LabelsService, useValue: labelsService },
       ],
     }).compile();
     service = module.get(ReportsService);
@@ -99,6 +118,32 @@ describe('ReportsService', () => {
       const match = pipeline()[0].$match;
       expect(match).not.toHaveProperty('accountId');
       expect(match).not.toHaveProperty('transferAccountId');
+    });
+
+    it('adds the label match for the requested labelId to the match', async () => {
+      labelsService.reportLabelMatch.mockResolvedValue({ labelId: null });
+
+      await service.getCashFlow(householdId, '2026-03', '2026-04', 'none');
+
+      expect(labelsService.reportLabelMatch).toHaveBeenCalledWith(
+        householdId,
+        'none',
+      );
+      const match = pipeline()[0].$match;
+      expect(match).toHaveProperty('labelId', null);
+      expect(match.type).toEqual({
+        $in: [TransactionType.INCOME, TransactionType.EXPENSE],
+      });
+    });
+
+    it('leaves the match without a label condition when no labelId is given', async () => {
+      await service.getCashFlow(householdId, '2026-03', '2026-04');
+
+      expect(labelsService.reportLabelMatch).toHaveBeenCalledWith(
+        householdId,
+        undefined,
+      );
+      expect(pipeline()[0].$match).not.toHaveProperty('labelId');
     });
 
     it('groups by the UTC year-month of date and type', async () => {
@@ -336,6 +381,7 @@ describe('ReportsService', () => {
         householdId,
         new Date('2026-03-01T00:00:00.000Z'),
         new Date('2026-04-01T00:00:00.000Z'),
+        {},
       );
       expect(budgetsService.getPlannedByCategory).toHaveBeenCalledWith(
         householdId,
@@ -346,6 +392,29 @@ describe('ReportsService', () => {
         true,
       );
       expect(categoriesService.listGroups).toHaveBeenCalledWith(householdId);
+    });
+
+    it('passes the label match for the requested labelId to the actuals aggregation', async () => {
+      const labelMatch = {
+        labelId: { $in: [new Types.ObjectId(), new Types.ObjectId()] },
+      };
+      labelsService.reportLabelMatch.mockResolvedValue(labelMatch);
+      const labelId = new Types.ObjectId().toString();
+
+      await service.getSpending(householdId, '2026-03', labelId);
+
+      expect(labelsService.reportLabelMatch).toHaveBeenCalledWith(
+        householdId,
+        labelId,
+      );
+      expect(
+        transactionsService.aggregateMonthlyActualsByCategory,
+      ).toHaveBeenCalledWith(
+        householdId,
+        new Date('2026-03-01T00:00:00.000Z'),
+        new Date('2026-04-01T00:00:00.000Z'),
+        labelMatch,
+      );
     });
 
     it('returns an empty report for a month with no spend and no plan', async () => {
@@ -728,7 +797,29 @@ describe('ReportsService', () => {
       expect(accountsService.findAll).toHaveBeenCalledWith(householdId, true);
       expect(
         transactionsService.sumLedgerDeltasByAccountAndMonth,
-      ).toHaveBeenCalledWith(householdId, new Date('2026-07-01T00:00:00.000Z'));
+      ).toHaveBeenCalledWith(
+        householdId,
+        new Date('2026-07-01T00:00:00.000Z'),
+        {},
+      );
+    });
+
+    it('passes the label match for the requested labelId to the delta scan', async () => {
+      labelsService.reportLabelMatch.mockResolvedValue({ labelId: null });
+
+      await service.getNetWorth(householdId, '2026-01', '2026-06', 'none');
+
+      expect(labelsService.reportLabelMatch).toHaveBeenCalledWith(
+        householdId,
+        'none',
+      );
+      expect(
+        transactionsService.sumLedgerDeltasByAccountAndMonth,
+      ).toHaveBeenCalledWith(
+        householdId,
+        new Date('2026-07-01T00:00:00.000Z'),
+        { labelId: null },
+      );
     });
 
     it('reports each account at its month-end balance with totals', async () => {
@@ -1123,6 +1214,477 @@ describe('ReportsService', () => {
           liabilitiesCents: 0,
           netWorthCents: 0,
           accounts: [],
+        },
+      ]);
+    });
+  });
+
+  describe('getBusiness', () => {
+    const LABEL = new Types.ObjectId().toString();
+    const SUB_LABEL = new Types.ObjectId().toString();
+    const GROUP = new Types.ObjectId().toString();
+    const SUPPLIES = new Types.ObjectId().toString();
+    const TRAVEL = new Types.ObjectId().toString();
+    const FEES = new Types.ObjectId().toString();
+    const labelMatch = {
+      labelId: {
+        $in: [new Types.ObjectId(LABEL), new Types.ObjectId(SUB_LABEL)],
+      },
+    };
+
+    type Facet = {
+      months: {
+        _id: { month: string; type: TransactionType };
+        totalCents: number;
+      }[];
+      reimbursedByMonth: { _id: string; totalCents: number }[];
+      categories: { _id: Types.ObjectId | null; totalCents: number }[];
+      totals: { _id: string; totalCents: number; count: number }[];
+    };
+
+    function mockFacet(facet: Partial<Facet>): void {
+      transactionModel.aggregate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue([
+          {
+            months: [],
+            reimbursedByMonth: [],
+            categories: [],
+            totals: [],
+            ...facet,
+          },
+        ]),
+      });
+    }
+
+    function reimbursable(
+      id: string,
+      date: string,
+      reimbursement: {
+        status: string;
+        reimbursedAt?: Date;
+        reimbursedByTransactionId?: Types.ObjectId;
+      },
+      extra: Record<string, unknown> = {},
+    ) {
+      return {
+        _id: new Types.ObjectId(id),
+        date: new Date(date),
+        payee: 'Office Depot',
+        amountCents: 1000,
+        categoryId: new Types.ObjectId(SUPPLIES),
+        labelId: new Types.ObjectId(LABEL),
+        reimbursement,
+        ...extra,
+      };
+    }
+
+    beforeEach(() => {
+      labelsService.reportLabelMatch.mockResolvedValue(labelMatch);
+      categoriesService.listCategories.mockResolvedValue([
+        {
+          _id: new Types.ObjectId(SUPPLIES),
+          groupId: new Types.ObjectId(GROUP),
+          name: 'Supplies',
+          isIncome: false,
+        },
+        {
+          _id: new Types.ObjectId(TRAVEL),
+          groupId: new Types.ObjectId(GROUP),
+          name: 'Travel',
+          isIncome: false,
+        },
+        {
+          _id: new Types.ObjectId(FEES),
+          groupId: new Types.ObjectId(GROUP),
+          name: 'Client fees',
+          isIncome: true,
+        },
+      ]);
+      categoriesService.listGroups.mockResolvedValue([
+        { _id: new Types.ObjectId(GROUP), name: 'Business' },
+      ]);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    const START = new Date('2026-03-01T00:00:00.000Z');
+    const END = new Date('2026-05-01T00:00:00.000Z');
+    // Owed expenses from before the range, or reimbursed ones inside it.
+    const reimbursableScope = [
+      { 'reimbursement.status': 'owed' },
+      { 'reimbursement.status': 'reimbursed', date: { $gte: START } },
+    ];
+
+    it('matches the household, the label and its sub-labels, and income and expense in the range or still owed before it', async () => {
+      await service.getBusiness(householdId, '2026-03', '2026-04', LABEL);
+
+      expect(labelsService.reportLabelMatch).toHaveBeenCalledWith(
+        householdId,
+        LABEL,
+      );
+      expect(pipeline()[0].$match).toEqual({
+        householdId: new Types.ObjectId(householdId),
+        ...labelMatch,
+        type: { $in: [TransactionType.INCOME, TransactionType.EXPENSE] },
+        date: { $lt: END },
+        $or: [
+          { date: { $gte: START } },
+          { type: TransactionType.EXPENSE, 'reimbursement.status': 'owed' },
+        ],
+      });
+    });
+
+    it('reads every owed expense dated before the end of the range and reimbursed ones inside it, oldest first', async () => {
+      await service.getBusiness(householdId, '2026-03', '2026-04', LABEL);
+
+      expect(transactionModel.find).toHaveBeenCalledWith({
+        householdId: new Types.ObjectId(householdId),
+        ...labelMatch,
+        type: TransactionType.EXPENSE,
+        date: { $lt: END },
+        $or: reimbursableScope,
+      });
+      const chain = transactionModel.find.mock.results[0].value;
+      expect(chain.select).toHaveBeenCalledWith(
+        'date payee amountCents categoryId labelId reimbursement',
+      );
+      expect(chain.sort).toHaveBeenCalledWith({ date: 1 });
+    });
+
+    it('asks for every labeled record when no labelId is given and echoes null', async () => {
+      const result = await service.getBusiness(
+        householdId,
+        '2026-03',
+        '2026-03',
+      );
+
+      expect(labelsService.reportLabelMatch).toHaveBeenCalledWith(
+        householdId,
+        'any',
+      );
+      expect(result.labelId).toBeNull();
+      expect(result.from).toBe('2026-03');
+      expect(result.to).toBe('2026-03');
+    });
+
+    it('echoes the requested labelId', async () => {
+      const result = await service.getBusiness(
+        householdId,
+        '2026-03',
+        '2026-03',
+        LABEL,
+      );
+      expect(result.labelId).toBe(LABEL);
+    });
+
+    it('splits one pass into months, reimbursed months and categories inside the range, and totals with owed unbounded', async () => {
+      await service.getBusiness(householdId, '2026-03', '2026-04', LABEL);
+
+      const facet = pipeline()[1].$facet;
+      const month = {
+        $dateToString: { format: '%Y-%m', date: '$date', timezone: 'UTC' },
+      };
+      const inRange = { date: { $gte: START } };
+      expect(facet.months).toEqual([
+        { $match: inRange },
+        {
+          $group: {
+            _id: { month, type: '$type' },
+            totalCents: { $sum: '$amountCents' },
+          },
+        },
+      ]);
+      // Bucketed by the expense date, not reimbursedAt.
+      expect(facet.reimbursedByMonth).toEqual([
+        {
+          $match: {
+            ...inRange,
+            type: TransactionType.EXPENSE,
+            'reimbursement.status': 'reimbursed',
+          },
+        },
+        { $group: { _id: month, totalCents: { $sum: '$amountCents' } } },
+      ]);
+      expect(facet.categories).toEqual([
+        { $match: { ...inRange, type: TransactionType.EXPENSE } },
+        {
+          $group: { _id: '$categoryId', totalCents: { $sum: '$amountCents' } },
+        },
+      ]);
+      expect(facet.totals).toEqual([
+        {
+          $match: {
+            type: TransactionType.EXPENSE,
+            $or: reimbursableScope,
+          },
+        },
+        {
+          $group: {
+            _id: '$reimbursement.status',
+            totalCents: { $sum: '$amountCents' },
+            count: { $sum: 1 },
+          },
+        },
+      ]);
+    });
+
+    it('zero-fills the months and places income, expense and reimbursed sums', async () => {
+      mockFacet({
+        months: [
+          {
+            _id: { month: '2026-01', type: TransactionType.INCOME },
+            totalCents: 50000,
+          },
+          {
+            _id: { month: '2026-03', type: TransactionType.EXPENSE },
+            totalCents: 12000,
+          },
+          {
+            _id: { month: '2026-03', type: TransactionType.INCOME },
+            totalCents: 800,
+          },
+        ],
+        reimbursedByMonth: [{ _id: '2026-03', totalCents: 3000 }],
+      });
+
+      const result = await service.getBusiness(
+        householdId,
+        '2026-01',
+        '2026-03',
+        LABEL,
+      );
+
+      expect(result.months).toEqual([
+        {
+          month: '2026-01',
+          expenseCents: 0,
+          incomeCents: 50000,
+          reimbursedCents: 0,
+        },
+        {
+          month: '2026-02',
+          expenseCents: 0,
+          incomeCents: 0,
+          reimbursedCents: 0,
+        },
+        {
+          month: '2026-03',
+          expenseCents: 12000,
+          incomeCents: 800,
+          reimbursedCents: 3000,
+        },
+      ]);
+    });
+
+    it('drops and warns about a month row outside the requested range', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      mockFacet({
+        months: [
+          {
+            _id: { month: '2025-12', type: TransactionType.EXPENSE },
+            totalCents: 999,
+          },
+        ],
+        reimbursedByMonth: [{ _id: '2026-04', totalCents: 111 }],
+      });
+
+      const result = await service.getBusiness(
+        householdId,
+        '2026-01',
+        '2026-01',
+        LABEL,
+      );
+
+      expect(result.months).toEqual([
+        {
+          month: '2026-01',
+          expenseCents: 0,
+          incomeCents: 0,
+          reimbursedCents: 0,
+        },
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        { householdId, month: '2025-12' },
+        'Dropped a business report row outside the range',
+      );
+      expect(warn).toHaveBeenCalledWith(
+        { householdId, month: '2026-04' },
+        'Dropped a business report row outside the range',
+      );
+    });
+
+    it('takes the reimbursement totals from the status groups', async () => {
+      mockFacet({
+        totals: [
+          { _id: 'owed', totalCents: 4500, count: 3 },
+          { _id: 'reimbursed', totalCents: 2000, count: 1 },
+        ],
+      });
+
+      const { reimbursements } = await service.getBusiness(
+        householdId,
+        '2026-01',
+        '2026-03',
+        LABEL,
+      );
+
+      expect(reimbursements.owedCents).toBe(4500);
+      expect(reimbursements.owedCount).toBe(3);
+      expect(reimbursements.reimbursedCents).toBe(2000);
+    });
+
+    it('reports zero totals and empty lists when nothing is reimbursable', async () => {
+      const result = await service.getBusiness(
+        householdId,
+        '2026-01',
+        '2026-01',
+        LABEL,
+      );
+
+      expect(result.reimbursements).toEqual({
+        owedCents: 0,
+        owedCount: 0,
+        reimbursedCents: 0,
+        owed: [],
+        reimbursed: [],
+      });
+      expect(result.categories).toEqual([]);
+      expect(result.uncategorizedCents).toBe(0);
+      expect(result.totalCents).toBe(0);
+    });
+
+    it('rolls spend up by category with no planned amounts and reconciles to the total', async () => {
+      mockFacet({
+        categories: [
+          { _id: new Types.ObjectId(SUPPLIES), totalCents: 10000 },
+          { _id: new Types.ObjectId(TRAVEL), totalCents: 2500 },
+          { _id: new Types.ObjectId(FEES), totalCents: 400 },
+          { _id: null, totalCents: 600 },
+        ],
+      });
+
+      const result = await service.getBusiness(
+        householdId,
+        '2026-01',
+        '2026-03',
+        LABEL,
+      );
+
+      expect(categoriesService.listCategories).toHaveBeenCalledWith(
+        householdId,
+        true,
+      );
+      expect(budgetsService.getPlannedByCategory).not.toHaveBeenCalled();
+      expect(result.categories).toEqual([
+        {
+          categoryId: SUPPLIES,
+          categoryName: 'Supplies',
+          groupId: GROUP,
+          groupName: 'Business',
+          actualCents: 10000,
+          plannedCents: null,
+        },
+        {
+          categoryId: TRAVEL,
+          categoryName: 'Travel',
+          groupId: GROUP,
+          groupName: 'Business',
+          actualCents: 2500,
+          plannedCents: null,
+        },
+      ]);
+      // Spend on the income category and spend with no category both roll
+      // into uncategorizedCents.
+      expect(result.uncategorizedCents).toBe(1000);
+      expect(result.totalCents).toBe(13500);
+      const rowSum = result.categories.reduce((n, c) => n + c.actualCents, 0);
+      expect(rowSum + result.uncategorizedCents).toBe(result.totalCents);
+    });
+
+    it('lists owed expenses oldest first and reimbursed expenses newest first with ISO dates', async () => {
+      const OWED_OLD = new Types.ObjectId().toString();
+      const OWED_NEW = new Types.ObjectId().toString();
+      const PAID_OLD = new Types.ObjectId().toString();
+      const PAID_NEW = new Types.ObjectId().toString();
+      const INCOME = new Types.ObjectId().toString();
+      // Mongo returns them sorted by date ascending.
+      transactionModel.find.mockReturnValue(
+        findChain([
+          reimbursable(OWED_OLD, '2026-01-05T00:00:00.000Z', {
+            status: 'owed',
+          }),
+          reimbursable(
+            PAID_OLD,
+            '2026-01-10T00:00:00.000Z',
+            {
+              status: 'reimbursed',
+              reimbursedAt: new Date('2026-01-20T00:00:00.000Z'),
+            },
+            { payee: undefined, categoryId: undefined },
+          ),
+          reimbursable(OWED_NEW, '2026-02-01T00:00:00.000Z', {
+            status: 'owed',
+          }),
+          reimbursable(
+            PAID_NEW,
+            '2026-02-03T00:00:00.000Z',
+            {
+              status: 'reimbursed',
+              reimbursedAt: new Date('2026-02-28T00:00:00.000Z'),
+              reimbursedByTransactionId: new Types.ObjectId(INCOME),
+            },
+            { labelId: new Types.ObjectId(SUB_LABEL), amountCents: 2500 },
+          ),
+        ]),
+      );
+
+      const { reimbursements } = await service.getBusiness(
+        householdId,
+        '2026-01',
+        '2026-02',
+        LABEL,
+      );
+
+      expect(reimbursements.owed).toEqual([
+        {
+          id: OWED_OLD,
+          date: '2026-01-05T00:00:00.000Z',
+          payee: 'Office Depot',
+          amountCents: 1000,
+          categoryId: SUPPLIES,
+          labelId: LABEL,
+        },
+        {
+          id: OWED_NEW,
+          date: '2026-02-01T00:00:00.000Z',
+          payee: 'Office Depot',
+          amountCents: 1000,
+          categoryId: SUPPLIES,
+          labelId: LABEL,
+        },
+      ]);
+      expect(reimbursements.reimbursed).toEqual([
+        {
+          id: PAID_NEW,
+          date: '2026-02-03T00:00:00.000Z',
+          payee: 'Office Depot',
+          amountCents: 2500,
+          categoryId: SUPPLIES,
+          labelId: SUB_LABEL,
+          reimbursedAt: '2026-02-28T00:00:00.000Z',
+          reimbursedByTransactionId: INCOME,
+        },
+        {
+          id: PAID_OLD,
+          date: '2026-01-10T00:00:00.000Z',
+          payee: null,
+          amountCents: 1000,
+          categoryId: null,
+          labelId: LABEL,
+          reimbursedAt: '2026-01-20T00:00:00.000Z',
+          reimbursedByTransactionId: null,
         },
       ]);
     });

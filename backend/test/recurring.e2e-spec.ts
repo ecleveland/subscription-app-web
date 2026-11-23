@@ -1139,6 +1139,25 @@ describe('Recurring (e2e)', () => {
       ).toBe(true);
     });
 
+    it('?labelId=any returns only labeled schedules', async () => {
+      const labeled = await createSchedule(tokenA, {
+        payee: 'Bookkeeping',
+        labelId: labelA,
+      });
+      const unlabeled = await createSchedule(tokenA, { payee: 'Streaming' });
+
+      const res = await request(app.getHttpServer())
+        .get('/api/recurring?labelId=any')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      const ids = res.body.map((s: { _id: string }) => s._id);
+      expect(ids).toContain(labeled._id);
+      expect(ids).not.toContain(unlabeled._id);
+      expect(
+        res.body.every((s: { labelId?: string }) => Boolean(s.labelId)),
+      ).toBe(true);
+    });
+
     it('rejects a malformed labelId filter with 400', async () => {
       await request(app.getHttpServer())
         .get('/api/recurring?labelId=personal')

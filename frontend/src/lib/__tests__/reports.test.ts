@@ -5,6 +5,8 @@ import {
   getCashFlow,
   getSpending,
   getNetWorth,
+  getBusinessReport,
+  formatSignedCents,
   defaultRange,
   monthSpan,
   isValidMonth,
@@ -34,6 +36,70 @@ describe('reports api helpers', () => {
     expect(apiFetch).toHaveBeenCalledWith(
       '/reports/net-worth?from=2025-11&to=2026-10',
     );
+  });
+});
+
+describe('label filter', () => {
+  beforeEach(() => {
+    vi.mocked(apiFetch).mockReset();
+    vi.mocked(apiFetch).mockResolvedValue({});
+  });
+
+  it('appends labelId to the cash flow, spending and net worth routes when set', async () => {
+    await getCashFlow('2025-11', '2026-10', 'l1');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/cash-flow?from=2025-11&to=2026-10&labelId=l1',
+    );
+    await getSpending('2026-10', 'none');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/spending?month=2026-10&labelId=none',
+    );
+    await getNetWorth('2025-11', '2026-10', 'any');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/net-worth?from=2025-11&to=2026-10&labelId=any',
+    );
+  });
+
+  it('leaves labelId off when it is empty', async () => {
+    await getCashFlow('2025-11', '2026-10', '');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/cash-flow?from=2025-11&to=2026-10',
+    );
+  });
+
+  it('encodes the label id so it cannot add query parameters', async () => {
+    await getSpending('2026-10', 'l1&month=1999-01');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/spending?month=2026-10&labelId=l1%26month%3D1999-01',
+    );
+  });
+
+  it('getBusinessReport requests every label when no label is given', async () => {
+    await getBusinessReport('2025-11', '2026-10');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/business?from=2025-11&to=2026-10',
+    );
+  });
+
+  it('getBusinessReport scopes to one label when given', async () => {
+    await getBusinessReport('2025-11', '2026-10', 'l1');
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/reports/business?from=2025-11&to=2026-10&labelId=l1',
+    );
+  });
+});
+
+describe('formatSignedCents', () => {
+  it('prefixes a rise with a plus sign', () => {
+    expect(formatSignedCents(12000)).toBe('+$120.00');
+  });
+
+  it('keeps the minus sign on a drop', () => {
+    expect(formatSignedCents(-4000)).toBe('-$40.00');
+  });
+
+  it('shows zero without a sign', () => {
+    expect(formatSignedCents(0)).toBe('$0.00');
   });
 });
 

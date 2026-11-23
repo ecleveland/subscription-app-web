@@ -573,4 +573,153 @@ describe('LabelsService', () => {
       );
     });
   });
+
+  describe('labelIdsWithDescendants', () => {
+    const GRANDCHILD_ID = '507f191e810c19729de86104';
+    const UNRELATED_ID = '507f191e810c19729de86105';
+
+    // The household's labels as the walk loads them, archived included.
+    function mockHouseholdLabels(
+      labels: { id: string; parentId?: string }[],
+    ): void {
+      labelModel.find.mockReturnValue(
+        createChainable(
+          labels.map(({ id, parentId }) =>
+            labelDoc({
+              _id: new Types.ObjectId(id),
+              parentId: parentId ? new Types.ObjectId(parentId) : undefined,
+            }),
+          ),
+        ),
+      );
+    }
+
+    function hex(ids: Types.ObjectId[]): string[] {
+      return ids.map((id) => id.toHexString()).sort();
+    }
+
+    it('returns the label, its children and its grandchildren from one household read', async () => {
+      mockHouseholdLabels([
+        { id: PARENT_ID },
+        { id: CHILD_ID, parentId: PARENT_ID },
+        { id: GRANDCHILD_ID, parentId: CHILD_ID },
+        { id: UNRELATED_ID },
+      ]);
+
+      const ids = await service.labelIdsWithDescendants(
+        HOUSEHOLD_ID,
+        PARENT_ID,
+      );
+
+      expect(hex(ids)).toEqual([PARENT_ID, CHILD_ID, GRANDCHILD_ID].sort());
+      expect(labelModel.find).toHaveBeenCalledTimes(1);
+      expect(labelModel.find).toHaveBeenCalledWith({
+        householdId: new Types.ObjectId(HOUSEHOLD_ID),
+      });
+    });
+
+    it('returns only the label when it has no children', async () => {
+      mockHouseholdLabels([
+        { id: PARENT_ID },
+        { id: CHILD_ID, parentId: PARENT_ID },
+      ]);
+
+      const ids = await service.labelIdsWithDescendants(HOUSEHOLD_ID, CHILD_ID);
+
+      expect(hex(ids)).toEqual([CHILD_ID]);
+    });
+
+    it('accepts an uppercase id and still finds the children', async () => {
+      mockHouseholdLabels([
+        { id: PARENT_ID },
+        { id: CHILD_ID, parentId: PARENT_ID },
+      ]);
+
+      const ids = await service.labelIdsWithDescendants(
+        HOUSEHOLD_ID,
+        PARENT_ID.toUpperCase(),
+      );
+
+      expect(hex(ids)).toEqual([PARENT_ID, CHILD_ID].sort());
+    });
+
+    it('ends the walk on a parent cycle and lists each label once', async () => {
+      mockHouseholdLabels([
+        { id: PARENT_ID, parentId: CHILD_ID },
+        { id: CHILD_ID, parentId: PARENT_ID },
+      ]);
+
+      const ids = await service.labelIdsWithDescendants(
+        HOUSEHOLD_ID,
+        PARENT_ID,
+      );
+
+      expect(hex(ids)).toEqual([PARENT_ID, CHILD_ID].sort());
+    });
+
+    it('returns just the id for a label outside the household, so it matches nothing', async () => {
+      mockHouseholdLabels([{ id: PARENT_ID }]);
+
+      const ids = await service.labelIdsWithDescendants(
+        HOUSEHOLD_ID,
+        UNRELATED_ID,
+      );
+
+      expect(hex(ids)).toEqual([UNRELATED_ID]);
+    });
+
+    it('returns an empty list for a malformed id without reading labels', async () => {
+      const ids = await service.labelIdsWithDescendants(
+        HOUSEHOLD_ID,
+        'not-an-id',
+      );
+
+      expect(ids).toEqual([]);
+      expect(labelModel.find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reportLabelMatch', () => {
+    it('adds no condition when no label is asked for', async () => {
+      await expect(service.reportLabelMatch(HOUSEHOLD_ID)).resolves.toEqual({});
+      await expect(service.reportLabelMatch(HOUSEHOLD_ID, '')).resolves.toEqual(
+        {},
+      );
+      expect(labelModel.find).not.toHaveBeenCalled();
+    });
+
+    it("matches only unlabeled records for 'none'", async () => {
+      await expect(
+        service.reportLabelMatch(HOUSEHOLD_ID, 'none'),
+      ).resolves.toEqual({ labelId: null });
+      expect(labelModel.find).not.toHaveBeenCalled();
+    });
+
+    it("matches every labeled record for 'any'", async () => {
+      await expect(
+        service.reportLabelMatch(HOUSEHOLD_ID, 'any'),
+      ).resolves.toEqual({ labelId: { $ne: null } });
+      expect(labelModel.find).not.toHaveBeenCalled();
+    });
+
+    it('matches a label id and its sub-labels', async () => {
+      labelModel.find.mockReturnValue(
+        createChainable([
+          labelDoc({ _id: new Types.ObjectId(PARENT_ID) }),
+          labelDoc({
+            _id: new Types.ObjectId(CHILD_ID),
+            parentId: new Types.ObjectId(PARENT_ID),
+          }),
+        ]),
+      );
+
+      const match = await service.reportLabelMatch(HOUSEHOLD_ID, PARENT_ID);
+
+      expect(match).toEqual({
+        labelId: {
+          $in: [new Types.ObjectId(PARENT_ID), new Types.ObjectId(CHILD_ID)],
+        },
+      });
+    });
+  });
 });

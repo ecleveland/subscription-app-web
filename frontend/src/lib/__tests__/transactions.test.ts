@@ -7,6 +7,7 @@ import {
   updateTransaction,
   deleteTransaction,
   importTransactions,
+  setReimbursement,
 } from '../transactions';
 
 describe('transactions api wrappers', () => {
@@ -61,6 +62,32 @@ describe('transactions api wrappers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/transactions/import', {
       method: 'POST',
       body: JSON.stringify(input),
+    });
+  });
+
+  it('setReimbursement PATCHes only the reimbursement block', async () => {
+    await setReimbursement('t1', {
+      status: 'reimbursed',
+      reimbursedAt: '2026-11-16',
+      reimbursedByTransactionId: 'i1',
+    });
+    expect(apiFetch).toHaveBeenCalledWith('/transactions/t1', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        reimbursement: {
+          status: 'reimbursed',
+          reimbursedAt: '2026-11-16',
+          reimbursedByTransactionId: 'i1',
+        },
+      }),
+    });
+  });
+
+  it('setReimbursement sends status owed to undo', async () => {
+    await setReimbursement('t1', { status: 'owed' });
+    expect(apiFetch).toHaveBeenCalledWith('/transactions/t1', {
+      method: 'PATCH',
+      body: JSON.stringify({ reimbursement: { status: 'owed' } }),
     });
   });
 });
